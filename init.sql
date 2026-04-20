@@ -1,0 +1,6 @@
+CREATE SCHEMA IF NOT EXISTS common;
+
+CREATE TABLE IF NOT EXISTS common.user (
+    id SERIAL PRIMARY KEY,
+    name TEXT,
+);
