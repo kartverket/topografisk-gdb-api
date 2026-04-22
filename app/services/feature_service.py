@@ -18,6 +18,11 @@ async def stream_feature_collection(
     conn: Connection,
     request: Request,
 ) -> AsyncGenerator[bytes, None]:
+    """Stream a GeoJSON FeatureCollection as bytes, one feature at a time.
+
+    The closing object includes numberReturned, timeStamp, and a rel:next link
+    when the returned page is full.
+    """
     # TODO: Implement other features, include type hinting
     generator = {
         "arealressursflate": FKBAR5DAO.get_all_arealressursflate,
@@ -25,7 +30,7 @@ async def stream_feature_collection(
     count = 0
     feature_id = None
     yield b'{"type":"FeatureCollection","features":['
-    async for model, omrade_geojson in generator:
+    async for model, geometry in generator:
         if count:  # Add commas after first feature
             yield b","
         count += 1
@@ -34,7 +39,7 @@ async def stream_feature_collection(
             b'{"type":"Feature", "id":'
             + orjson.dumps(feature_id)
             + b', "geometry":'
-            + omrade_geojson.encode()
+            + geometry.encode()
             + b', "properties":'
             + orjson.dumps(model.model_dump())
             + b"}"
@@ -55,6 +60,10 @@ async def stream_feature_collection(
 async def get_feature_geojson(
     collection_id: str, feature_id: str, conn: Connection
 ) -> dict:
+    """Fetch a single feature and return it as a plain GeoJSON dict.
+
+    Sketch function that fits the signature in FeatureService.
+    """
     model, geometry = await {"arealressursflate": FKBAR5DAO.get_arealressursflate}[
         collection_id
     ](conn, feature_id)

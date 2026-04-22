@@ -13,6 +13,11 @@ class FKBAR5DAO:
         conn: Connection,
         lokal_id: str,
     ) -> Tuple[ArealressursFlate, str]:
+        """Fetch a single arealressursflate by lokalid.
+
+        Returns a tuple of (model, omrade_geojson) where omrade_geojson is a
+        raw GeoJSON string. Raises FeatureNotFoundError if no row matches.
+        """
         result = await conn.execute(
             """
             SELECT 
@@ -27,7 +32,9 @@ class FKBAR5DAO:
         arealressurs_flate_row = await result.fetchone()
 
         if not arealressurs_flate_row:
-            raise FeatureNotFoundError()
+            raise FeatureNotFoundError(
+                f"No element '{lokal_id}' in collection arealressursflate."
+            )
 
         return (
             db_to_arealressurs_flate(
@@ -40,6 +47,13 @@ class FKBAR5DAO:
     async def get_all_arealressursflate(
         conn: Connection, limit: int | None = None, after_id: str | None = None
     ) -> AsyncGenerator[Tuple[ArealressursFlate, str], None]:
+        """Stream arealressursflate rows using a named cursor (ar5_stream).
+
+        Yields (model, omrade_geojson) tuples one at a time, keeping memory
+        usage constant regardless of result size. Supports keyset pagination:
+        pass after_id to start from the row after the given lokalid, ordered
+        by lokalid. limit=None returns all matching rows.
+        """
         async with conn.cursor(name="ar5_stream") as cur:
             await cur.execute(
                 """
