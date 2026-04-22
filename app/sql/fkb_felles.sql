@@ -1,7 +1,7 @@
 BEGIN;
 
 
-CREATE extension if NOT EXISTS postgis;
+CREATE EXTENSION if NOT EXISTS postgis;
 CREATE SCHEMA IF NOT EXISTS fkb_felles;
 
 CREATE TABLE IF NOT EXISTS fkb_felles.registreringsversjon
