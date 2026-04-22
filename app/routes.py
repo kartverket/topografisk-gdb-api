@@ -1,10 +1,10 @@
 from typing import List
 
-from app.config import settings
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, ORJSONResponse, StreamingResponse
 from psycopg import Connection
 
+from app.config import settings
 from app.database_manager import get_db_conn
 from app.models.exceptions import FeatureNotFoundError
 from app.models.ogc import (
@@ -153,7 +153,9 @@ async def get_features(
     after_id: str | None = None,
     conn: Connection = Depends(get_db_conn),
 ):
-    if limit > settings.MAX_PAGE_SIZE:  # instead of le in Query to make testing easier
+    # Check max page size. Checked here instead of in Query(le=1000) for easier testing
+    # TODO: lacks fastapi direct documenttation of max_page_size
+    if limit > settings.MAX_PAGE_SIZE:
         raise HTTPException(
             status_code=400, detail=f"limit cannot exceed {settings.MAX_PAGE_SIZE}"
         )
@@ -161,6 +163,7 @@ async def get_features(
     if collection_id not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Collection not found")
 
+    # arealressursflate as a special case until generalised in featureservice
     if collection_id == "arealressursflate":
         return StreamingResponse(
             stream_feature_collection(collection_id, limit, after_id, conn, request),
@@ -182,6 +185,7 @@ async def get_feature(
     if collection_id not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Collection not found")
 
+    # arealressursflate as a special case until generalised in featureservice
     if collection_id == "arealressursflate":
         feature = await get_feature_geojson(collection_id, feature_id, conn)
         return ORJSONResponse(feature)

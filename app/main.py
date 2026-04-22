@@ -9,9 +9,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routes import router
 from app.database_manager import get_db_connection_pool
+from app.exception_handlers import EXCEPTION_HANDLERS
 from app.postgis_backend import PostGISBackend
+from app.routes import router
 
 
 @asynccontextmanager
@@ -27,7 +28,7 @@ async def lifespan(app: FastAPI):
         await PostGISBackend.initialize_schema(conn)
     print("✓ Connected to PostGIS")
 
-    yield  {"connection_pool": connection_pool}
+    yield {"connection_pool": connection_pool}
 
     # Shutdown: disconnect backend
     await connection_pool.close()
@@ -44,10 +45,10 @@ app = FastAPI(
 )
 
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_headers=["*"],
-    allow_methods=["*"]
+    CORSMiddleware, allow_origins=["*"], allow_headers=["*"], allow_methods=["*"]
 )
 
 app.include_router(router)
+
+for exc_class, exc_handler in EXCEPTION_HANDLERS.items():
+    app.add_exception_handler(exc_class, exc_handler)
