@@ -1,6 +1,8 @@
+import datetime
 from typing import AsyncGenerator, Awaitable, Callable, List, Tuple
 
 import orjson
+from fastapi import Request
 from psycopg import Connection
 
 from app.db.fkb_ar5_dao import FKBAR5DAO
@@ -10,21 +12,27 @@ from app.postgis_backend import PostGISBackend
 
 
 async def stream_feature_collection(
-    collection_id: str, limit: int | None, after_id: str | None, conn: Connection
+    collection_id: str,
+    limit: int | None,
+    after_id: str | None,
+    conn: Connection,
+    request: Request,
 ) -> AsyncGenerator[bytes, None]:
     # TODO: Implement other features, include type hinting
     generator = {
         "arealressursflate": FKBAR5DAO.get_all_arealressursflate,
     }[collection_id](conn, limit, after_id)
+    count = 0
+    feature_id = None
     yield b'{"type":"FeatureCollection","features":['
-    first = True
     async for model, omrade_geojson in generator:
-        if not first:
+        if count:  # Add commas after first feature
             yield b","
-        first = False
+        count += 1
+        feature_id = model.identifikasjon.lokal_id
         feature_bytes = (
             b'{"type":"Feature", "id":'
-            + orjson.dumps(model.identifikasjon.lokal_id)
+            + orjson.dumps(feature_id)
             + b', "geometry":'
             + omrade_geojson.encode()
             + b', "properties":'
@@ -32,7 +40,16 @@ async def stream_feature_collection(
             + b"}"
         )
         yield feature_bytes
-    yield b"]}"
+    tail = {
+        "numberReturned": count,
+        "timeStamp": datetime.datetime.now(datetime.UTC).isoformat(),
+    }
+    if limit is not None and count == limit:
+        next_url = str(request.url.include_query_params(after_id=feature_id))
+        tail["links"] = [
+            {"rel": "next", "href": next_url, "type": "application/geo+json"}
+        ]
+    yield b"]," + orjson.dumps(tail)[1:]  # Close last feature, strip leading '{'
 
 
 async def get_feature_geojson(

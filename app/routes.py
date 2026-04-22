@@ -1,5 +1,6 @@
 from typing import List
 
+from app.config import settings
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, ORJSONResponse, StreamingResponse
 from psycopg import Connection
@@ -145,18 +146,24 @@ async def get_collection(collection_id: str, request: Request):
 )  # Hent flere features
 async def get_features(
     collection_id: str,
+    request: Request,
     bbox: List[float] = Query(default=[]),
     datetime: str | None = None,
     limit: int = Query(default=10, ge=0),
     after_id: str | None = None,
     conn: Connection = Depends(get_db_conn),
 ):
+    if limit > settings.MAX_PAGE_SIZE:  # instead of le in Query to make testing easier
+        raise HTTPException(
+            status_code=400, detail=f"limit cannot exceed {settings.MAX_PAGE_SIZE}"
+        )
+
     if collection_id not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Collection not found")
 
     if collection_id == "arealressursflate":
         return StreamingResponse(
-            stream_feature_collection(collection_id, limit, after_id, conn),
+            stream_feature_collection(collection_id, limit, after_id, conn, request),
             media_type="application/geo+json",
         )
 

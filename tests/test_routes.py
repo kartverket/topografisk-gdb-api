@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from starlette.testclient import TestClient
 
+from app.config import settings
 from app.database_manager import get_db_conn
 from app.db.fkb_ar5_dao import FKBAR5DAO
 from app.main import app
@@ -88,6 +89,35 @@ class TestArealressursflateRoute(TestCase):
 
         feature = response.json()["features"][1]
         self.assertIsNone(feature["properties"]["posisjon"])
+
+    def test_limit_exceeds_max_page_size_returns_400(self):
+        with patch.object(settings, "MAX_PAGE_SIZE", 1):
+            response = self.client.get("/collections/arealressursflate/items?limit=2")
+
+        self.assertEqual(400, response.status_code)
+
+    def test_next_link_present_when_page_is_full(self):
+        with patch.object(settings, "MAX_PAGE_SIZE", 2):
+            with patch.object(
+                FKBAR5DAO, "get_all_arealressursflate", side_effect=fake_get_all
+            ):
+                response = self.client.get("/collections/arealressursflate/items?limit=2")
+
+        body = response.json()
+        links = {link["rel"]: link["href"] for link in body.get("links", [])}
+        self.assertIn("next", links)
+        self.assertIn("after_id=id-2", links["next"])
+
+    def test_no_next_link_when_page_is_not_full(self):
+        with patch.object(settings, "MAX_PAGE_SIZE", 10):
+            with patch.object(
+                FKBAR5DAO, "get_all_arealressursflate", side_effect=fake_get_all
+            ):
+                response = self.client.get("/collections/arealressursflate/items?limit=10")
+
+        body = response.json()
+        rels = [link["rel"] for link in body.get("links", [])]
+        self.assertNotIn("next", rels)
 
 
 async def fake_get_one(lokal_id, conn):
