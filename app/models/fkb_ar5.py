@@ -1,11 +1,16 @@
 from enum import Enum
+from typing import Optional
+
+import orjson
+from pydantic import Field
 
 from app.models.fkb_felles import (
-    FKBFelles,
-    Posisjonskvalitet,
     CaseInsensitiveStrEnum,
-    Identifikasjon
+    FKBFelles,
+    Identifikasjon,
+    Posisjonskvalitet,
 )
+
 
 class ArealressursArealtype(Enum):
     bebygd = "11"
@@ -21,6 +26,7 @@ class ArealressursArealtype(Enum):
     hav = "82"
     ikke_kartlagt = "99"
 
+
 class ArealressursTreslag(Enum):
     barskog = "31"
     lauvskog = "32"
@@ -28,6 +34,7 @@ class ArealressursTreslag(Enum):
     ikke_tresatt = "39"
     ikke_relevant = "98"
     ikke_registrert = "99"
+
 
 class ArealressursSkogbonitet(Enum):
     impediment = "11"
@@ -37,6 +44,7 @@ class ArealressursSkogbonitet(Enum):
     sars_hoy = "15"
     ikke_relevant = "98"
     ikke_registrert = "99"
+
 
 class ArealressursGrunnforhold(Enum):
     blokkmark = "41"
@@ -48,6 +56,7 @@ class ArealressursGrunnforhold(Enum):
     ikke_relevant = "98"
     ikke_registrert = "99"
 
+
 class Klassifiseringsmetode(CaseInsensitiveStrEnum):
     sOrto = "sOrto"
     uOrto = "uOrto"
@@ -56,12 +65,15 @@ class Klassifiseringsmetode(CaseInsensitiveStrEnum):
     uMeld = "uMeld"
     uAnnen = "uAnnen"
 
+
 class ArealressursGrense(FKBFelles):
     avgrensing_type: str
     kvalitet: Posisjonskvalitet
 
+
 class ArealressursFiktiv(FKBFelles):
     pass
+
 
 class ArealressursFlate(FKBFelles):
     arealtype: ArealressursArealtype
@@ -69,19 +81,26 @@ class ArealressursFlate(FKBFelles):
     skogbonitet: ArealressursSkogbonitet
     grunnforhold: ArealressursGrunnforhold
     klassifiseringsmetode: Klassifiseringsmetode
+    posisjon: Optional[dict] = (
+        Field(
+            None, json_schema_extra={"type": "object", "description": "GeoJSON Point"}
+        ),
+    )
 
-def db_to_arealressurs_flate(dict: dict) -> ArealressursFlate:
-        return ArealressursFlate(
-            identifikasjon=Identifikasjon(
-                lokal_id=dict["lokalid"],
-                navnerom=dict["identifikasjon_navnerom"],
-                versjon_id=dict["identifikasjon_versjonid"]
-            ),
-            oppdateringsdato=dict["oppdateringsdato"],
-            datafangstdato=dict["datafangstdato"],
-            arealtype=dict["arealtype"],
-            treslag=dict["treslag"],
-            skogbonitet=dict["skogbonitet"],
-            grunnforhold=dict["grunnforhold"],
-            klassifiseringsmetode=dict["klassifiseringsmetode"]
-        )
+
+def db_to_arealressurs_flate(row: dict, posisjon: str) -> ArealressursFlate:
+    return ArealressursFlate(
+        identifikasjon=Identifikasjon(
+            lokal_id=row["lokalid"],
+            navnerom=row["identifikasjon_navnerom"],
+            versjon_id=row["identifikasjon_versjonid"],
+        ),
+        oppdateringsdato=row["oppdateringsdato"],
+        datafangstdato=row["datafangstdato"],
+        arealtype=row["arealtype"],
+        treslag=row["treslag"],
+        skogbonitet=row["skogbonitet"],
+        grunnforhold=row["grunnforhold"],
+        klassifiseringsmetode=row["klassifiseringsmetode"],
+        posisjon=orjson.loads(posisjon) if posisjon else None,
+    )

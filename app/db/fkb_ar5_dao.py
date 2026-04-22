@@ -10,7 +10,8 @@ from app.models.ogc import FeatureGeoJSON
 class FKBAR5DAO:
     @staticmethod
     async def get_arealressursflate(
-        lokal_id: str, conn: Connection
+        conn: Connection,
+        lokal_id: str,
     ) -> Tuple[ArealressursFlate, str]:
         result = await conn.execute(
             """
@@ -29,7 +30,9 @@ class FKBAR5DAO:
             raise FeatureNotFoundError()
 
         return (
-            db_to_arealressurs_flate(arealressurs_flate_row),
+            db_to_arealressurs_flate(
+                arealressurs_flate_row, arealressurs_flate_row["posisjon_geojson"]
+            ),
             arealressurs_flate_row["omrade_geojson"],
         )
 
@@ -45,14 +48,17 @@ class FKBAR5DAO:
                     ST_AsGeoJSON(omrade)::text AS omrade_geojson, 
                     ST_AsGeoJSON(posisjon)::text AS posisjon_geojson 
                 FROM fkb_ar5.arealressursflate
-                WHERE (%(after_id)s IS NULL OR lokalid > %(after_id)s)
+                WHERE (%(after_id)s::text IS NULL OR lokalid > %(after_id)s::text)
                 ORDER BY lokalid
                 LIMIT %(limit)s
                 """,
                 params={"limit": limit, "after_id": after_id},
             )
             async for row in cur:
-                yield (db_to_arealressurs_flate(row), row["omrade_geojson"])
+                yield (
+                    db_to_arealressurs_flate(row, row["posisjon_geojson"]),
+                    row["omrade_geojson"],
+                )
 
     @staticmethod
     async def create_arealressursflate(feature: FeatureGeoJSON, conn: Connection):
