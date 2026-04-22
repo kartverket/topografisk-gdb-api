@@ -1,6 +1,6 @@
-# PostGIS Feature API
+# PostGIS OGC+ API
 
-REST API for storing and querying geographic features using PostGIS.
+REST API for storing and querying geographic features based on OGC standards, with custom extensions covering FKB requirements.
 
 ## Features
 
@@ -25,52 +25,26 @@ docker-compose up
 
 ```bash
 # Start PostgreSQL with PostGIS (if not using docker-compose)
-docker run --name postgis-dev -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=geodata -p 5432:5432 -d postgis/postgis:16-3.4
-
-# Initialize database
-docker cp init.sql postgis-dev:/tmp/init.sql
-docker exec postgis-dev psql -U postgres -d geodata -f /tmp/init.sql
+docker run --name postgis-dev -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=geodata -p 5432:5432 -d postgis/postgis:18-3.6
 
 # Install dependencies
 uv sync
 
 # Run the API
-uv run uvicorn app.main:app --reload
+uv run --env-file dev.env uvicorn app.main:app --reload
 ```
 
 ## API Endpoints
 
-- `POST /api/v1/features` — Create a feature
-- `GET /api/v1/features/{id}` — Get a feature by ID
-- `GET /api/v1/features` — List features (with optional bbox filter)
-- `PUT /api/v1/features/{id}` — Update a feature
-- `DELETE /api/v1/features/{id}` — Delete a feature
-- `GET /api/v1/features/stats/count` — Get feature count
-
-## Example Usage
-
-### Create a Feature
-
-```bash
-curl -X POST http://localhost:8000/api/v1/features \
-  -H "Content-Type: application/json" \
-  -d '{
-    "geometry": {
-      "type": "Point",
-      "coordinates": [10.0, 59.0]
-    },
-    "properties": {
-      "name": "Oslo",
-      "category": "capital"
-    }
-  }'
-```
-
-### Query with Bounding Box
-
-```bash
-curl "http://localhost:8000/api/v1/features?minx=9&miny=58&maxx=11&maxy=60"
-```
+- `GET /` — Landing page
+- `GET /conformance` — API conformance to OGC standards
+- `GET /collections` — List of collections in the API
+- `GET /collections/{collection_id}` — Collection metadata
+- `GET /collections/{collection_id}/items` — All features in a collection
+- `POST /collections/{collection_id}items` — Create a feature
+- `GET /collections/{collection_id}/items/{feature_id}` — A specific feature
+- `PATCH /collections/{collection_id}/items/{feature_id}` — Partial update of feature
+- `DELETE /collections/{collection_id}/items/{feature_id}` — Delete a feature
 
 ## Architecture
 
@@ -83,7 +57,3 @@ curl "http://localhost:8000/api/v1/features?minx=9&miny=58&maxx=11&maxy=60"
 ## Configuration
 
 Set `DATABASE_URL` environment variable (default: `postgresql://postgres:postgres@localhost:5432/geodata`).
-
-## License
-
-MIT
