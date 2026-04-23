@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     PGSSLCERT: str | None = None  # e.g. /app/db-certs/client.crt
     PGSSLKEY: str | None = None  # e.g. /app/db-certs/client.key
 
+    # PAGINATION
+    MAX_PAGE_SIZE: int = 1000
+
     @property
     def connection_url(self) -> str:
         if self.database_url:

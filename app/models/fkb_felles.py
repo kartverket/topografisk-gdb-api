@@ -2,7 +2,8 @@ import datetime
 from enum import Enum, StrEnum
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
 
 class CaseInsensitiveStrEnum(StrEnum):
     """Enums inheriting from this class becomes case insensitive for input
@@ -26,6 +27,8 @@ class CaseInsensitiveStrEnum(StrEnum):
         return None
 
     # https://register.geonorge.no/sosi-kodelister/fkb/generell/5.0/datafangstmetode
+
+
 class Datafangstmetode(CaseInsensitiveStrEnum):
     dig = "dig"  # Digitalisert fra ortofoto / plane kartdata
     fot = "fot"  # Fotogrammetri
@@ -44,11 +47,13 @@ class Synbarhet(Enum):
     middels = 2  # Middels synlig / gjenkjennbart
     ikke_synlig = 3  # Ikke synlig / gjenkjennbart
 
+
 class FKBBase(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,  # accept both Python name and alias
         alias_generator=None,  # explicit aliases only — no auto-camel-case
     )
+
 
 # https://sosi.geonorge.no/Produktspesifikasjoner/FKB-Bane/5.0.1/#identifikasjon
 class Identifikasjon(FKBBase):
@@ -67,6 +72,7 @@ class Posisjonskvalitet(FKBBase):
     )
     noyaktighet_hoyde: Optional[int] = Field(None, alias="nøyaktighetHøyde")
 
+
 class FKBFelles(FKBBase):
     identifikasjon: Identifikasjon
     oppdateringsdato: datetime.datetime
@@ -75,3 +81,10 @@ class FKBFelles(FKBBase):
     verifiseringsdato: Optional[datetime.date] = None
     registreringsversjon: Optional[str] = None
     informasjon: Optional[str] = None
+
+    @field_validator("datafangstdato", "verifiseringsdato", mode="before")
+    @classmethod
+    def coerce_to_date(cls, v):
+        if isinstance(v, datetime.datetime):
+            return v.date()
+        return v
