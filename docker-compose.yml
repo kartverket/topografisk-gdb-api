@@ -9,8 +9,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      # Auto-run init.sql on first startup
-      # - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./app/sql/ar5_db_nibio.sql:/docker-entrypoint-initdb.d/01_ar5_db_nibio.sql
       # Persist data across restarts
       - postgres_data:/var/lib/postgresql
     healthcheck:
@@ -24,7 +23,6 @@ services:
       context: .
     container_name: postgis-api
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
       APP_ENV: production
     ports:
       - "8000:8000"

@@ -77,7 +77,9 @@ class FKBFelles(FKBBase):
     identifikasjon: Identifikasjon
     oppdateringsdato: datetime.datetime
     sluttdato: Optional[datetime.datetime] = None
-    datafangstdato: datetime.date
+    datafangstdato: Optional[datetime.date] = (
+        None  # Nibio seed data has null rows here although it is required by sosi spec
+    )
     verifiseringsdato: Optional[datetime.date] = None
     registreringsversjon: Optional[str] = None
     informasjon: Optional[str] = None
