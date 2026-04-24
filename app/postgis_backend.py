@@ -1,55 +1,64 @@
-from typing import Tuple, List
-from pathlib import Path
 import uuid
+from pathlib import Path
+from typing import List, Tuple
 
 from psycopg import Connection
 
-from app.models.ogc import Geometry
+from app.models.exceptions import FeatureNotFoundError
 from app.models.fkb_bane import (
     JernbaneplattformkantProperties,
     SpormidtProperties,
     db_to_jernbaneplattformkant,
     db_to_spormidt,
     json_to_jernbaneplattformkant,
-    json_to_spormidt
+    json_to_spormidt,
 )
-from app.models.exceptions import FeatureNotFoundError
+from app.models.ogc import Geometry
 
 USER_TABLE = "common_users"
+
 
 class PostGISBackend:
     @staticmethod
     async def initialize_schema(conn: Connection) -> None:
-        fkb_felles_path = Path("app") / "sql/fkb_felles.sql"
-        fkb_felles = fkb_felles_path.read_text(encoding="utf-8")
-        await conn.execute(fkb_felles)
+        base_path = Path("app") / "sql"
 
-        fkb_bane_path = Path("app") / "sql/fkb_bane.sql"
-        fkb_bane = fkb_bane_path.read_text(encoding="utf-8")
-        await conn.execute(fkb_bane)
-
-        fkb_ar5_path = Path("app") / "sql/fkb_ar5.sql"
-        fkb_ar5 = fkb_ar5_path.read_text(encoding="utf-8")
-        await conn.execute(fkb_ar5)
+        # TODO: add nibio db_schema initialisation here.
+        # current file (ar5_db_nibio.sql) is a pg_dump and
+        # TODO: Decide if files should stay here or somewhere else
+        # If here we can loop through and execute using Path().glob()
+        # Only thing to be aware is that "fkb_felles" should run first
+        # in current setup. glob(".sql") would give wrong order but
+        # a rename to "01_fkb_felles.sql", "02_..." would work
+        for file in ("fkb_felles", "fkb_bane", "fkb_ar5"):  # fkb_felles first
+            await conn.execute(
+                (base_path / file).with_suffix(".sql").read_text(encoding="utf-8")
+            )
 
     @staticmethod
-    async def get_jernbaneplattformkant(id: str, conn: Connection) -> Tuple[JernbaneplattformkantProperties, dict]:
+    async def get_jernbaneplattformkant(
+        id: str, conn: Connection
+    ) -> Tuple[JernbaneplattformkantProperties, dict]:
         result = await conn.execute(
             query=f"""
                 SELECT *, ST_AsGeoJSON(grense)::json AS grense_geojson FROM fkb_bane.jernbaneplattformkant 
                 WHERE lokalid = %(id)s
             """,
-            params={"id": id}
+            params={"id": id},
         )
         jernbaneplattformkant_row = await result.fetchone()
 
         if not jernbaneplattformkant_row:
             raise FeatureNotFoundError()
 
-        return db_to_jernbaneplattformkant(jernbaneplattformkant_row), jernbaneplattformkant_row["grense_geojson"]
-    
+        return db_to_jernbaneplattformkant(
+            jernbaneplattformkant_row
+        ), jernbaneplattformkant_row["grense_geojson"]
+
     @staticmethod
-    async def get_all_jernbaneplattformkant(conn: Connection) -> List[Tuple[JernbaneplattformkantProperties, dict]]:
+    async def get_all_jernbaneplattformkant(
+        conn: Connection,
+    ) -> List[Tuple[JernbaneplattformkantProperties, dict]]:
         result = await conn.execute(
             query=f"""
                 SELECT *, ST_AsGeoJSON(grense)::json AS grense_geojson FROM fkb_bane.jernbaneplattformkant
@@ -57,13 +66,17 @@ class PostGISBackend:
         )
         jernbaneplattformkant_rows = await result.fetchall()
 
-        return list(map(
-            lambda row: (db_to_jernbaneplattformkant(row), row["grense_geojson"]),
-            jernbaneplattformkant_rows
-        ))
-    
+        return list(
+            map(
+                lambda row: (db_to_jernbaneplattformkant(row), row["grense_geojson"]),
+                jernbaneplattformkant_rows,
+            )
+        )
+
     @staticmethod
-    async def create_jernbaneplattformkant(properties: dict, geometry: Geometry, conn: Connection) -> JernbaneplattformkantProperties:
+    async def create_jernbaneplattformkant(
+        properties: dict, geometry: Geometry, conn: Connection
+    ) -> JernbaneplattformkantProperties:
         query = """
             INSERT INTO fkb_bane.jernbaneplattformkant (
                 lokalid,
@@ -130,30 +143,34 @@ class PostGISBackend:
 
         result = await conn.execute(query=query, params=params)
         row = await result.fetchone()
-        
+
         if row is None:
             return None
 
         return row["lokalid"]
 
     @staticmethod
-    async def get_spormidt(id: str, conn: Connection) -> Tuple[SpormidtProperties, dict]:
+    async def get_spormidt(
+        id: str, conn: Connection
+    ) -> Tuple[SpormidtProperties, dict]:
         result = await conn.execute(
             query=f"""
                 SELECT *, ST_AsGeoJSON(senterlinje)::json AS senterlinje_geojson FROM fkb_bane.spormidt
                 WHERE lokalid = %(id)s
             """,
-            params={"id": id}
+            params={"id": id},
         )
         spormidt_row = await result.fetchone()
 
         if not spormidt_row:
             raise FeatureNotFoundError()
-            
+
         return db_to_spormidt(spormidt_row), spormidt_row["senterlinje_geojson"]
-    
+
     @staticmethod
-    async def get_all_spormidt(conn: Connection) -> List[Tuple[SpormidtProperties, dict]]:
+    async def get_all_spormidt(
+        conn: Connection,
+    ) -> List[Tuple[SpormidtProperties, dict]]:
         result = await conn.execute(
             query=f"""
                 SELECT *, ST_AsGeoJSON(senterlinje)::json AS senterlinje_geojson FROM fkb_bane.spormidt
@@ -161,11 +178,13 @@ class PostGISBackend:
         )
         spormidt_rows = await result.fetchall()
 
-        return list(map(
-            lambda row: (db_to_spormidt(row), row["senterlinje_geojson"]),
-            spormidt_rows
-        ))
-    
+        return list(
+            map(
+                lambda row: (db_to_spormidt(row), row["senterlinje_geojson"]),
+                spormidt_rows,
+            )
+        )
+
     @staticmethod
     async def create_sportmidt(properties: dict, geometry: Geometry, conn: Connection):
         query = """
@@ -240,7 +259,7 @@ class PostGISBackend:
 
         result = await conn.execute(query=query, params=params)
         row = await result.fetchone()
-        
+
         if row is None:
             return None
 

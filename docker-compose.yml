@@ -9,7 +9,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./app/sql/ar5_db_nibio.sql:/docker-entrypoint-initdb.d/01_ar5_db_nibio.sql
+      - ./ar5_nibio_db_init.sql:/docker-entrypoint-initdb.d/01_ar5_db_nibio.sql
       # Persist data across restarts
       - postgres_data:/var/lib/postgresql
     healthcheck:
