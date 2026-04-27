@@ -22,6 +22,7 @@ from app.services.feature_service import (
     create_feature_service,
     get_feature_geojson,
     stream_feature_collection,
+    patch_feature_geojson,
 )
 
 router = APIRouter(tags=["OGC API Features - FKB Bane"])
@@ -223,9 +224,9 @@ async def create_feature(
     status_code=200,
 )
 async def update_feature(
-    collection_id: str, feature: FeatureGeoJSON, conn: Connection = Depends(get_db_conn)
+    collection_id: str, feature_id: str, patch: dict, conn: Connection = Depends(get_db_conn)
 ):
-    raise NotImplementedError()
+    return await patch_feature_geojson(collection_id, feature_id, patch, conn)
 
 
 @router.delete("/collections/{collection_id}/items/{feature_id}", status_code=200)
