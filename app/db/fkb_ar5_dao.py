@@ -6,6 +6,39 @@ from app.models.exceptions import FeatureNotFoundError
 from app.models.fkb_ar5 import ArealressursFlate, db_to_arealressurs_flate
 from app.models.ogc import FeatureGeoJSON
 
+# Need to unpack for now because of postgis topology
+# TODO: Fix in declarative setup later if possible
+AREALRESSURSFLATE_SELECT = """
+SELECT
+    -- identity
+    identifikasjon_lokal_id::text         AS lokalid,
+    identifikasjon_versjon_id::text       AS identifikasjon_versjonid,
+    identifikasjon_navnerom,
+
+    -- dates
+    datafangstdato,
+    verifiseringsdato,
+    oppdateringsdato,
+
+    -- text fields
+    klassifiseringsmetode,
+    informasjon,
+    opphav,
+    registreringsversjon::text,
+
+    -- enum codes
+    arealtype::text,
+    treslag::text,
+    skogbonitet::text,
+    grunnforhold::text,
+
+    -- geometry
+    ST_AsGeoJSON(ST_Transform(omrade::geometry, 4326))::text  AS omrade_geojson,
+    ST_AsGeoJSON(geometry_properties_position)::text          AS posisjon_geojson
+
+FROM topo_ar5ngis.face_attributes
+"""
+
 
 class FKBAR5DAO:
     @staticmethod
@@ -19,14 +52,8 @@ class FKBAR5DAO:
         raw GeoJSON string. Raises FeatureNotFoundError if no row matches.
         """
         result = await conn.execute(
-            """
-            SELECT 
-                *,
-                ST_AsGeoJSON(omrade)::text AS omrade_geojson,
-                ST_AsGeoJSON(posisjon)::text AS posisjon_geojson 
-            FROM fkb_ar5.arealressursflate 
-            WHERE lokalid = %(lokalid)s
-            """,
+            AREALRESSURSFLATE_SELECT
+            + "WHERE identifikasjon_lokal_id::text = %(lokalid)s",
             params={"lokalid": lokal_id},
         )
         arealressurs_flate_row = await result.fetchone()
@@ -56,14 +83,10 @@ class FKBAR5DAO:
         """
         async with conn.cursor(name="ar5_stream") as cur:
             await cur.execute(
-                """
-                SELECT 
-                    *, 
-                    ST_AsGeoJSON(omrade)::text AS omrade_geojson, 
-                    ST_AsGeoJSON(posisjon)::text AS posisjon_geojson 
-                FROM fkb_ar5.arealressursflate
-                WHERE (%(after_id)s::text IS NULL OR lokalid > %(after_id)s::text)
-                ORDER BY lokalid
+                AREALRESSURSFLATE_SELECT
+                + """
+                WHERE (%(after_id)s::text IS NULL OR identifikasjon_lokal_id::text > %(after_id)s::text)
+                ORDER BY identifikasjon_lokal_id
                 LIMIT %(limit)s
                 """,
                 params={"limit": limit, "after_id": after_id},
