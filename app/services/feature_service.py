@@ -1,6 +1,6 @@
 import datetime
 from enum import Enum
-from typing import AsyncGenerator, Awaitable, Callable, List, Tuple
+from typing import AsyncGenerator, Tuple
 
 import orjson
 from fastapi import Request
@@ -39,7 +39,7 @@ def get_accessor(collection_id: str, type: Accessor):
         "spormidt": {
             Accessor.GET_ONE: PostGISBackend.get_spormidt,
             Accessor.GET_LIST: PostGISBackend.get_all_spormidt,
-            Accessor.CREATE: PostGISBackend.create_jernbaneplattformkant,
+            Accessor.CREATE: PostGISBackend.create_spormidt,
             Accessor.PATCH: None,
             Accessor.DELETE: None,
         },
@@ -64,6 +64,34 @@ def get_patch_accessor(collection_id: str):
 
 def get_delete_accessor(collection_id: str):
     return get_accessor(collection_id, Accessor.DELETE)
+
+
+def to_featuregeojson(featuredata: Tuple[FKBFelles, str]):
+    return FeatureGeoJSON(
+        id=featuredata[0].identifikasjon.lokal_id,
+        geometry=orjson.loads(featuredata[1]),
+        properties=featuredata[0],
+    )
+
+
+async def get_feature_geojson(
+    collection_id: str, feature_id: str, conn: Connection
+) -> dict:
+    """Fetch a single feature and return it as a plain GeoJSON dict.
+
+    Sketch function that fits the signature in FeatureService.
+    """
+    model, geometry = await get_one_accessor(collection_id)(feature_id, conn)
+    return FeatureGeoJSON(
+        id=model.identifikasjon.lokal_id,
+        geometry=orjson.loads(geometry),
+        properties=model.model_dump(),
+    )
+
+
+async def get_feature_collection(collection_id: str, conn: Connection):
+    features = await get_list_accessor(collection_id)(conn)
+    return FeatureCollectionGeoJSON(features=list(map(to_featuregeojson, features)))
 
 
 async def stream_feature_collection(
@@ -110,22 +138,6 @@ async def stream_feature_collection(
     yield b"]," + orjson.dumps(tail)[1:]  # Close last feature, strip leading '{'
 
 
-async def get_feature_geojson(
-    collection_id: str, feature_id: str, conn: Connection
-) -> dict:
-    """Fetch a single feature and return it as a plain GeoJSON dict.
-
-    Sketch function that fits the signature in FeatureService.
-    """
-    model, geometry = await get_one_accessor(collection_id)(conn, feature_id)
-    return {
-        "type": "Feature",
-        "id": model.identifikasjon.lokal_id,
-        "geometry": orjson.loads(geometry),
-        "properties": model.model_dump(),
-    }
-
-
 async def patch_feature_geojson(
     collection_id: str, feature_id: str, patch: dict, conn: Connection
 ):
@@ -139,60 +151,10 @@ async def patch_feature_geojson(
     return target
 
 
-class FeatureService:
-    def __init__(self, get_one, get_all, create):
-        self.get_one: Callable[[str, Connection], Awaitable[Tuple[FKBFelles, dict]]] = (
-            get_one
-        )
-        self.get_all: Callable[
-            [Connection], Awaitable[List[Tuple[FKBFelles, dict]]]
-        ] = get_all
-        self.create = create
-
-    def to_featuregeojson(self, featuredata: Tuple[FKBFelles, str]):
-        return FeatureGeoJSON(
-            id=featuredata[0].identifikasjon.lokal_id,
-            geometry=featuredata[1],
-            properties=featuredata[0],
-        )
-
-    async def get_feature(self, feature_id: str, conn: Connection) -> FeatureGeoJSON:
-        properties, geometry = await self.get_one(feature_id, conn)
-        return FeatureGeoJSON(
-            id=properties.identifikasjon.lokal_id,
-            geometry=geometry,
-            properties=properties,
-        )
-
-    async def get_features(self, conn: Connection) -> FeatureCollectionGeoJSON:
-        features = await self.get_all(conn)
-        return FeatureCollectionGeoJSON(
-            features=list(map(self.to_featuregeojson, features))
-        )
-
-    async def create_feature(self, feature: FeatureGeoJSON, conn: Connection):
-        print(feature.geometry)
-        created_id = await self.create(feature.properties, feature.geometry, conn)
-        return created_id
-
-
-def create_feature_service(collection_id: str):
-    functions = {
-        "jernbaneplattformkant": {
-            "get_one": PostGISBackend.get_jernbaneplattformkant,
-            "get_all": PostGISBackend.get_all_jernbaneplattformkant,
-            "create": PostGISBackend.create_jernbaneplattformkant,
-        },
-        "spormidt": {
-            "get_one": PostGISBackend.get_spormidt,
-            "get_all": PostGISBackend.get_all_spormidt,
-            "create": PostGISBackend.create_sportmidt,
-        },
-        "arealressursflate": {
-            "get_one": FKBAR5DAO.get_arealressursflate,
-            "get_all": FKBAR5DAO.get_all_arealressursflate,
-            "create": FKBAR5DAO.create_arealressursflate,
-        },
-    }[collection_id]
-
-    return FeatureService(**functions)
+async def create_feature_geojson(
+    collection_id: str, feature: FeatureGeoJSON, conn: Connection
+):
+    created_id = await get_create_accesor(collection_id)(
+        feature.properties, feature.geometry, conn
+    )
+    return created_id

@@ -40,8 +40,8 @@ class PostGISBackend:
         id: str, conn: Connection
     ) -> Tuple[JernbaneplattformkantProperties, dict]:
         result = await conn.execute(
-            query=f"""
-                SELECT *, ST_AsGeoJSON(grense)::json AS grense_geojson FROM fkb_bane.jernbaneplattformkant 
+            query="""
+                SELECT *, ST_AsGeoJSON(grense)::text AS grense_geojson FROM fkb_bane.jernbaneplattformkant 
                 WHERE lokalid = %(id)s
             """,
             params={"id": id},
@@ -60,8 +60,8 @@ class PostGISBackend:
         conn: Connection,
     ) -> List[Tuple[JernbaneplattformkantProperties, dict]]:
         result = await conn.execute(
-            query=f"""
-                SELECT *, ST_AsGeoJSON(grense)::json AS grense_geojson FROM fkb_bane.jernbaneplattformkant
+            query="""
+                SELECT *, ST_AsGeoJSON(grense)::text AS grense_geojson FROM fkb_bane.jernbaneplattformkant
             """
         )
         jernbaneplattformkant_rows = await result.fetchall()
@@ -154,8 +154,8 @@ class PostGISBackend:
         id: str, conn: Connection
     ) -> Tuple[SpormidtProperties, dict]:
         result = await conn.execute(
-            query=f"""
-                SELECT *, ST_AsGeoJSON(senterlinje)::json AS senterlinje_geojson FROM fkb_bane.spormidt
+            query="""
+                SELECT *, ST_AsGeoJSON(senterlinje)::text AS senterlinje_geojson FROM fkb_bane.spormidt
                 WHERE lokalid = %(id)s
             """,
             params={"id": id},
@@ -172,8 +172,8 @@ class PostGISBackend:
         conn: Connection,
     ) -> List[Tuple[SpormidtProperties, dict]]:
         result = await conn.execute(
-            query=f"""
-                SELECT *, ST_AsGeoJSON(senterlinje)::json AS senterlinje_geojson FROM fkb_bane.spormidt
+            query="""
+                SELECT *, ST_AsGeoJSON(senterlinje)::text AS senterlinje_geojson FROM fkb_bane.spormidt
             """
         )
         spormidt_rows = await result.fetchall()
@@ -186,7 +186,7 @@ class PostGISBackend:
         )
 
     @staticmethod
-    async def create_sportmidt(properties: dict, geometry: Geometry, conn: Connection):
+    async def create_spormidt(properties: dict, geometry: Geometry, conn: Connection):
         query = """
             INSERT INTO fkb_bane.spormidt (
                 lokalid,

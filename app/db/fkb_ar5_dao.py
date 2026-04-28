@@ -43,8 +43,8 @@ FROM topo_ar5ngis.face_attributes
 class FKBAR5DAO:
     @staticmethod
     async def get_arealressursflate(
-        conn: Connection,
         lokal_id: str,
+        conn: Connection,
     ) -> Tuple[ArealressursFlate, str]:
         """Fetch a single arealressursflate by lokalid.
 
@@ -118,18 +118,19 @@ class FKBAR5DAO:
             registreringsversjon=%(registreringsversjon)s
             WHERE identifikasjon_lokal_id::text = %(lokalid)s; 
             """,
-            params = {
-                "lokalid":feature["properties"]["identifikasjon"]["lokal_id"],
+            params={
+                "lokalid": feature["properties"]["identifikasjon"]["lokal_id"],
                 "datafangstdato": feature["properties"]["datafangstdato"],
                 "informasjon": feature["properties"]["informasjon"],
                 "verifiseringsdato": feature["properties"]["verifiseringsdato"],
-                "klassifiseringsmetode": feature["properties"]["klassifiseringsmetode"].value,
+                "klassifiseringsmetode": feature["properties"][
+                    "klassifiseringsmetode"
+                ].value,
                 "oppdateringsdato": feature["properties"]["oppdateringsdato"],
                 "arealtype": feature["properties"]["arealtype"].value,
                 "treslag": feature["properties"]["treslag"].value,
                 "skogbonitet": feature["properties"]["skogbonitet"].value,
                 "grunnforhold": feature["properties"]["grunnforhold"].value,
-                "registreringsversjon": feature["properties"]["registreringsversjon"]}
+                "registreringsversjon": feature["properties"]["registreringsversjon"],
+            },
         )
-
-
