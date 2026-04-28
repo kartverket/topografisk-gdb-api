@@ -221,4 +221,15 @@ VALUES
     ('samf', 'Samferdsel'),
     ('annet', 'Annet');
 
+CREATE INDEX IF NOT EXISTS idx_arealressursflate_lokalid
+    ON fkb_ar5.arealressursflate (lokalid);
+
+
+CREATE INDEX IF NOT EXISTS idx_arealressursflate_omrade
+    ON fkb_ar5.arealressursflate USING GIST (omrade);
+
+CREATE INDEX IF NOT EXISTS idx_arealressursflate_posisjon
+    ON fkb_ar5.arealressursflate USING GIST (posisjon);
+
+
 END;

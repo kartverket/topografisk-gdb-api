@@ -1,6 +1,7 @@
 services:
   api:
     environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/geodata
       APP_ENV: development
       PYTHONUNBUFFERED: 1
     volumes:
