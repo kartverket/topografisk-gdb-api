@@ -6,8 +6,7 @@
 -- string literals). Storing as text aligns schema with actual use.
 --
 -- Views that depend on these columns must be dropped and recreated.
--- The ::VARCHAR casts in the original view bodies are removed — text::varchar
--- is a no-op and would just be noise.
+-- The ::VARCHAR casts in the original view bodies are now unnecessary
 
 DROP VIEW IF EXISTS topo_ar5ngis.face_attributes_export_fkb50;
 DROP VIEW IF EXISTS topo_ar5ngis.edge_attributes_export_fkb50;

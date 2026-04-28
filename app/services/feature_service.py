@@ -1,6 +1,6 @@
 import datetime
-from typing import AsyncGenerator, Awaitable, Callable, List, Tuple
 import enum
+from typing import AsyncGenerator, Awaitable, Callable, List, Tuple
 
 import orjson
 from fastapi import Request
@@ -75,14 +75,19 @@ async def get_feature_geojson(
         "properties": model.model_dump(),
     }
 
-async def patch_feature_geojson(collection_id: str, feature_id: str, patch: dict, conn: Connection):
+
+async def patch_feature_geojson(
+    collection_id: str, feature_id: str, patch: dict, conn: Connection
+):
     target = await get_feature_geojson(collection_id, feature_id, conn)
     for key, value in patch.items():
         if isinstance(target["properties"][key], enum.Enum):
             target["properties"][key] = type(target["properties"][key])(patch.get(key))
         else:
             target["properties"][key] = patch.get(key)
-    await FKBAR5DAO.patch_arealressursflate(target, conn) #TODO: Generalize, jira: TT-39
+    await FKBAR5DAO.patch_arealressursflate(
+        target, conn
+    )  # TODO: Generalize, jira: TT-39
     return target
 
 

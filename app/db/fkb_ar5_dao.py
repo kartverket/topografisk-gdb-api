@@ -10,7 +10,7 @@ from app.models.ogc import FeatureGeoJSON
 # TODO: Fix in declarative setup later if possible
 AREALRESSURSFLATE_SELECT = """
 SELECT
-    -- identity
+    -- identity. explicitly cast lokalId uuid -> text, versjonId date -> text
     identifikasjon_lokal_id::text         AS lokalid,
     identifikasjon_versjon_id::text       AS identifikasjon_versjonid,
     identifikasjon_navnerom,
@@ -24,13 +24,13 @@ SELECT
     klassifiseringsmetode,
     informasjon,
     opphav,
-    registreringsversjon::text,
+    registreringsversjon,
 
     -- enum codes
-    arealtype::text,
-    treslag::text,
-    skogbonitet::text,
-    grunnforhold::text,
+    arealtype,
+    treslag,
+    skogbonitet,
+    grunnforhold,
 
     -- geometry
     ST_AsGeoJSON(ST_Transform(omrade::geometry, 4326))::text  AS omrade_geojson,
@@ -118,18 +118,19 @@ class FKBAR5DAO:
             registreringsversjon=%(registreringsversjon)s
             WHERE identifikasjon_lokal_id::text = %(lokalid)s; 
             """,
-            params = {
-                "lokalid":feature["properties"]["identifikasjon"]["lokal_id"],
+            params={
+                "lokalid": feature["properties"]["identifikasjon"]["lokal_id"],
                 "datafangstdato": feature["properties"]["datafangstdato"],
                 "informasjon": feature["properties"]["informasjon"],
                 "verifiseringsdato": feature["properties"]["verifiseringsdato"],
-                "klassifiseringsmetode": feature["properties"]["klassifiseringsmetode"].value,
+                "klassifiseringsmetode": feature["properties"][
+                    "klassifiseringsmetode"
+                ].value,
                 "oppdateringsdato": feature["properties"]["oppdateringsdato"],
                 "arealtype": feature["properties"]["arealtype"].value,
                 "treslag": feature["properties"]["treslag"].value,
                 "skogbonitet": feature["properties"]["skogbonitet"].value,
                 "grunnforhold": feature["properties"]["grunnforhold"].value,
-                "registreringsversjon": feature["properties"]["registreringsversjon"]}
+                "registreringsversjon": feature["properties"]["registreringsversjon"],
+            },
         )
-
-
