@@ -3,7 +3,7 @@ from typing import AsyncGenerator, Tuple
 from psycopg import Connection
 
 from app.models.exceptions import FeatureNotFoundError
-from app.models.fkb_ar5 import ArealressursFlate, db_to_arealressurs_flate
+from app.models.fkb_ar5 import ArealressursFlate, ArealressursGrense
 from app.models.ogc import FeatureGeoJSON
 
 # Need to unpack for now because of postgis topology
@@ -40,6 +40,37 @@ FROM topo_ar5ngis.face_attributes
 """
 
 
+AREALRESSURSGRENSE_SELECT = """
+SELECT
+    -- identity
+    identifikasjon_lokal_id::text   AS lokalid,
+    identifikasjon_versjon_id::text AS identifikasjon_versjonid,
+    identifikasjon_navnerom,
+
+    -- dates
+    datafangstdato,
+    verifiseringsdato,
+    oppdateringsdato,
+
+    -- text fields
+    opphav,
+    registreringsversjon::text,
+
+    -- enum codes
+    avgrensing_type::text,
+    
+    -- composite
+    kvalitet.datafangstmetode::text   AS datafangstmetode,
+    kvalitet.noyaktighet              AS noyaktighet,
+    kvalitet.synbarhet                AS synbarhet,
+
+    -- geometry
+    ST_AsGeoJSON(ST_Transform(grense::geometry, 4326))::text  AS grense_geojson
+
+FROM topo_ar5ngis.edge_attributes
+"""
+
+
 class FKBAR5DAO:
     @staticmethod
     async def get_arealressursflate(
@@ -53,7 +84,7 @@ class FKBAR5DAO:
         """
         result = await conn.execute(
             AREALRESSURSFLATE_SELECT
-            + "WHERE identifikasjon_lokal_id::text = %(lokalid)s",
+            + " WHERE identifikasjon_lokal_id::text = %(lokalid)s",
             params={"lokalid": lokal_id},
         )
         arealressurs_flate_row = await result.fetchone()
@@ -64,24 +95,55 @@ class FKBAR5DAO:
             )
 
         return (
-            db_to_arealressurs_flate(
+            ArealressursFlate.db_to_arealressurs_flate(
                 arealressurs_flate_row, arealressurs_flate_row["posisjon_geojson"]
             ),
             arealressurs_flate_row["omrade_geojson"],
         )
 
+
+    @staticmethod
+    async def get_arealressursgrense(
+        conn: Connection,
+        lokal_id: str,
+    ) -> Tuple[ArealressursGrense, str]:
+        """Fetch a single arealressursgrense by lokalid.
+
+        Returns a tuple of (model, grense_geojson) where grense_geojson is a
+        raw GeoJSON string. Raises FeatureNotFoundError if no row matches.
+        """
+        result = await conn.execute(
+            AREALRESSURSGRENSE_SELECT
+            + " WHERE identifikasjon_lokal_id::text = %(lokalid)s",
+            params={"lokalid": lokal_id},
+        )
+        arealressurs_grense_row = await result.fetchone()
+
+        if not arealressurs_grense_row:
+            raise FeatureNotFoundError(
+                f"No element '{lokal_id}' in collection arealressursgrense."
+            )
+
+        return (
+            ArealressursGrense.db_to_arealressurs_grense(
+                arealressurs_grense_row
+            ),
+            arealressurs_grense_row["grense_geojson"],
+        )
+
+
     @staticmethod
     async def get_all_arealressursflate(
         conn: Connection, limit: int | None = None, after_id: str | None = None
     ) -> AsyncGenerator[Tuple[ArealressursFlate, str], None]:
-        """Stream arealressursflate rows using a named cursor (ar5_stream).
+        """Stream arealressursflate rows using a named cursor (ar5_flater_stream).
 
         Yields (model, omrade_geojson) tuples one at a time, keeping memory
         usage constant regardless of result size. Supports keyset pagination:
         pass after_id to start from the row after the given lokalid, ordered
         by lokalid. limit=None returns all matching rows.
         """
-        async with conn.cursor(name="ar5_stream") as cur:
+        async with conn.cursor(name="ar5_flater_stream") as cur:
             await cur.execute(
                 AREALRESSURSFLATE_SELECT
                 + """
@@ -93,9 +155,38 @@ class FKBAR5DAO:
             )
             async for row in cur:
                 yield (
-                    db_to_arealressurs_flate(row, row["posisjon_geojson"]),
+                    ArealressursFlate.db_to_arealressurs_flate(row, row["posisjon_geojson"]),
                     row["omrade_geojson"],
                 )
+
+
+    @staticmethod
+    async def get_all_arealressursgrense(
+        conn: Connection, limit: int | None = None, after_id: str | None = None
+    ) -> AsyncGenerator[Tuple[ArealressursGrense, str], None]:
+        """Stream arealressursgrense rows using a named cursor (ar5_grenser_stream).
+
+        Yields (model, grense_geojson) tuples one at a time, keeping memory
+        usage constant regardless of result size. Supports keyset pagination:
+        pass after_id to start from the row after the given lokalid, ordered
+        by lokalid. limit=None returns all matching rows.
+        """
+        async with conn.cursor(name="ar5_grenser_stream") as cur:
+            await cur.execute(
+                AREALRESSURSGRENSE_SELECT
+                + """
+                WHERE (%(after_id)s::text IS NULL OR identifikasjon_lokal_id::text > %(after_id)s::text)
+                ORDER BY identifikasjon_lokal_id
+                LIMIT %(limit)s
+                """,
+                params={"limit": limit, "after_id": after_id},
+            )
+            async for row in cur:
+                yield (
+                    ArealressursGrense.db_to_arealressurs_grense(row),
+                    row["grense_geojson"],
+                )
+
 
     @staticmethod
     async def create_arealressursflate(feature: FeatureGeoJSON, conn: Connection):

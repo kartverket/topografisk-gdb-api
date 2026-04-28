@@ -30,6 +30,7 @@ COLLECTIONS = [
     "jernbaneplattformkant",
     "spormidt",
     "arealressursflate",
+    "arealressursgrense",
 ]
 
 COLLECTION_METADATA = {
@@ -41,6 +42,9 @@ COLLECTION_METADATA = {
     ),
     "arealressursflate": CollectionMetadata(
         title="Arealressurs flate", description="Inneholder arealressurs flate"
+    ),
+    "arealressursgrense": CollectionMetadata(
+        title="Arealressurs grense", description="Inneholder arealressurs grense"
     ),
 }
 
@@ -169,6 +173,12 @@ async def get_features(
             stream_feature_collection(collection_id, limit, after_id, conn, request),
             media_type="application/geo+json",
         )
+    # arealressursgrense as another special case until generalised in featureservice
+    if collection_id == "arealressursgrense":
+        return StreamingResponse(
+            stream_feature_collection(collection_id, limit, after_id, conn, request),
+            media_type="application/geo+json",
+        )
 
     feature_service = create_feature_service(collection_id)
     return await feature_service.get_features(conn)
@@ -187,6 +197,11 @@ async def get_feature(
 
     # arealressursflate as a special case until generalised in featureservice
     if collection_id == "arealressursflate":
+        feature = await get_feature_geojson(collection_id, feature_id, conn)
+        return ORJSONResponse(feature)
+    
+    # arealressursgrense as a special case until generalised in featureservice
+    if collection_id == "arealressursgrense":
         feature = await get_feature_geojson(collection_id, feature_id, conn)
         return ORJSONResponse(feature)
 

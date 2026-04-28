@@ -57,6 +57,15 @@ class ArealressursGrunnforhold(Enum):
     ikke_registrert = "99"
 
 
+class ArealressursAvgrensningstype(Enum):
+    arealressursgrensegrense = "4206"
+    ikke_kartlagt_grense = "9300"
+    isbregrense = "3310"
+    lagringsenhentsgrense = "9111"
+    samferdselsgrense = "7200"
+    vanngrense = "3000"
+
+
 class Klassifiseringsmetode(CaseInsensitiveStrEnum):
     sOrto = "sOrto"
     uOrto = "uOrto"
@@ -67,8 +76,26 @@ class Klassifiseringsmetode(CaseInsensitiveStrEnum):
 
 
 class ArealressursGrense(FKBFelles):
-    avgrensing_type: str
+    avgrensing_type: ArealressursAvgrensningstype
     kvalitet: Posisjonskvalitet
+    
+    @staticmethod
+    def db_to_arealressurs_grense(row: dict) -> ArealressursGrense:
+        return ArealressursGrense(
+            identifikasjon=Identifikasjon(
+                lokal_id=row["lokalid"],
+                navnerom=row["identifikasjon_navnerom"],
+                versjon_id=row["identifikasjon_versjonid"],
+            ),
+            oppdateringsdato=row["oppdateringsdato"],
+            datafangstdato=row["datafangstdato"],
+            verifiseringsdato=row["verifiseringsdato"],
+            avgrensing_type=row["avgrensing_type"],
+            kvalitet=Posisjonskvalitet(
+                datafangstmetode=row["datafangstmetode"],
+                noyaktighet=row["noyaktighet"],
+                synbarhet=row["synbarhet"]),
+        )
 
 
 class ArealressursFiktiv(FKBFelles):
@@ -87,20 +114,21 @@ class ArealressursFlate(FKBFelles):
         ),
     )
 
-
-def db_to_arealressurs_flate(row: dict, posisjon: str) -> ArealressursFlate:
-    return ArealressursFlate(
-        identifikasjon=Identifikasjon(
-            lokal_id=row["lokalid"],
-            navnerom=row["identifikasjon_navnerom"],
-            versjon_id=row["identifikasjon_versjonid"],
-        ),
-        oppdateringsdato=row["oppdateringsdato"],
-        datafangstdato=row["datafangstdato"],
-        arealtype=row["arealtype"],
-        treslag=row["treslag"],
-        skogbonitet=row["skogbonitet"],
-        grunnforhold=row["grunnforhold"],
-        klassifiseringsmetode=row["klassifiseringsmetode"],
-        posisjon=orjson.loads(posisjon) if posisjon else None,
-    )
+    @staticmethod
+    def db_to_arealressurs_flate(row: dict, posisjon: str) -> ArealressursFlate:
+        return ArealressursFlate(
+            identifikasjon=Identifikasjon(
+                lokal_id=row["lokalid"],
+                navnerom=row["identifikasjon_navnerom"],
+                versjon_id=row["identifikasjon_versjonid"],
+            ),
+            oppdateringsdato=row["oppdateringsdato"],
+            datafangstdato=row["datafangstdato"],
+            verifiseringsdato=row["verifiseringsdato"],
+            arealtype=row["arealtype"],
+            treslag=row["treslag"],
+            skogbonitet=row["skogbonitet"],
+            grunnforhold=row["grunnforhold"],
+            klassifiseringsmetode=row["klassifiseringsmetode"],
+            posisjon=orjson.loads(posisjon) if posisjon else None,
+        )

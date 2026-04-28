@@ -26,6 +26,7 @@ async def stream_feature_collection(
     # TODO: Implement other features, include type hinting
     generator = {
         "arealressursflate": FKBAR5DAO.get_all_arealressursflate,
+        "arealressursgrense": FKBAR5DAO.get_all_arealressursgrense,
     }[collection_id](conn, limit, after_id)
     count = 0
     feature_id = None
@@ -64,9 +65,10 @@ async def get_feature_geojson(
 
     Sketch function that fits the signature in FeatureService.
     """
-    model, geometry = await {"arealressursflate": FKBAR5DAO.get_arealressursflate}[
-        collection_id
-    ](conn, feature_id)
+    model, geometry = await {
+        "arealressursflate": FKBAR5DAO.get_arealressursflate,
+        "arealressursgrense": FKBAR5DAO.get_arealressursgrense
+    }[collection_id](conn, feature_id)
     return {
         "type": "Feature",
         "id": model.identifikasjon.lokal_id,
@@ -128,6 +130,11 @@ def create_feature_service(collection_id: str):
             "get_one": FKBAR5DAO.get_arealressursflate,
             "get_all": FKBAR5DAO.get_all_arealressursflate,
             "create": FKBAR5DAO.create_arealressursflate,
+        },
+        "arealressursgrense": {
+            "get_one": FKBAR5DAO.get_arealressursgrense,
+            "get_all": FKBAR5DAO.get_all_arealressursgrense,
+            "create": None,
         },
     }[collection_id]
 
