@@ -12,6 +12,60 @@ from app.models.ogc import FeatureCollectionGeoJSON, FeatureGeoJSON
 from app.postgis_backend import PostGISBackend
 
 
+class Accessor(Enum):
+    GET_ONE = 1
+    GET_LIST = 2
+    CREATE = 3
+    PATCH = 4
+    DELETE = 5
+
+
+def get_accessor(collection_id: str, type: Accessor):
+    return {
+        "arealressursflate": {
+            Accessor.GET_ONE: FKBAR5DAO.get_arealressursflate,
+            Accessor.GET_LIST: FKBAR5DAO.get_all_arealressursflate,
+            Accessor.CREATE: FKBAR5DAO.create_arealressursflate,
+            Accessor.PATCH: FKBAR5DAO.patch_arealressursflate,
+            Accessor.DELETE: None,
+        },
+        "jernbaneplattformkant": {
+            Accessor.GET_ONE: PostGISBackend.get_jernbaneplattformkant,
+            Accessor.GET_LIST: PostGISBackend.get_all_jernbaneplattformkant,
+            Accessor.CREATE: PostGISBackend.create_jernbaneplattformkant,
+            Accessor.PATCH: None,
+            Accessor.DELETE: None,
+        },
+        "spormidt": {
+            Accessor.GET_ONE: PostGISBackend.get_spormidt,
+            Accessor.GET_LIST: PostGISBackend.get_all_spormidt,
+            Accessor.CREATE: PostGISBackend.create_jernbaneplattformkant,
+            Accessor.PATCH: None,
+            Accessor.DELETE: None,
+        },
+    }[collection_id][type]
+
+
+def get_one_accessor(collection_id: str):
+    return get_accessor(collection_id, Accessor.GET_ONE)
+
+
+def get_list_accessor(collection_id: str):
+    return get_accessor(collection_id, Accessor.GET_LIST)
+
+
+def get_create_accesor(collection_id: str):
+    return get_accessor(collection_id, Accessor.CREATE)
+
+
+def get_patch_accessor(collection_id: str):
+    return get_accessor(collection_id, Accessor.PATCH)
+
+
+def get_delete_accessor(collection_id: str):
+    return get_accessor(collection_id, Accessor.DELETE)
+
+
 async def stream_feature_collection(
     collection_id: str,
     limit: int | None,
@@ -25,9 +79,7 @@ async def stream_feature_collection(
     when the returned page is full.
     """
     # TODO: Implement other features, include type hinting
-    generator = {
-        "arealressursflate": FKBAR5DAO.get_all_arealressursflate,
-    }[collection_id](conn, limit, after_id)
+    generator = get_list_accessor(collection_id)(conn, limit, after_id)
     count = 0
     feature_id = None
     yield b'{"type":"FeatureCollection","features":['
@@ -65,9 +117,7 @@ async def get_feature_geojson(
 
     Sketch function that fits the signature in FeatureService.
     """
-    model, geometry = await {"arealressursflate": FKBAR5DAO.get_arealressursflate}[
-        collection_id
-    ](conn, feature_id)
+    model, geometry = await get_one_accessor(collection_id)(conn, feature_id)
     return {
         "type": "Feature",
         "id": model.identifikasjon.lokal_id,
@@ -85,9 +135,7 @@ async def patch_feature_geojson(
             target["properties"][key] = type(target["properties"][key])(patch.get(key))
         else:
             target["properties"][key] = patch.get(key)
-    await FKBAR5DAO.patch_arealressursflate(
-        target, conn
-    )  # TODO: Generalize, jira: TT-39
+    await get_patch_accessor(collection_id)(target, conn)
     return target
 
 
