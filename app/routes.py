@@ -165,7 +165,9 @@ async def get_features(
         raise HTTPException(status_code=404, detail="Collection not found")
 
     return StreamingResponse(
-        stream_feature_collection(collection_id, limit, after_id, conn, request),
+        stream_feature_collection(
+            collection_id, limit, after_id, conn, str(request.url)
+        ),
         media_type="application/geo+json",
     )
 

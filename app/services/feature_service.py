@@ -3,12 +3,11 @@ from enum import Enum
 from typing import AsyncGenerator, Tuple
 
 import orjson
-from fastapi import Request
 from psycopg import Connection
 
 from app.db.fkb_ar5_dao import FKBAR5DAO
 from app.models.fkb_felles import FKBFelles
-from app.models.ogc import FeatureCollectionGeoJSON, FeatureGeoJSON
+from app.models.ogc import FeatureGeoJSON
 from app.postgis_backend import PostGISBackend
 
 
@@ -89,17 +88,12 @@ async def get_feature_geojson(
     )
 
 
-async def get_feature_collection(collection_id: str, conn: Connection):
-    features = await get_list_accessor(collection_id)(conn)
-    return FeatureCollectionGeoJSON(features=list(map(to_featuregeojson, features)))
-
-
 async def stream_feature_collection(
     collection_id: str,
     limit: int | None,
     after_id: str | None,
     conn: Connection,
-    request: Request,
+    request_url: str,
 ) -> AsyncGenerator[bytes, None]:
     """Stream a GeoJSON FeatureCollection as bytes, one feature at a time.
 
@@ -131,7 +125,12 @@ async def stream_feature_collection(
         "timeStamp": datetime.datetime.now(datetime.UTC).isoformat(),
     }
     if limit is not None and count == limit:
-        next_url = str(request.url.include_query_params(after_id=feature_id))
+        query_param = (
+            f"&after_id={feature_id}"
+            if "?" in request_url
+            else f"?after_id={feature_id}"
+        )
+        next_url = f"{request_url}{query_param}"
         tail["links"] = [
             {"rel": "next", "href": next_url, "type": "application/geo+json"}
         ]
