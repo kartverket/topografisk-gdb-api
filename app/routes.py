@@ -20,7 +20,6 @@ from app.models.ogc import (
 )
 from app.services.feature_service import (
     create_feature_geojson,
-    get_feature_collection,
     get_feature_geojson,
     patch_feature_geojson,
     stream_feature_collection,
@@ -165,14 +164,10 @@ async def get_features(
     if collection_id not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    # arealressursflate as a special case until generalised in featureservice
-    if collection_id == "arealressursflate":
-        return StreamingResponse(
-            stream_feature_collection(collection_id, limit, after_id, conn, request),
-            media_type="application/geo+json",
-        )
-
-    return await get_feature_collection(collection_id, conn)
+    return StreamingResponse(
+        stream_feature_collection(collection_id, limit, after_id, conn, request),
+        media_type="application/geo+json",
+    )
 
 
 @router.get(

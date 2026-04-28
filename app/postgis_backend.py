@@ -1,8 +1,8 @@
 import uuid
 from pathlib import Path
-from typing import List, Tuple
+from typing import AsyncGenerator, Tuple
 
-from psycopg import Connection
+from psycopg import Connection, Cursor
 
 from app.models.exceptions import FeatureNotFoundError
 from app.models.fkb_bane import (
@@ -58,20 +58,26 @@ class PostGISBackend:
     @staticmethod
     async def get_all_jernbaneplattformkant(
         conn: Connection,
-    ) -> List[Tuple[JernbaneplattformkantProperties, dict]]:
-        result = await conn.execute(
-            query="""
-                SELECT *, ST_AsGeoJSON(grense)::text AS grense_geojson FROM fkb_bane.jernbaneplattformkant
-            """
-        )
-        jernbaneplattformkant_rows = await result.fetchall()
-
-        return list(
-            map(
-                lambda row: (db_to_jernbaneplattformkant(row), row["grense_geojson"]),
-                jernbaneplattformkant_rows,
+        limit: int | None = None,
+        after_id: str | None = None,
+    ) -> AsyncGenerator[Tuple[JernbaneplattformkantProperties, str], None]:
+        cur: Cursor
+        async with conn.cursor(name="jernbaneplattformkant_stream") as cur:
+            await cur.execute(
+                query="""
+                SELECT *, ST_AsGeoJSON(grense)::text AS grense_geojson
+                FROM fkb_bane.jernbaneplattformkant
+                WHERE (%(after_id)s::text IS NULL OR lokalid::text > %(after_id)s::text)
+                ORDER BY lokalid
+                LIMIT %(limit)s
+                """,
+                params={"limit": limit, "after_id": after_id},
             )
-        )
+            async for row in cur:
+                yield (
+                    db_to_jernbaneplattformkant(row),
+                    row["grense_geojson"],
+                )
 
     @staticmethod
     async def create_jernbaneplattformkant(
@@ -170,20 +176,26 @@ class PostGISBackend:
     @staticmethod
     async def get_all_spormidt(
         conn: Connection,
-    ) -> List[Tuple[SpormidtProperties, dict]]:
-        result = await conn.execute(
-            query="""
-                SELECT *, ST_AsGeoJSON(senterlinje)::text AS senterlinje_geojson FROM fkb_bane.spormidt
-            """
-        )
-        spormidt_rows = await result.fetchall()
-
-        return list(
-            map(
-                lambda row: (db_to_spormidt(row), row["senterlinje_geojson"]),
-                spormidt_rows,
+        limit: int | None = None,
+        after_id: str | None = None,
+    ) -> AsyncGenerator[Tuple[SpormidtProperties, str], None]:
+        cur: Cursor
+        async with conn.cursor(name="spormidt_stream") as cur:
+            await cur.execute(
+                query="""
+                SELECT *, ST_AsGeoJSON(senterlinje)::text AS senterlinje_geojson
+                FROM fkb_bane.spormidt
+                WHERE (%(after_id)s::text IS NULL OR lokalid::text > %(after_id)s::text)
+                ORDER BY lokalid
+                LIMIT %(limit)s
+                """,
+                params={"limit": limit, "after_id": after_id},
             )
-        )
+            async for row in cur:
+                yield (
+                    db_to_spormidt(row),
+                    row["senterlinje_geojson"],
+                )
 
     @staticmethod
     async def create_spormidt(properties: dict, geometry: Geometry, conn: Connection):
