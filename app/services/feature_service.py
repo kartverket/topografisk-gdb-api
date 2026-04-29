@@ -19,12 +19,22 @@ class Accessor(Enum):
     DELETE = 5
 
 
+# TODO: remove nonexisting keys such as Accessor.DELETE?
+# In that way we fail with a bang (KeyError) instead of
+# some None type error somewhere?
 DB_ACCESSORS = {
     "arealressursflate": {
         Accessor.GET_ONE: FKBAR5DAO.get_arealressursflate,
         Accessor.GET_LIST: FKBAR5DAO.get_all_arealressursflate,
         Accessor.CREATE: FKBAR5DAO.create_arealressursflate,
         Accessor.PATCH: FKBAR5DAO.patch_arealressursflate,
+        Accessor.DELETE: None,
+    },
+    "arealressursgrense": {
+        Accessor.GET_ONE: FKBAR5DAO.get_arealressursgrense,
+        Accessor.GET_LIST: FKBAR5DAO.get_all_arealressursgrense,
+        Accessor.CREATE: FKBAR5DAO.create_arealressursgrense,
+        Accessor.PATCH: None,
         Accessor.DELETE: None,
     },
     "jernbaneplattformkant": {

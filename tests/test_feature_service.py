@@ -1,172 +1,113 @@
 import json
 from unittest import IsolatedAsyncioTestCase
-from unittest.mock import AsyncMock
+from unittest.mock import patch
 
-from app.models.fkb_bane import (
-    Datafangstmetode,
-    Hoydereferanse,
-    Identifikasjon,
-    JernbaneplattformkantProperties,
-    Jernbanetype,
-    Medium,
-    Posisjonskvalitet,
-    SpormidtProperties,
-)
-from app.models.ogc import FeatureCollectionGeoJSON, FeatureGeoJSON
-from app.postgis_backend import PostGISBackend
+from pydantic import BaseModel
+
+from app.models.fkb_felles import Identifikasjon
+from app.models.ogc import FeatureGeoJSON
 from app.services.feature_service import get_feature_geojson, stream_feature_collection
 
-
-def get_test_geometries():
-    return [
-        json.dumps(
-            {
-                "type": "LineString",
-                "coordinates": [
-                    [267779.71748773, 7038554.33060874, 164.78],
-                    [267791.908078314, 7038540.100148616, 164.36],
-                    [267801.261600452, 7038529.261796265, 163.77],
-                ],
-            }
-        ).encode("utf-8"),
-        json.dumps(
-            {
-                "type": "LineString",
-                "coordinates": [
-                    [267252.60920833, 7039103.461850385, 191.2],
-                    [267248.841590744, 7039100.479157028, 191.03],
-                    [267251.738305063, 7039096.438212778, 190.86],
-                ],
-            }
-        ).encode("utf-8"),
-    ]
+MOCK_GEOMETRY = '{"type":"Polygon","coordinates":[[[10.0,59.0],[10.1,59.0],[10.1,59.1],[10.0,59.0]]]}'
 
 
-class TestJernbaneplattformkantService(IsolatedAsyncioTestCase):
-    @staticmethod
-    def get_test_properties():
-        return [
-            JernbaneplattformkantProperties(
-                identifikasjon=Identifikasjon(
-                    lokal_id="test_id_1", navnerom="navnerom_1", versjon_id="0.0.1"
-                ),
-                oppdateringsdato="2026-01-02",
-                datafangstdato="2026-01-01",
-                kvalitet=Posisjonskvalitet(datafangstmetode=Datafangstmetode["dig"]),
-                medium=Medium["T"],
-            ),
-            JernbaneplattformkantProperties(
-                identifikasjon=Identifikasjon(
-                    lokal_id="test_id_2", navnerom="navnerom_1", versjon_id="0.0.1"
-                ),
-                oppdateringsdato="2026-02-02",
-                datafangstdato="2026-02-01",
-                kvalitet=Posisjonskvalitet(datafangstmetode=Datafangstmetode["dig"]),
-                medium=Medium["T"],
-            ),
-        ]
+class GenericFeature(BaseModel):
+    identifikasjon: Identifikasjon
+    label: str = "test"
 
-    async def test_get_feature(self):
-        properties = TestJernbaneplattformkantService.get_test_properties()
-        geometries = get_test_geometries()
 
-        PostGISBackend.get_jernbaneplattformkant = AsyncMock(
-            return_value=(properties[0], geometries[0])
+def make_generic_feature(lokal_id: str) -> GenericFeature:
+    return GenericFeature(
+        identifikasjon=Identifikasjon(lokal_id=lokal_id, navnerom="test")
+    )
+
+
+async def mock_get_all(conn, limit, after_id):
+    yield (make_generic_feature("id-1"), MOCK_GEOMETRY)
+    yield (make_generic_feature("id-2"), MOCK_GEOMETRY)
+
+
+async def mock_get_one(feature_id, conn):
+    return (make_generic_feature("id-1"), MOCK_GEOMETRY)
+
+
+class TestGetFeatureGeoJSON(IsolatedAsyncioTestCase):
+    async def test_returns_feature_geojson(self):
+        with patch(
+            "app.services.feature_service.get_accessor", return_value=mock_get_one
+        ):
+            feature = await get_feature_geojson("arealressursflate", "id-1", None)
+
+        self.assertIsInstance(feature, FeatureGeoJSON)
+        self.assertEqual("id-1", feature.id)
+        self.assertEqual("Polygon", feature.geometry.type)
+        self.assertIn("label", feature.properties)
+
+
+class TestStreamFeatureCollection(IsolatedAsyncioTestCase):
+    async def _collect(self, **kwargs) -> dict:
+        with patch(
+            "app.services.feature_service.get_accessor", return_value=mock_get_all
+        ):
+            chunks = []
+            async for chunk in stream_feature_collection(**kwargs):
+                chunks.append(chunk)
+            return json.loads(b"".join(chunks))
+
+    async def test_returns_feature_collection(self):
+        body = await self._collect(
+            collection_id="arealressursflate",
+            limit=10,
+            after_id=None,
+            conn=None,
+            request_url="http://test/collections/arealressursflate/items?limit=10",
         )
-        connection = None  # Not necessary since get_jernbaneplattformkant is mocked
+        self.assertEqual("FeatureCollection", body["type"])
+        self.assertEqual(2, len(body["features"]))
 
-        actual_feature: FeatureGeoJSON = await get_feature_geojson(
-            "jernbaneplattformkant", "test_id_1", connection
+    async def test_feature_shape(self):
+        body = await self._collect(
+            collection_id="arealressursflate",
+            limit=10,
+            after_id=None,
+            conn=None,
+            request_url="http://test/collections/arealressursflate/items?limit=10",
         )
+        feature = body["features"][0]
+        self.assertEqual("Feature", feature["type"])
+        self.assertEqual("id-1", feature["id"])
+        self.assertIn("geometry", feature)
+        self.assertIn("label", feature["properties"])
 
-        self.assertEqual("test_id_1", actual_feature.id)
-        self.assertEqual("LineString", actual_feature.geometry.type)
-
-    # async def test_get_features(self):
-    #     properties = self.get_test_properties()
-    #     geometries = get_test_geometries()
-
-    #     expected = [[properties[0], geometries[0]], [properties[1], geometries[1]]]
-
-    #     PostGISBackend.get_all_jernbaneplattformkant = AsyncMock(return_value=expected)
-    #     connection = None  # Not necessary since get_jernbaneplattformkant is mocked
-
-    #     feature_collection: FeatureCollectionGeoJSON = stream_feature_collection(
-    #         collection_id="jernbaneplattformkant",
-    #         limit=None,
-    #         after_id=None,
-    #         conn=connection,
-    #         request_url="dummy.url",
-    #     )
-
-    #     self.assertEqual("test_id_1", feature_collection.features[0].id)
-    #     self.assertEqual("test_id_2", feature_collection.features[1].id)
-    #     self.assertEqual("LineString", feature_collection.features[0].geometry.type)
-    #     self.assertEqual("LineString", feature_collection.features[1].geometry.type)
-
-
-class TestSpormidtService(IsolatedAsyncioTestCase):
-    @staticmethod
-    def get_test_properties():
-        return [
-            SpormidtProperties(
-                identifikasjon=Identifikasjon(
-                    lokal_id="test_id_1", navnerom="navnerom_1", versjon_id="0.0.1"
-                ),
-                oppdateringsdato="2026-01-02",
-                datafangstdato="2026-01-01",
-                kvalitet=Posisjonskvalitet(datafangstmetode=Datafangstmetode["dig"]),
-                medium=Medium["T"],
-                jernbanetype=Jernbanetype["J"],
-                hoydereferanse=Hoydereferanse["fot"],
-            ),
-            SpormidtProperties(
-                identifikasjon=Identifikasjon(
-                    lokal_id="test_id_2", navnerom="navnerom_1", versjon_id="0.0.1"
-                ),
-                oppdateringsdato="2026-02-02",
-                datafangstdato="2026-02-01",
-                kvalitet=Posisjonskvalitet(datafangstmetode=Datafangstmetode["dig"]),
-                medium=Medium["T"],
-                jernbanetype=Jernbanetype["J"],
-                hoydereferanse=Hoydereferanse["fot"],
-            ),
-        ]
-
-    async def test_get_feature(self):
-        properties = TestSpormidtService.get_test_properties()
-        geometries = get_test_geometries()
-
-        PostGISBackend.get_spormidt = AsyncMock(
-            return_value=(properties[0], geometries[0])
+    async def test_number_returned(self):
+        body = await self._collect(
+            collection_id="arealressursflate",
+            limit=10,
+            after_id=None,
+            conn=None,
+            request_url="http://test/collections/arealressursflate/items?limit=10",
         )
-        connection = None  # Not necessary since get_spormidt is mocked
+        self.assertEqual(2, body["numberReturned"])
 
-        actual_feature: FeatureGeoJSON = await get_feature_geojson(
-            "spormidt", "test_id_1", connection
+    async def test_next_link_present_when_page_full(self):
+        body = await self._collect(
+            collection_id="arealressursflate",
+            limit=2,
+            after_id=None,
+            conn=None,
+            request_url="http://test/collections/arealressursflate/items?limit=2",
         )
+        links = {link["rel"]: link["href"] for link in body.get("links", [])}
+        self.assertIn("next", links)
+        self.assertIn("after_id=id-2", links["next"])
 
-        self.assertEqual("test_id_1", actual_feature.id)
-        self.assertEqual("LineString", actual_feature.geometry.type)
-
-    # async def test_get_features(self):
-    #     properties = self.get_test_properties()
-    #     geometries = get_test_geometries()
-
-    #     expected = [[properties[0], geometries[0]], [properties[1], geometries[1]]]
-
-    #     PostGISBackend.get_all_spormidt = AsyncMock(return_value=expected)
-    #     connection = None  # Not necessary since get_spormidt is mocked
-
-    #     feature_collection: FeatureCollectionGeoJSON = stream_feature_collection(
-    #         collection_id="spormidt",
-    #         limit=None,
-    #         after_id=None,
-    #         conn=connection,
-    #         request_url="dummy.url",
-    #     )
-
-    #     self.assertEqual("test_id_1", feature_collection.features[0].id)
-    #     self.assertEqual("test_id_2", feature_collection.features[1].id)
-    #     self.assertEqual("LineString", feature_collection.features[0].geometry.type)
-    #     self.assertEqual("LineString", feature_collection.features[1].geometry.type)
+    async def test_no_next_link_when_page_not_full(self):
+        body = await self._collect(
+            collection_id="arealressursflate",
+            limit=10,
+            after_id=None,
+            conn=None,
+            request_url="http://test/collections/arealressursflate/items?limit=10",
+        )
+        rels = [link["rel"] for link in body.get("links", [])]
+        self.assertNotIn("next", rels)

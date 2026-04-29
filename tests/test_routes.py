@@ -7,13 +7,12 @@ from starlette.testclient import TestClient
 
 from app.config import settings
 from app.database_manager import get_db_conn
-from app.db.fkb_ar5_dao import FKBAR5DAO
 from app.main import app
 from app.models.fkb_ar5 import ArealressursFlate
 from app.models.fkb_felles import Identifikasjon
 
-FAKE_OMRADE = '{"type":"Polygon","coordinates":[[[10.0,59.0],[10.1,59.0],[10.1,59.1],[10.0,59.0]]]}'
-FAKE_POSISJON = '{"type":"Point","coordinates":[10.05,59.05]}'
+MOCK_OMRADE = '{"type":"Polygon","coordinates":[[[10.0,59.0],[10.1,59.0],[10.1,59.1],[10.0,59.0]]]}'
+MOCK_POSISJON = '{"type":"Point","coordinates":[10.05,59.05]}'
 
 
 def make_arealressursflate(lokal_id: str, posisjon: str | None) -> ArealressursFlate:
@@ -30,7 +29,7 @@ def make_arealressursflate(lokal_id: str, posisjon: str | None) -> ArealressursF
     )
 
 
-async def fake_get_all(conn, limit, after_id, target_srid=4326):
+async def mock_get_all(conn, limit, after_id, target_srid=4326):
     yield (make_arealressursflate("id-1", FAKE_POSISJON), FAKE_OMRADE)
     yield (make_arealressursflate("id-2", None), FAKE_OMRADE)
 
@@ -46,8 +45,8 @@ class TestArealressursflateRoute(TestCase):
         self.client = TestClient(app, raise_server_exceptions=True)
 
     def test_get_items_returns_feature_collection(self):
-        with patch.object(
-            FKBAR5DAO, "get_all_arealressursflate", side_effect=fake_get_all
+        with patch(
+            "app.services.feature_service.get_accessor", return_value=mock_get_all
         ):
             response = self.client.get("/collections/arealressursflate/items?limit=10")
 
@@ -57,8 +56,8 @@ class TestArealressursflateRoute(TestCase):
         self.assertEqual(2, len(body["features"]))
 
     def test_feature_shape(self):
-        with patch.object(
-            FKBAR5DAO, "get_all_arealressursflate", side_effect=fake_get_all
+        with patch(
+            "app.services.feature_service.get_accessor", return_value=mock_get_all
         ):
             response = self.client.get("/collections/arealressursflate/items")
 
@@ -70,20 +69,20 @@ class TestArealressursflateRoute(TestCase):
         self.assertEqual("id-1", feature["id"])
 
     def test_geometry_serialisation(self):
-        with patch.object(
-            FKBAR5DAO, "get_all_arealressursflate", side_effect=fake_get_all
+        with patch(
+            "app.services.feature_service.get_accessor", return_value=mock_get_all
         ):
             response = self.client.get("/collections/arealressursflate/items")
 
         features = response.json()["features"]
-        self.assertEqual(json.loads(FAKE_OMRADE), features[0]["geometry"])
+        self.assertEqual(json.loads(MOCK_OMRADE), features[0]["geometry"])
         self.assertEqual(
-            json.loads(FAKE_POSISJON), features[0]["properties"]["posisjon"]
+            json.loads(MOCK_POSISJON), features[0]["properties"]["posisjon"]
         )
 
     def test_null_posisjon_serialised_as_null(self):
-        with patch.object(
-            FKBAR5DAO, "get_all_arealressursflate", side_effect=fake_get_all
+        with patch(
+            "app.services.feature_service.get_accessor", return_value=mock_get_all
         ):
             response = self.client.get("/collections/arealressursflate/items")
 
@@ -98,10 +97,12 @@ class TestArealressursflateRoute(TestCase):
 
     def test_next_link_present_when_page_is_full(self):
         with patch.object(settings, "MAX_PAGE_SIZE", 2):
-            with patch.object(
-                FKBAR5DAO, "get_all_arealressursflate", side_effect=fake_get_all
+            with patch(
+                "app.services.feature_service.get_accessor", return_value=mock_get_all
             ):
-                response = self.client.get("/collections/arealressursflate/items?limit=2")
+                response = self.client.get(
+                    "/collections/arealressursflate/items?limit=2"
+                )
 
         body = response.json()
         links = {link["rel"]: link["href"] for link in body.get("links", [])}
@@ -110,18 +111,20 @@ class TestArealressursflateRoute(TestCase):
 
     def test_no_next_link_when_page_is_not_full(self):
         with patch.object(settings, "MAX_PAGE_SIZE", 10):
-            with patch.object(
-                FKBAR5DAO, "get_all_arealressursflate", side_effect=fake_get_all
+            with patch(
+                "app.services.feature_service.get_accessor", return_value=mock_get_all
             ):
-                response = self.client.get("/collections/arealressursflate/items?limit=10")
+                response = self.client.get(
+                    "/collections/arealressursflate/items?limit=10"
+                )
 
         body = response.json()
         rels = [link["rel"] for link in body.get("links", [])]
         self.assertNotIn("next", rels)
 
 
-async def fake_get_one(lokal_id, conn, target_srid=4326):
-    return (make_arealressursflate("id-1", FAKE_POSISJON), FAKE_OMRADE)
+async def mock_get_one(feature_id, conn, target_srid=4326):
+    return (make_arealressursflate("id-1", MOCK_POSISJON), MOCK_OMRADE)
 
 
 class TestArealressursflateItemRoute(TestCase):
@@ -131,8 +134,8 @@ class TestArealressursflateItemRoute(TestCase):
         self.client = TestClient(app, raise_server_exceptions=True)
 
     def test_get_item_returns_feature(self):
-        with patch.object(
-            FKBAR5DAO, "get_arealressursflate", side_effect=fake_get_one
+        with patch(
+            "app.services.feature_service.get_accessor", return_value=mock_get_one
         ):
             response = self.client.get("/collections/arealressursflate/items/id-1")
 
@@ -142,11 +145,11 @@ class TestArealressursflateItemRoute(TestCase):
         self.assertEqual("id-1", body["id"])
 
     def test_item_geometry(self):
-        with patch.object(
-            FKBAR5DAO, "get_arealressursflate", side_effect=fake_get_one
+        with patch(
+            "app.services.feature_service.get_accessor", return_value=mock_get_one
         ):
             response = self.client.get("/collections/arealressursflate/items/id-1")
 
         body = response.json()
-        self.assertEqual(json.loads(FAKE_OMRADE), body["geometry"])
-        self.assertEqual(json.loads(FAKE_POSISJON), body["properties"]["posisjon"])
+        self.assertEqual(json.loads(MOCK_OMRADE), body["geometry"])
+        self.assertEqual(json.loads(MOCK_POSISJON), body["properties"]["posisjon"])
