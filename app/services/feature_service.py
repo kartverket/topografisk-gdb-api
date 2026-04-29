@@ -45,26 +45,6 @@ def get_accessor(collection_id: str, type: Accessor):
     }[collection_id][type]
 
 
-def get_one_accessor(collection_id: str):
-    return get_accessor(collection_id, Accessor.GET_ONE)
-
-
-def get_list_accessor(collection_id: str):
-    return get_accessor(collection_id, Accessor.GET_LIST)
-
-
-def get_create_accesor(collection_id: str):
-    return get_accessor(collection_id, Accessor.CREATE)
-
-
-def get_patch_accessor(collection_id: str):
-    return get_accessor(collection_id, Accessor.PATCH)
-
-
-def get_delete_accessor(collection_id: str):
-    return get_accessor(collection_id, Accessor.DELETE)
-
-
 def to_featuregeojson(featuredata: Tuple[FKBFelles, str]):
     return FeatureGeoJSON(
         id=featuredata[0].identifikasjon.lokal_id,
@@ -80,7 +60,9 @@ async def get_feature_geojson(
 
     Sketch function that fits the signature in FeatureService.
     """
-    model, geometry = await get_one_accessor(collection_id)(feature_id, conn)
+    model, geometry = await get_accessor(collection_id, Accessor.GET_ONE)(
+        feature_id, conn
+    )
     return FeatureGeoJSON(
         id=model.identifikasjon.lokal_id,
         geometry=orjson.loads(geometry),
@@ -101,7 +83,7 @@ async def stream_feature_collection(
     when the returned page is full.
     """
     # TODO: Implement other features, include type hinting
-    generator = get_list_accessor(collection_id)(conn, limit, after_id)
+    generator = get_accessor(collection_id, Accessor.GET_LIST)(conn, limit, after_id)
     count = 0
     feature_id = None
     yield b'{"type":"FeatureCollection","features":['
@@ -146,14 +128,14 @@ async def patch_feature_geojson(
             target["properties"][key] = type(target["properties"][key])(patch.get(key))
         else:
             target["properties"][key] = patch.get(key)
-    await get_patch_accessor(collection_id)(target, conn)
+    await get_accessor(collection_id, Accessor.PATCH)(target, conn)
     return target
 
 
 async def create_feature_geojson(
     collection_id: str, feature: FeatureGeoJSON, conn: Connection
 ):
-    created_id = await get_create_accesor(collection_id)(
+    created_id = await get_accessor(collection_id, Accessor.CREATE)(
         feature.properties, feature.geometry, conn
     )
     return created_id
