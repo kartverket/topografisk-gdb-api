@@ -78,9 +78,9 @@ class Klassifiseringsmetode(CaseInsensitiveStrEnum):
 class ArealressursGrense(FKBFelles):
     avgrensing_type: ArealressursAvgrensningstype
     kvalitet: Posisjonskvalitet
-    
+
     @staticmethod
-    def db_to_arealressurs_grense(row: dict) -> "ArealressursGrense":
+    def from_db(row: dict) -> "ArealressursGrense":
         return ArealressursGrense(
             identifikasjon=Identifikasjon(
                 lokal_id=row["lokalid"],
@@ -94,7 +94,8 @@ class ArealressursGrense(FKBFelles):
             kvalitet=Posisjonskvalitet(
                 datafangstmetode=row["datafangstmetode"],
                 noyaktighet=row["noyaktighet"],
-                synbarhet=row["synbarhet"]),
+                synbarhet=row["synbarhet"],
+            ),
         )
 
 
@@ -113,7 +114,7 @@ class ArealressursFlate(FKBFelles):
     )
 
     @staticmethod
-    def db_to_arealressurs_flate(row: dict, posisjon: str)  -> "ArealressursFlate":
+    def from_db(row: dict, posisjon: str) -> "ArealressursFlate":
         return ArealressursFlate(
             identifikasjon=Identifikasjon(
                 lokal_id=row["lokalid"],

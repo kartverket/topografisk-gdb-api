@@ -95,17 +95,16 @@ class FKBAR5DAO:
             )
 
         return (
-            ArealressursFlate.db_to_arealressurs_flate(
+            ArealressursFlate.from_db(
                 arealressurs_flate_row, arealressurs_flate_row["posisjon_geojson"]
             ),
             arealressurs_flate_row["omrade_geojson"],
         )
 
-
     @staticmethod
     async def get_arealressursgrense(
-        conn: Connection,
         lokal_id: str,
+        conn: Connection,
     ) -> Tuple[ArealressursGrense, str]:
         """Fetch a single arealressursgrense by lokalid.
 
@@ -125,12 +124,9 @@ class FKBAR5DAO:
             )
 
         return (
-            ArealressursGrense.db_to_arealressurs_grense(
-                arealressurs_grense_row
-            ),
+            ArealressursGrense.from_db(arealressurs_grense_row),
             arealressurs_grense_row["grense_geojson"],
         )
-
 
     @staticmethod
     async def get_all_arealressursflate(
@@ -158,10 +154,9 @@ class FKBAR5DAO:
             )
             async for row in cur:
                 yield (
-                    ArealressursFlate.db_to_arealressurs_flate(row, row["posisjon_geojson"]),
+                    ArealressursFlate.from_db(row, row["posisjon_geojson"]),
                     row["omrade_geojson"],
                 )
-
 
     @staticmethod
     async def get_all_arealressursgrense(
@@ -186,10 +181,9 @@ class FKBAR5DAO:
             )
             async for row in cur:
                 yield (
-                    ArealressursGrense.db_to_arealressurs_grense(row),
+                    ArealressursGrense.from_db(row),
                     row["grense_geojson"],
                 )
-
 
     @staticmethod
     async def create_arealressursflate(feature: FeatureGeoJSON, conn: Connection):
@@ -198,7 +192,7 @@ class FKBAR5DAO:
     @staticmethod
     async def create_arealressursgrense(feature: FeatureGeoJSON, conn: Connection):
         raise NotImplementedError()
-    
+
     @staticmethod
     async def patch_arealressursflate(feature: FeatureGeoJSON, conn: Connection):
         await conn.execute(
