@@ -34,7 +34,7 @@ async def mock_get_one(feature_id, conn):
 class TestGetFeatureGeoJSON(IsolatedAsyncioTestCase):
     async def test_returns_feature_geojson(self):
         with patch(
-            "app.services.feature_service.get_one_accessor", return_value=mock_get_one
+            "app.services.feature_service.get_accessor", return_value=mock_get_one
         ):
             feature = await get_feature_geojson("arealressursflate", "id-1", None)
 
@@ -47,7 +47,7 @@ class TestGetFeatureGeoJSON(IsolatedAsyncioTestCase):
 class TestStreamFeatureCollection(IsolatedAsyncioTestCase):
     async def _collect(self, **kwargs) -> dict:
         with patch(
-            "app.services.feature_service.get_list_accessor", return_value=mock_get_all
+            "app.services.feature_service.get_accessor", return_value=mock_get_all
         ):
             chunks = []
             async for chunk in stream_feature_collection(**kwargs):
