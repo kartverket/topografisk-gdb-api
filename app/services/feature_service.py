@@ -134,7 +134,7 @@ def create_feature_service(collection_id: str):
         "arealressursgrense": {
             "get_one": FKBAR5DAO.get_arealressursgrense,
             "get_all": FKBAR5DAO.get_all_arealressursgrense,
-            "create": None,
+            "create": FKBAR5DAO.create_arealressursgrense,
         },
     }[collection_id]
 

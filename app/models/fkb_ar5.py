@@ -80,7 +80,7 @@ class ArealressursGrense(FKBFelles):
     kvalitet: Posisjonskvalitet
     
     @staticmethod
-    def db_to_arealressurs_grense(row: dict) -> ArealressursGrense:
+    def db_to_arealressurs_grense(row: dict) -> "ArealressursGrense":
         return ArealressursGrense(
             identifikasjon=Identifikasjon(
                 lokal_id=row["lokalid"],
@@ -115,7 +115,7 @@ class ArealressursFlate(FKBFelles):
     )
 
     @staticmethod
-    def db_to_arealressurs_flate(row: dict, posisjon: str) -> ArealressursFlate:
+    def db_to_arealressurs_flate(row: dict, posisjon: str)  -> "ArealressursFlate":
         return ArealressursFlate(
             identifikasjon=Identifikasjon(
                 lokal_id=row["lokalid"],

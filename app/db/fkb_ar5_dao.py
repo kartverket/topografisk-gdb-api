@@ -60,9 +60,9 @@ SELECT
     avgrensing_type::text,
     
     -- composite
-    kvalitet.datafangstmetode::text   AS datafangstmetode,
-    kvalitet.noyaktighet              AS noyaktighet,
-    kvalitet.synbarhet                AS synbarhet,
+    (topo_ar5ngis.edge_attributes.kvalitet).datafangstmetode::text      AS datafangstmetode,
+    (topo_ar5ngis.edge_attributes.kvalitet).noyaktighet::integer        AS noyaktighet,
+    (topo_ar5ngis.edge_attributes.kvalitet).synbarhet::integer          AS synbarhet,
 
     -- geometry
     ST_AsGeoJSON(ST_Transform(grense::geometry, 4326))::text  AS grense_geojson
@@ -190,4 +190,8 @@ class FKBAR5DAO:
 
     @staticmethod
     async def create_arealressursflate(feature: FeatureGeoJSON, conn: Connection):
+        raise NotImplementedError()
+
+    @staticmethod
+    async def create_arealressursgrense(feature: FeatureGeoJSON, conn: Connection):
         raise NotImplementedError()
