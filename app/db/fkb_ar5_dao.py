@@ -8,6 +8,7 @@ from app.models.ogc import FeatureGeoJSON
 
 # Need to unpack for now because of postgis topology
 # TODO: Fix in declarative setup later if possible
+
 AREALRESSURSFLATE_SELECT = """
 SELECT
     -- identity
@@ -33,7 +34,7 @@ SELECT
     grunnforhold::text,
 
     -- geometry
-    ST_AsGeoJSON(ST_Transform(omrade::geometry, 4326))::text  AS omrade_geojson,
+    ST_AsGeoJSON(ST_Transform(omrade::geometry, %(target_srid)s))::text  AS omrade_geojson,
     ST_AsGeoJSON(geometry_properties_position)::text          AS posisjon_geojson
 
 FROM topo_ar5ngis.face_attributes
@@ -76,6 +77,7 @@ class FKBAR5DAO:
     async def get_arealressursflate(
         lokal_id: str,
         conn: Connection,
+        target_srid: int = 4326,
     ) -> Tuple[ArealressursFlate, str]:
         """Fetch a single arealressursflate by lokalid.
 
@@ -85,7 +87,7 @@ class FKBAR5DAO:
         result = await conn.execute(
             AREALRESSURSFLATE_SELECT
             + " WHERE identifikasjon_lokal_id::text = %(lokalid)s",
-            params={"lokalid": lokal_id},
+            params={"lokalid": lokal_id, "target_srid": target_srid},
         )
         arealressurs_flate_row = await result.fetchone()
 
@@ -130,9 +132,7 @@ class FKBAR5DAO:
 
     @staticmethod
     async def get_all_arealressursflate(
-        conn: Connection,
-        limit: int | None = None,
-        after_id: str | None = None,
+        conn: Connection, limit: int | None = None, after_id: str | None = None, target_srid: int = 4326,
     ) -> AsyncGenerator[Tuple[ArealressursFlate, str], None]:
         """Stream arealressursflate rows using a named cursor (ar5_flater_stream).
 
@@ -150,7 +150,7 @@ class FKBAR5DAO:
                 ORDER BY identifikasjon_lokal_id
                 LIMIT %(limit)s
                 """,
-                params={"limit": limit, "after_id": after_id},
+                params={"limit": limit, "after_id": after_id, "target_srid": target_srid},
             )
             async for row in cur:
                 yield (

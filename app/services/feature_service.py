@@ -67,14 +67,14 @@ def to_featuregeojson(featuredata: Tuple[FKBFelles, str]):
 
 
 async def get_feature_geojson(
-    collection_id: str, feature_id: str, conn: Connection
+    collection_id: str, feature_id: str, conn: Connection, target_srid: int = 4326
 ) -> FeatureGeoJSON:
     """Fetch a single feature and return it as a plain GeoJSON dict.
 
     Sketch function that fits the signature in FeatureService.
     """
     model, geometry = await get_accessor(collection_id, Accessor.GET_ONE)(
-        feature_id, conn
+        feature_id, conn, target_srid
     )
     return FeatureGeoJSON(
         id=model.identifikasjon.lokal_id,
@@ -89,6 +89,7 @@ async def stream_feature_collection(
     after_id: str | None,
     conn: Connection,
     request_url: str,
+    target_srid: int = 4326
 ) -> AsyncGenerator[bytes, None]:
     """Stream a GeoJSON FeatureCollection as bytes, one feature at a time.
 
@@ -96,7 +97,7 @@ async def stream_feature_collection(
     when the returned page is full.
     """
     # TODO: Implement other features, include type hinting
-    generator = get_accessor(collection_id, Accessor.GET_LIST)(conn, limit, after_id)
+    generator = get_accessor(collection_id, Accessor.GET_LIST)(conn, limit, after_id, target_srid)
     count = 0
     feature_id = None
     yield b'{"type":"FeatureCollection","features":['

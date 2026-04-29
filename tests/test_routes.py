@@ -29,9 +29,9 @@ def make_arealressursflate(lokal_id: str, posisjon: str | None) -> ArealressursF
     )
 
 
-async def mock_get_all(conn, limit, after_id):
-    yield (make_arealressursflate("id-1", MOCK_POSISJON), MOCK_OMRADE)
-    yield (make_arealressursflate("id-2", None), MOCK_OMRADE)
+async def mock_get_all(conn, limit, after_id, target_srid=4326):
+    yield (make_arealressursflate("id-1", FAKE_POSISJON), FAKE_OMRADE)
+    yield (make_arealressursflate("id-2", None), FAKE_OMRADE)
 
 
 async def mock_db_conn():
@@ -123,7 +123,7 @@ class TestArealressursflateRoute(TestCase):
         self.assertNotIn("next", rels)
 
 
-async def mock_get_one(feature_id, conn):
+async def mock_get_one(feature_id, conn, target_srid=4326):
     return (make_arealressursflate("id-1", MOCK_POSISJON), MOCK_OMRADE)
 
 
