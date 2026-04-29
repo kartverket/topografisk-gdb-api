@@ -1,7 +1,7 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, ORJSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from psycopg import Connection
 
 from app.config import settings
@@ -19,8 +19,9 @@ from app.models.ogc import (
     Link,
 )
 from app.services.feature_service import (
-    create_feature_service,
+    create_feature_geojson,
     get_feature_geojson,
+    patch_feature_geojson,
     stream_feature_collection,
 )
 
@@ -167,21 +168,12 @@ async def get_features(
     if collection_id not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    # arealressursflate as a special case until generalised in featureservice
-    if collection_id == "arealressursflate":
-        return StreamingResponse(
-            stream_feature_collection(collection_id, limit, after_id, conn, request),
-            media_type="application/geo+json",
-        )
-    # arealressursgrense as another special case until generalised in featureservice
-    if collection_id == "arealressursgrense":
-        return StreamingResponse(
-            stream_feature_collection(collection_id, limit, after_id, conn, request),
-            media_type="application/geo+json",
-        )
-
-    feature_service = create_feature_service(collection_id)
-    return await feature_service.get_features(conn)
+    return StreamingResponse(
+        stream_feature_collection(
+            collection_id, limit, after_id, conn, str(request.url)
+        ),
+        media_type="application/geo+json",
+    )
 
 
 @router.get(
@@ -195,19 +187,8 @@ async def get_feature(
     if collection_id not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    # arealressursflate as a special case until generalised in featureservice
-    if collection_id == "arealressursflate":
-        feature = await get_feature_geojson(collection_id, feature_id, conn)
-        return ORJSONResponse(feature)
-    
-    # arealressursgrense as a special case until generalised in featureservice
-    if collection_id == "arealressursgrense":
-        feature = await get_feature_geojson(collection_id, feature_id, conn)
-        return ORJSONResponse(feature)
-
-    feature_service = create_feature_service(collection_id)
     try:
-        return await feature_service.get_feature(feature_id, conn)
+        return await get_feature_geojson(collection_id, feature_id, conn)
     except FeatureNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -224,8 +205,7 @@ async def create_feature(
     if collection_id not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    feature_service = create_feature_service(collection_id)
-    created_id = await feature_service.create_feature(feature, conn)
+    created_id = await create_feature_geojson(collection_id, feature, conn)
     headers = {
         "Location": f"{request.base_url}collections/{collection_id}/items/{created_id}"
     }
@@ -238,9 +218,12 @@ async def create_feature(
     status_code=200,
 )
 async def update_feature(
-    collection_id: str, feature: FeatureGeoJSON, conn: Connection = Depends(get_db_conn)
+    collection_id: str,
+    feature_id: str,
+    patch: dict,
+    conn: Connection = Depends(get_db_conn),
 ):
-    raise NotImplementedError()
+    return await patch_feature_geojson(collection_id, feature_id, patch, conn)
 
 
 @router.delete("/collections/{collection_id}/items/{feature_id}", status_code=200)

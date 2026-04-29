@@ -108,10 +108,8 @@ class ArealressursFlate(FKBFelles):
     skogbonitet: ArealressursSkogbonitet
     grunnforhold: ArealressursGrunnforhold
     klassifiseringsmetode: Klassifiseringsmetode
-    posisjon: Optional[dict] = (
-        Field(
-            None, json_schema_extra={"type": "object", "description": "GeoJSON Point"}
-        ),
+    posisjon: Optional[dict] = Field(
+        None, json_schema_extra={"type": "object", "description": "GeoJSON Point"}
     )
 
     @staticmethod

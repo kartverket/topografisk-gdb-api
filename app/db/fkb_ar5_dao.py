@@ -1,6 +1,6 @@
 from typing import AsyncGenerator, Tuple
 
-from psycopg import Connection
+from psycopg import Connection, Cursor
 
 from app.models.exceptions import FeatureNotFoundError
 from app.models.fkb_ar5 import ArealressursFlate, ArealressursGrense
@@ -74,8 +74,8 @@ FROM topo_ar5ngis.edge_attributes
 class FKBAR5DAO:
     @staticmethod
     async def get_arealressursflate(
-        conn: Connection,
         lokal_id: str,
+        conn: Connection,
     ) -> Tuple[ArealressursFlate, str]:
         """Fetch a single arealressursflate by lokalid.
 
@@ -134,7 +134,9 @@ class FKBAR5DAO:
 
     @staticmethod
     async def get_all_arealressursflate(
-        conn: Connection, limit: int | None = None, after_id: str | None = None
+        conn: Connection,
+        limit: int | None = None,
+        after_id: str | None = None,
     ) -> AsyncGenerator[Tuple[ArealressursFlate, str], None]:
         """Stream arealressursflate rows using a named cursor (ar5_flater_stream).
 
@@ -143,7 +145,8 @@ class FKBAR5DAO:
         pass after_id to start from the row after the given lokalid, ordered
         by lokalid. limit=None returns all matching rows.
         """
-        async with conn.cursor(name="ar5_flater_stream") as cur:
+        cur: Cursor
+        async with conn.cursor(name="ar5_stream") as cur:
             await cur.execute(
                 AREALRESSURSFLATE_SELECT
                 + """
@@ -195,3 +198,37 @@ class FKBAR5DAO:
     @staticmethod
     async def create_arealressursgrense(feature: FeatureGeoJSON, conn: Connection):
         raise NotImplementedError()
+    
+    @staticmethod
+    async def patch_arealressursflate(feature: FeatureGeoJSON, conn: Connection):
+        await conn.execute(
+            """UPDATE topo_ar5ngis.face_attributes 
+            SET
+            datafangstdato=%(datafangstdato)s, 
+            informasjon=%(informasjon)s, 
+            verifiseringsdato=%(verifiseringsdato)s, 
+            klassifiseringsmetode=%(klassifiseringsmetode)s, 
+            oppdateringsdato=%(oppdateringsdato)s, 
+            arealtype=%(arealtype)s, 
+            treslag=%(treslag)s, 
+            skogbonitet=%(skogbonitet)s, 
+            grunnforhold=%(grunnforhold)s,
+            registreringsversjon=%(registreringsversjon)s
+            WHERE identifikasjon_lokal_id::text = %(lokalid)s; 
+            """,
+            params={
+                "lokalid": feature.properties["identifikasjon"]["lokal_id"],
+                "datafangstdato": feature.properties["datafangstdato"],
+                "informasjon": feature.properties["informasjon"],
+                "verifiseringsdato": feature.properties["verifiseringsdato"],
+                "klassifiseringsmetode": feature.properties[
+                    "klassifiseringsmetode"
+                ].value,
+                "oppdateringsdato": feature.properties["oppdateringsdato"],
+                "arealtype": feature.properties["arealtype"].value,
+                "treslag": feature.properties["treslag"].value,
+                "skogbonitet": feature.properties["skogbonitet"].value,
+                "grunnforhold": feature.properties["grunnforhold"].value,
+                "registreringsversjon": feature.properties["registreringsversjon"],
+            },
+        )
