@@ -30,7 +30,7 @@ def make_arealressursflate(lokal_id: str, posisjon: str | None) -> ArealressursF
     )
 
 
-async def fake_get_all(conn, limit, after_id):
+async def fake_get_all(conn, limit, after_id, target_srid=4326):
     yield (make_arealressursflate("id-1", FAKE_POSISJON), FAKE_OMRADE)
     yield (make_arealressursflate("id-2", None), FAKE_OMRADE)
 
@@ -120,7 +120,7 @@ class TestArealressursflateRoute(TestCase):
         self.assertNotIn("next", rels)
 
 
-async def fake_get_one(lokal_id, conn):
+async def fake_get_one(lokal_id, conn, target_srid=4326):
     return (make_arealressursflate("id-1", FAKE_POSISJON), FAKE_OMRADE)
 
 

@@ -1,10 +1,10 @@
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from psycopg import Connection
 
-from app.config import settings
+from app.config import settings, SUPPORTED_CRS
 from app.database_manager import get_db_conn
 from app.models.exceptions import FeatureNotFoundError
 from app.models.ogc import (
@@ -109,6 +109,7 @@ async def get_conformance():
         conforms_to=[
             "http://www.opengis.net/spec/ogcapi-features-1/1.0/req/core",
             "http://www.opengis.net/spec/ogcapi-features-1/1.0/req/geojson",
+            "http://www.opengis.net/spec/ogcapi-features-2/1.0/req/crs",
         ]
     )
 
@@ -152,6 +153,7 @@ async def get_features(
     datetime: str | None = None,
     limit: int = Query(default=10, ge=0),
     after_id: str | None = None,
+    crs: str = Query(default="http://www.opengis.net/def/crs/OGC/1.3/CRS84"),
     conn: Connection = Depends(get_db_conn),
 ):
     # Check max page size. Checked here instead of in Query(le=1000) for easier testing
@@ -164,11 +166,16 @@ async def get_features(
     if collection_id not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Collection not found")
 
+    if crs not in SUPPORTED_CRS:
+        raise HTTPException(status_code=400, detail=f"Unsupported CRS: {crs}")
+    target_srid = SUPPORTED_CRS[crs]
+
     return StreamingResponse(
         stream_feature_collection(
-            collection_id, limit, after_id, conn, str(request.url)
+            collection_id, limit, after_id, conn, str(request.url), target_srid
         ),
         media_type="application/geo+json",
+        headers={"Content-Crs": f"<{crs}>"},
     )
 
 
@@ -178,13 +185,20 @@ async def get_features(
     status_code=200,
 )  # Hent en feature
 async def get_feature(
-    collection_id: str, feature_id: str, conn: Connection = Depends(get_db_conn)
+    collection_id: str, feature_id: str, response: Response, crs: str = Query(default="http://www.opengis.net/def/crs/OGC/1.3/CRS84"), conn: Connection = Depends(get_db_conn),
 ):
     if collection_id not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Collection not found")
 
+    if crs not in SUPPORTED_CRS:
+        raise HTTPException(status_code=400, detail=f"Unsupported CRS: {crs}")
+    target_srid = SUPPORTED_CRS[crs]
+
     try:
-        return await get_feature_geojson(collection_id, feature_id, conn)
+        feature = await get_feature_geojson(collection_id, feature_id, conn, target_srid)
+        response.headers["Content-Crs"] = f"<{crs}>"
+        return feature
+
     except FeatureNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

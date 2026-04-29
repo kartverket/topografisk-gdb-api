@@ -3,6 +3,7 @@ from typing import Optional, List, Union
 from pydantic import BaseModel, ConfigDict, Field
 from geojson_pydantic import Point, MultiPoint, LineString, MultiLineString, Polygon, MultiPolygon, GeometryCollection
 
+from app.config import SUPPORTED_CRS
 
 Geometry = Union[
     Point,
@@ -59,7 +60,12 @@ class Collection(OGCBase):
     links: List[Link]
     extent: Optional[Extent] = None
     item_type: Optional[str] = Field(None, alias="itemType")
-    crs: List[str] = ["EPSG:5973"]
+    crs: List[str] = list(SUPPORTED_CRS)
+    storage_crs: str = Field(
+        "http://www.opengis.net/def/crs/EPSG/0/5973",
+        alias="storageCrs"
+    )
+
 
 class Collections(OGCBase):
     links: List[Link]

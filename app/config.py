@@ -57,3 +57,9 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+SUPPORTED_CRS = {
+    "http://www.opengis.net/def/crs/OGC/1.3/CRS84": 4326,
+    "http://www.opengis.net/def/crs/EPSG/0/5973": 5973,
+    "http://www.opengis.net/def/crs/EPSG/0/25833": 25833,
+}
