@@ -19,30 +19,33 @@ class Accessor(Enum):
     DELETE = 5
 
 
-def get_accessor(collection_id: str, type: Accessor):
-    return {
-        "arealressursflate": {
-            Accessor.GET_ONE: FKBAR5DAO.get_arealressursflate,
-            Accessor.GET_LIST: FKBAR5DAO.get_all_arealressursflate,
-            Accessor.CREATE: FKBAR5DAO.create_arealressursflate,
-            Accessor.PATCH: FKBAR5DAO.patch_arealressursflate,
-            Accessor.DELETE: None,
-        },
-        "jernbaneplattformkant": {
-            Accessor.GET_ONE: PostGISBackend.get_jernbaneplattformkant,
-            Accessor.GET_LIST: PostGISBackend.get_all_jernbaneplattformkant,
-            Accessor.CREATE: PostGISBackend.create_jernbaneplattformkant,
-            Accessor.PATCH: None,
-            Accessor.DELETE: None,
-        },
-        "spormidt": {
-            Accessor.GET_ONE: PostGISBackend.get_spormidt,
-            Accessor.GET_LIST: PostGISBackend.get_all_spormidt,
-            Accessor.CREATE: PostGISBackend.create_spormidt,
-            Accessor.PATCH: None,
-            Accessor.DELETE: None,
-        },
-    }[collection_id][type]
+DB_ACCESSORS = {
+    "arealressursflate": {
+        Accessor.GET_ONE: FKBAR5DAO.get_arealressursflate,
+        Accessor.GET_LIST: FKBAR5DAO.get_all_arealressursflate,
+        Accessor.CREATE: FKBAR5DAO.create_arealressursflate,
+        Accessor.PATCH: FKBAR5DAO.patch_arealressursflate,
+        Accessor.DELETE: None,
+    },
+    "jernbaneplattformkant": {
+        Accessor.GET_ONE: PostGISBackend.get_jernbaneplattformkant,
+        Accessor.GET_LIST: PostGISBackend.get_all_jernbaneplattformkant,
+        Accessor.CREATE: PostGISBackend.create_jernbaneplattformkant,
+        Accessor.PATCH: None,
+        Accessor.DELETE: None,
+    },
+    "spormidt": {
+        Accessor.GET_ONE: PostGISBackend.get_spormidt,
+        Accessor.GET_LIST: PostGISBackend.get_all_spormidt,
+        Accessor.CREATE: PostGISBackend.create_spormidt,
+        Accessor.PATCH: None,
+        Accessor.DELETE: None,
+    },
+}
+
+
+def get_accessor(collection_id: str, accessor_type: Accessor):
+    return DB_ACCESSORS[collection_id][accessor_type]
 
 
 def to_featuregeojson(featuredata: Tuple[FKBFelles, str]):
