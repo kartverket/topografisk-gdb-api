@@ -1,6 +1,6 @@
 from typing import AsyncGenerator, Tuple
 
-from psycopg import Connection
+from psycopg import Connection, Cursor
 
 from app.models.exceptions import FeatureNotFoundError
 from app.models.fkb_ar5 import ArealressursFlate, db_to_arealressurs_flate
@@ -43,8 +43,8 @@ FROM topo_ar5ngis.face_attributes
 class FKBAR5DAO:
     @staticmethod
     async def get_arealressursflate(
-        conn: Connection,
         lokal_id: str,
+        conn: Connection,
     ) -> Tuple[ArealressursFlate, str]:
         """Fetch a single arealressursflate by lokalid.
 
@@ -72,7 +72,9 @@ class FKBAR5DAO:
 
     @staticmethod
     async def get_all_arealressursflate(
-        conn: Connection, limit: int | None = None, after_id: str | None = None
+        conn: Connection,
+        limit: int | None = None,
+        after_id: str | None = None,
     ) -> AsyncGenerator[Tuple[ArealressursFlate, str], None]:
         """Stream arealressursflate rows using a named cursor (ar5_stream).
 
@@ -81,6 +83,7 @@ class FKBAR5DAO:
         pass after_id to start from the row after the given lokalid, ordered
         by lokalid. limit=None returns all matching rows.
         """
+        cur: Cursor
         async with conn.cursor(name="ar5_stream") as cur:
             await cur.execute(
                 AREALRESSURSFLATE_SELECT
@@ -118,18 +121,19 @@ class FKBAR5DAO:
             registreringsversjon=%(registreringsversjon)s
             WHERE identifikasjon_lokal_id::text = %(lokalid)s; 
             """,
-            params = {
-                "lokalid":feature["properties"]["identifikasjon"]["lokal_id"],
-                "datafangstdato": feature["properties"]["datafangstdato"],
-                "informasjon": feature["properties"]["informasjon"],
-                "verifiseringsdato": feature["properties"]["verifiseringsdato"],
-                "klassifiseringsmetode": feature["properties"]["klassifiseringsmetode"].value,
-                "oppdateringsdato": feature["properties"]["oppdateringsdato"],
-                "arealtype": feature["properties"]["arealtype"].value,
-                "treslag": feature["properties"]["treslag"].value,
-                "skogbonitet": feature["properties"]["skogbonitet"].value,
-                "grunnforhold": feature["properties"]["grunnforhold"].value,
-                "registreringsversjon": feature["properties"]["registreringsversjon"]}
+            params={
+                "lokalid": feature.properties["identifikasjon"]["lokal_id"],
+                "datafangstdato": feature.properties["datafangstdato"],
+                "informasjon": feature.properties["informasjon"],
+                "verifiseringsdato": feature.properties["verifiseringsdato"],
+                "klassifiseringsmetode": feature.properties[
+                    "klassifiseringsmetode"
+                ].value,
+                "oppdateringsdato": feature.properties["oppdateringsdato"],
+                "arealtype": feature.properties["arealtype"].value,
+                "treslag": feature.properties["treslag"].value,
+                "skogbonitet": feature.properties["skogbonitet"].value,
+                "grunnforhold": feature.properties["grunnforhold"].value,
+                "registreringsversjon": feature.properties["registreringsversjon"],
+            },
         )
-
-
