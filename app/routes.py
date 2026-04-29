@@ -29,6 +29,7 @@ COLLECTIONS = [
     "jernbaneplattformkant",
     "spormidt",
     "arealressursflate",
+    "arealressursgrense",
 ]
 
 COLLECTION_METADATA = {
@@ -40,6 +41,9 @@ COLLECTION_METADATA = {
     ),
     "arealressursflate": CollectionMetadata(
         title="Arealressurs flate", description="Inneholder arealressurs flate"
+    ),
+    "arealressursgrense": CollectionMetadata(
+        title="Arealressurs grense", description="Inneholder arealressurs grense"
     ),
 }
 
