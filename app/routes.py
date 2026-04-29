@@ -1,5 +1,3 @@
-from typing import List
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from psycopg import Connection
@@ -148,7 +146,7 @@ async def get_collection(collection_id: str, request: Request):
 async def get_features(
     collection_id: str,
     request: Request,
-    bbox: List[float] | None = None,
+    bbox: str | None = None,
     datetime: str | None = None,
     limit: int = Query(default=10, ge=0),
     after_id: str | None = None,
