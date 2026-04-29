@@ -22,7 +22,7 @@ def make_generic_feature(lokal_id: str) -> GenericFeature:
     )
 
 
-async def mock_get_all(conn, limit, after_id):
+async def mock_get_all(conn, bbox, datetime_query, limit, after_id):
     yield (make_generic_feature("id-1"), MOCK_GEOMETRY)
     yield (make_generic_feature("id-2"), MOCK_GEOMETRY)
 
@@ -57,6 +57,8 @@ class TestStreamFeatureCollection(IsolatedAsyncioTestCase):
     async def test_returns_feature_collection(self):
         body = await self._collect(
             collection_id="arealressursflate",
+            bbox=None,
+            datetime_query=None,
             limit=10,
             after_id=None,
             conn=None,
@@ -68,6 +70,8 @@ class TestStreamFeatureCollection(IsolatedAsyncioTestCase):
     async def test_feature_shape(self):
         body = await self._collect(
             collection_id="arealressursflate",
+            bbox=None,
+            datetime_query=None,
             limit=10,
             after_id=None,
             conn=None,
@@ -82,6 +86,8 @@ class TestStreamFeatureCollection(IsolatedAsyncioTestCase):
     async def test_number_returned(self):
         body = await self._collect(
             collection_id="arealressursflate",
+            bbox=None,
+            datetime_query=None,
             limit=10,
             after_id=None,
             conn=None,
@@ -92,6 +98,8 @@ class TestStreamFeatureCollection(IsolatedAsyncioTestCase):
     async def test_next_link_present_when_page_full(self):
         body = await self._collect(
             collection_id="arealressursflate",
+            bbox=None,
+            datetime_query=None,
             limit=2,
             after_id=None,
             conn=None,
@@ -104,6 +112,8 @@ class TestStreamFeatureCollection(IsolatedAsyncioTestCase):
     async def test_no_next_link_when_page_not_full(self):
         body = await self._collect(
             collection_id="arealressursflate",
+            bbox=None,
+            datetime_query=None,
             limit=10,
             after_id=None,
             conn=None,

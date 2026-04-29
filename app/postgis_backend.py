@@ -1,6 +1,6 @@
 import uuid
 from pathlib import Path
-from typing import AsyncGenerator, Tuple
+from typing import AsyncGenerator, List, Tuple
 
 from psycopg import Connection, Cursor
 
@@ -58,6 +58,8 @@ class PostGISBackend:
     @staticmethod
     async def get_all_jernbaneplattformkant(
         conn: Connection,
+        bbox: List[float] | None = None,
+        datetime_query: str | None = None,
         limit: int | None = None,
         after_id: str | None = None,
     ) -> AsyncGenerator[Tuple[JernbaneplattformkantProperties, str], None]:
@@ -176,6 +178,8 @@ class PostGISBackend:
     @staticmethod
     async def get_all_spormidt(
         conn: Connection,
+        bbox: List[float] | None = None,
+        datetime_query: str | None = None,
         limit: int | None = None,
         after_id: str | None = None,
     ) -> AsyncGenerator[Tuple[SpormidtProperties, str], None]:

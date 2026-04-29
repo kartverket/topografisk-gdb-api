@@ -1,6 +1,6 @@
 import datetime
 from enum import Enum
-from typing import AsyncGenerator, Tuple
+from typing import AsyncGenerator, List, Tuple
 
 import orjson
 from psycopg import Connection
@@ -75,6 +75,8 @@ async def get_feature_geojson(
 
 async def stream_feature_collection(
     collection_id: str,
+    bbox: List[float],
+    datetime_query: str | None,
     limit: int | None,
     after_id: str | None,
     conn: Connection,
@@ -86,7 +88,13 @@ async def stream_feature_collection(
     when the returned page is full.
     """
     # TODO: Implement other features, include type hinting
-    generator = get_accessor(collection_id, Accessor.GET_LIST)(conn, limit, after_id)
+    generator = get_accessor(collection_id, Accessor.GET_LIST)(
+        conn=conn,
+        bbox=bbox,
+        datetime_query=datetime_query,
+        limit=limit,
+        after_id=after_id,
+    )
     count = 0
     feature_id = None
     yield b'{"type":"FeatureCollection","features":['

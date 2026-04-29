@@ -144,11 +144,11 @@ async def get_collection(collection_id: str, request: Request):
     "/collections/{collection_id}/items",
     response_model=FeatureCollectionGeoJSON,
     status_code=200,
-)  # Hent flere features
+)
 async def get_features(
     collection_id: str,
     request: Request,
-    bbox: List[float] = Query(default=[]),
+    bbox: List[float] | None = None,
     datetime: str | None = None,
     limit: int = Query(default=10, ge=0),
     after_id: str | None = None,
@@ -166,7 +166,13 @@ async def get_features(
 
     return StreamingResponse(
         stream_feature_collection(
-            collection_id, limit, after_id, conn, str(request.url)
+            collection_id=collection_id,
+            bbox=bbox,
+            datetime_query=datetime,
+            limit=limit,
+            after_id=after_id,
+            conn=conn,
+            request_url=str(request.url),
         ),
         media_type="application/geo+json",
     )
@@ -176,9 +182,11 @@ async def get_features(
     "/collections/{collection_id}/items/{feature_id}",
     response_model=FeatureGeoJSON,
     status_code=200,
-)  # Hent en feature
+)
 async def get_feature(
-    collection_id: str, feature_id: str, conn: Connection = Depends(get_db_conn)
+    collection_id: str,
+    feature_id: str,
+    conn: Connection = Depends(get_db_conn),
 ):
     if collection_id not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Collection not found")
@@ -190,8 +198,10 @@ async def get_feature(
 
 
 @router.post(
-    "/collections/{collection_id}/items", response_model=str, status_code=201
-)  # lag en ny feature
+    "/collections/{collection_id}/items",
+    response_model=str,
+    status_code=201,
+)
 async def create_feature(
     collection_id: str,
     feature: FeatureGeoJSON,

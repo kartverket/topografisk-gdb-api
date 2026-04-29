@@ -1,4 +1,4 @@
-from typing import AsyncGenerator, Tuple
+from typing import AsyncGenerator, List, Tuple
 
 from psycopg import Connection, Cursor
 
@@ -73,6 +73,8 @@ class FKBAR5DAO:
     @staticmethod
     async def get_all_arealressursflate(
         conn: Connection,
+        bbox: List[float] | None = None,
+        datetime_query: str | None = None,
         limit: int | None = None,
         after_id: str | None = None,
     ) -> AsyncGenerator[Tuple[ArealressursFlate, str], None]:
