@@ -55,7 +55,7 @@ def to_featuregeojson(featuredata: Tuple[FKBFelles, str]):
 
 async def get_feature_geojson(
     collection_id: str, feature_id: str, conn: Connection
-) -> dict:
+) -> FeatureGeoJSON:
     """Fetch a single feature and return it as a plain GeoJSON dict.
 
     Sketch function that fits the signature in FeatureService.
@@ -124,10 +124,10 @@ async def patch_feature_geojson(
 ):
     target = await get_feature_geojson(collection_id, feature_id, conn)
     for key, value in patch.items():
-        if isinstance(target["properties"][key], Enum):
-            target["properties"][key] = type(target["properties"][key])(patch.get(key))
+        if isinstance(target.properties[key], Enum):
+            target.properties[key] = type(target.properties[key])(patch.get(key))
         else:
-            target["properties"][key] = patch.get(key)
+            target.properties[key] = patch.get(key)
     await get_accessor(collection_id, Accessor.PATCH)(target, conn)
     return target
 

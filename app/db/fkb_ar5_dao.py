@@ -122,18 +122,18 @@ class FKBAR5DAO:
             WHERE identifikasjon_lokal_id::text = %(lokalid)s; 
             """,
             params={
-                "lokalid": feature["properties"]["identifikasjon"]["lokal_id"],
-                "datafangstdato": feature["properties"]["datafangstdato"],
-                "informasjon": feature["properties"]["informasjon"],
-                "verifiseringsdato": feature["properties"]["verifiseringsdato"],
-                "klassifiseringsmetode": feature["properties"][
+                "lokalid": feature.properties["identifikasjon"]["lokal_id"],
+                "datafangstdato": feature.properties["datafangstdato"],
+                "informasjon": feature.properties["informasjon"],
+                "verifiseringsdato": feature.properties["verifiseringsdato"],
+                "klassifiseringsmetode": feature.properties[
                     "klassifiseringsmetode"
                 ].value,
-                "oppdateringsdato": feature["properties"]["oppdateringsdato"],
-                "arealtype": feature["properties"]["arealtype"].value,
-                "treslag": feature["properties"]["treslag"].value,
-                "skogbonitet": feature["properties"]["skogbonitet"].value,
-                "grunnforhold": feature["properties"]["grunnforhold"].value,
-                "registreringsversjon": feature["properties"]["registreringsversjon"],
+                "oppdateringsdato": feature.properties["oppdateringsdato"],
+                "arealtype": feature.properties["arealtype"].value,
+                "treslag": feature.properties["treslag"].value,
+                "skogbonitet": feature.properties["skogbonitet"].value,
+                "grunnforhold": feature.properties["grunnforhold"].value,
+                "registreringsversjon": feature.properties["registreringsversjon"],
             },
         )
