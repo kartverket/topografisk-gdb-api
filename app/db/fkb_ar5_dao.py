@@ -33,7 +33,7 @@ SELECT
     grunnforhold::text,
 
     -- geometry
-    ST_AsGeoJSON(ST_Transform(omrade::geometry, 25833))::text  AS omrade_geojson,
+    ST_AsGeoJSON(ST_Transform(omrade::geometry, 4326))::text  AS omrade_geojson,
     ST_AsGeoJSON(geometry_properties_position)::text          AS posisjon_geojson
 
 FROM topo_ar5ngis.face_attributes
@@ -152,7 +152,7 @@ class FKBAR5DAO:
 
             if bbox is not None:
                 query += """
-                AND ST_Intersects(ST_Transform(omrade::geometry, 25833), ST_MakeEnvelope(%(lower_left_x)s, %(lower_left_y)s, %(upper_right_x)s, %(upper_right_y)s, 25833))
+                AND ST_Intersects(ST_Transform(omrade::geometry, 4326), ST_MakeEnvelope(%(lower_left_x)s, %(lower_left_y)s, %(upper_right_x)s, %(upper_right_y)s, 4326))
                 """
 
             query += """
