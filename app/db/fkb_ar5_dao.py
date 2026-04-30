@@ -58,7 +58,7 @@ SELECT
 
     -- enum codes
     avgrensing_type::text,
-    
+
     -- composite
     (topo_ar5ngis.edge_attributes.kvalitet).datafangstmetode::text      AS datafangstmetode,
     (topo_ar5ngis.edge_attributes.kvalitet).noyaktighet::integer        AS noyaktighet,
@@ -183,7 +183,11 @@ class FKBAR5DAO:
 
     @staticmethod
     async def get_all_arealressursgrense(
-        conn: Connection, limit: int | None = None, after_id: str | None = None
+        conn: Connection,
+        bbox: List[float] | None = None,
+        datetime_query: str | None = None,
+        limit: int | None = None,
+        after_id: str | None = None,
     ) -> AsyncGenerator[Tuple[ArealressursGrense, str], None]:
         """Stream arealressursgrense rows using a named cursor (ar5_grenser_stream).
 
@@ -193,14 +197,35 @@ class FKBAR5DAO:
         by lokalid. limit=None returns all matching rows.
         """
         async with conn.cursor(name="ar5_grenser_stream") as cur:
+            query = AREALRESSURSGRENSE_SELECT
+            query += """
+            WHERE (%(after_id)s::text IS NULL OR identifikasjon_lokal_id::text > %(after_id)s::text)
+            """
+
+            if bbox is not None:
+                query += """
+                AND ST_Intersects(ST_Transform(grense::geometry, 4326), ST_MakeEnvelope(%(lower_left_x)s, %(lower_left_y)s, %(upper_right_x)s, %(upper_right_y)s, 4326))
+                """
+
+            query += """
+            ORDER BY identifikasjon_lokal_id
+            LIMIT %(limit)s
+            """
+
+            params = {
+                "limit": limit,
+                "after_id": after_id,
+            }
+
+            if bbox is not None:
+                params["lower_left_x"] = bbox[0]
+                params["lower_left_y"] = bbox[1]
+                params["upper_right_x"] = bbox[2]
+                params["upper_right_y"] = bbox[3]
+
             await cur.execute(
-                AREALRESSURSGRENSE_SELECT
-                + """
-                WHERE (%(after_id)s::text IS NULL OR identifikasjon_lokal_id::text > %(after_id)s::text)
-                ORDER BY identifikasjon_lokal_id
-                LIMIT %(limit)s
-                """,
-                params={"limit": limit, "after_id": after_id},
+                query=query,
+                params=params,
             )
             async for row in cur:
                 yield (

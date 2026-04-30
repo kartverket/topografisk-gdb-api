@@ -65,15 +65,36 @@ class PostGISBackend:
     ) -> AsyncGenerator[Tuple[JernbaneplattformkantProperties, str], None]:
         cur: Cursor
         async with conn.cursor(name="jernbaneplattformkant_stream") as cur:
+            query = """
+            SELECT *, ST_AsGeoJSON(grense)::text AS grense_geojson
+            FROM fkb_bane.jernbaneplattformkant
+            WHERE (%(after_id)s::text IS NULL OR lokalid::text > %(after_id)s::text)
+            """
+
+            if bbox is not None:
+                query += """
+                AND ST_Intersects(ST_Transform(grense, 4326), ST_MakeEnvelope(%(lower_left_x)s, %(lower_left_y)s, %(upper_right_x)s, %(upper_right_y)s, 4326))
+                """
+
+            query += """
+            ORDER BY lokalid
+            LIMIT %(limit)s
+            """
+
+            params = {
+                "limit": limit,
+                "after_id": after_id,
+            }
+
+            if bbox is not None:
+                params["lower_left_x"] = bbox[0]
+                params["lower_left_y"] = bbox[1]
+                params["upper_right_x"] = bbox[2]
+                params["upper_right_y"] = bbox[3]
+
             await cur.execute(
-                query="""
-                SELECT *, ST_AsGeoJSON(grense)::text AS grense_geojson
-                FROM fkb_bane.jernbaneplattformkant
-                WHERE (%(after_id)s::text IS NULL OR lokalid::text > %(after_id)s::text)
-                ORDER BY lokalid
-                LIMIT %(limit)s
-                """,
-                params={"limit": limit, "after_id": after_id},
+                query=query,
+                params=params,
             )
             async for row in cur:
                 yield (
@@ -185,15 +206,36 @@ class PostGISBackend:
     ) -> AsyncGenerator[Tuple[SpormidtProperties, str], None]:
         cur: Cursor
         async with conn.cursor(name="spormidt_stream") as cur:
+            query = """
+            SELECT *, ST_AsGeoJSON(senterlinje)::text AS senterlinje_geojson
+            FROM fkb_bane.spormidt
+            WHERE (%(after_id)s::text IS NULL OR lokalid::text > %(after_id)s::text)
+            """
+
+            if bbox is not None:
+                query += """
+                AND ST_Intersects(ST_Transform(senterlinje, 4326), ST_MakeEnvelope(%(lower_left_x)s, %(lower_left_y)s, %(upper_right_x)s, %(upper_right_y)s, 4326))
+                """
+
+            query += """
+            ORDER BY lokalid
+            LIMIT %(limit)s
+            """
+
+            params = {
+                "limit": limit,
+                "after_id": after_id,
+            }
+
+            if bbox is not None:
+                params["lower_left_x"] = bbox[0]
+                params["lower_left_y"] = bbox[1]
+                params["upper_right_x"] = bbox[2]
+                params["upper_right_y"] = bbox[3]
+
             await cur.execute(
-                query="""
-                SELECT *, ST_AsGeoJSON(senterlinje)::text AS senterlinje_geojson
-                FROM fkb_bane.spormidt
-                WHERE (%(after_id)s::text IS NULL OR lokalid::text > %(after_id)s::text)
-                ORDER BY lokalid
-                LIMIT %(limit)s
-                """,
-                params={"limit": limit, "after_id": after_id},
+                query=query,
+                params=params,
             )
             async for row in cur:
                 yield (
