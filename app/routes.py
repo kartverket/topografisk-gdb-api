@@ -4,7 +4,7 @@ from psycopg import Connection
 
 from app.config import settings
 from app.database_manager import get_db_conn
-from app.models.exceptions import FeatureNotFoundError
+from app.models.exceptions import FeatureNotFoundError, InvalidBoundingBoxError
 from app.models.ogc import (
     Collection,
     CollectionMetadata,
@@ -22,6 +22,7 @@ from app.services.feature_service import (
     patch_feature_geojson,
     stream_feature_collection,
 )
+from app.utils.routes_utils import bbox_is_valid
 
 router = APIRouter(tags=["OGC API Features - FKB Bane"])
 
@@ -165,6 +166,9 @@ async def get_features(
 
     if collection_id not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Collection not found")
+
+    if not bbox_is_valid(bbox):
+        raise InvalidBoundingBoxError(bbox)
 
     return StreamingResponse(
         stream_feature_collection(
