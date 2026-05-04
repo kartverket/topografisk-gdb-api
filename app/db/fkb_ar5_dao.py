@@ -2,191 +2,76 @@ from typing import AsyncGenerator, Tuple
 
 from psycopg import Connection, Cursor
 
+import app.db.SQL as SQL  # noqa
 from app.models.exceptions import FeatureNotFoundError
 from app.models.fkb_ar5 import ArealressursFlate, ArealressursGrense
 from app.models.ogc import FeatureGeoJSON
 
-# Need to unpack for now because of postgis topology
-# TODO: Fix in declarative setup later if possible
-COMMON_SELECT = """
-
-"""
-
-AREALRESSURSFLATE_SELECT = """
-SELECT
-    -- identity
-    identifikasjon_lokal_id::text         AS lokalid,
-    identifikasjon_versjon_id::text       AS identifikasjon_versjonid,
-    identifikasjon_navnerom,
-
-    -- dates
-    datafangstdato,
-    verifiseringsdato,
-    oppdateringsdato,
-
-    -- text fields
-    klassifiseringsmetode,
-    informasjon,
-    opphav,
-    registreringsversjon,
-
-    -- enum codes
-    arealtype,
-    treslag,
-    skogbonitet,
-    grunnforhold,
-
-    -- geometry
-    ST_AsGeoJSON(ST_Transform(omrade::geometry, 4326))::text  AS omrade_geojson,
-    ST_AsGeoJSON(geometry_properties_position)::text          AS posisjon_geojson
-
-FROM topo_ar5ngis.face_attributes
-"""
-
-
-AREALRESSURSGRENSE_SELECT = """
-SELECT
-    -- identity
-    identifikasjon_lokal_id::text   AS lokalid,
-    identifikasjon_versjon_id::text AS identifikasjon_versjonid,
-    identifikasjon_navnerom,
-
-    -- dates
-    datafangstdato,
-    verifiseringsdato,
-    oppdateringsdato,
-
-    -- text fields
-    opphav,
-    registreringsversjon,
-
-    -- enum codes
-    avgrensing_type,
-    
-    -- composite
-    (topo_ar5ngis.edge_attributes.kvalitet).datafangstmetode      AS datafangstmetode,
-    (topo_ar5ngis.edge_attributes.kvalitet).noyaktighet        AS noyaktighet,
-    (topo_ar5ngis.edge_attributes.kvalitet).synbarhet          AS synbarhet,
-
-    -- geometry
-    ST_AsGeoJSON(ST_Transform(grense::geometry, 4326))::text  AS grense_geojson
-
-FROM topo_ar5ngis.edge_attributes
-"""
+SELECT_MODEL_LOOKUP = {
+    "arealressursgrense": {
+        "select": SQL.AREALRESSURSGRENSE_SELECT,
+        "model": ArealressursGrense,
+    },
+    "arealressursflate": {
+        "select": SQL.AREALRESSURSFLATE_SELECT,
+        "model": ArealressursFlate,
+    },
+}
 
 
 class FKBAR5DAO:
     @staticmethod
-    async def get_arealressursflate(
-        lokal_id: str,
+    async def get_feature(
         conn: Connection,
+        collection_id: str,
+        feature_id: str,
     ) -> Tuple[ArealressursFlate, str]:
-        """Fetch a single arealressursflate by lokalid.
+        """Fetch a single feature by collection and lokalid.
 
-        Returns a tuple of (model, omrade_geojson) where omrade_geojson is a
-        raw GeoJSON string. Raises FeatureNotFoundError if no row matches.
+        Returns a tuple of (model, geometry) where geometry is a
+        raw GeoJSON string of the main geometry column.
+        Raises FeatureNotFoundError if no row matches.
         """
         result = await conn.execute(
-            AREALRESSURSFLATE_SELECT
-            + " WHERE identifikasjon_lokal_id::text = %(lokalid)s",
-            params={"lokalid": lokal_id},
+            SELECT_MODEL_LOOKUP[collection_id]["select"] + SQL.WHERE_ID_EQUALS,
+            params={"lokalid": feature_id},
         )
-        arealressurs_flate_row = await result.fetchone()
+        row = await result.fetchone()
 
-        if not arealressurs_flate_row:
+        if not row:
             raise FeatureNotFoundError(
-                f"No element '{lokal_id}' in collection arealressursflate."
+                f"No element '{feature_id}' in collection {collection_id}."
             )
 
         return (
-            ArealressursFlate.from_db(
-                arealressurs_flate_row, arealressurs_flate_row["posisjon_geojson"]
-            ),
-            arealressurs_flate_row["omrade_geojson"],
+            SELECT_MODEL_LOOKUP[collection_id]["model"].from_db(row),
+            row["main_geometry"],
         )
 
     @staticmethod
-    async def get_arealressursgrense(
-        lokal_id: str,
+    async def get_feature_collection(
         conn: Connection,
-    ) -> Tuple[ArealressursGrense, str]:
-        """Fetch a single arealressursgrense by lokalid.
-
-        Returns a tuple of (model, grense_geojson) where grense_geojson is a
-        raw GeoJSON string. Raises FeatureNotFoundError if no row matches.
-        """
-        result = await conn.execute(
-            AREALRESSURSGRENSE_SELECT
-            + " WHERE identifikasjon_lokal_id::text = %(lokalid)s",
-            params={"lokalid": lokal_id},
-        )
-        arealressurs_grense_row = await result.fetchone()
-
-        if not arealressurs_grense_row:
-            raise FeatureNotFoundError(
-                f"No element '{lokal_id}' in collection arealressursgrense."
-            )
-
-        return (
-            ArealressursGrense.from_db(arealressurs_grense_row),
-            arealressurs_grense_row["grense_geojson"],
-        )
-
-    @staticmethod
-    async def get_all_arealressursflate(
-        conn: Connection,
-        limit: int | None = None,
+        collection_id: str,
+        limit: int,
         after_id: str | None = None,
     ) -> AsyncGenerator[Tuple[ArealressursFlate, str], None]:
-        """Stream arealressursflate rows using a named cursor (ar5_flater_stream).
+        """Stream feature collection rows.
 
-        Yields (model, omrade_geojson) tuples one at a time, keeping memory
+        Yields (model, geometry) tuples one at a time, keeping memory
         usage constant regardless of result size. Supports keyset pagination:
         pass after_id to start from the row after the given lokalid, ordered
         by lokalid. limit=None returns all matching rows.
         """
         cur: Cursor
-        async with conn.cursor(name="ar5_stream") as cur:
+        async with conn.cursor() as cur:
             await cur.execute(
-                AREALRESSURSFLATE_SELECT
-                + """
-                WHERE (%(after_id)s::text IS NULL OR identifikasjon_lokal_id::text > %(after_id)s::text)
-                ORDER BY identifikasjon_lokal_id
-                LIMIT %(limit)s
-                """,
+                SELECT_MODEL_LOOKUP[collection_id]["select"] + SQL.AFTER_ID_LIMIT,
                 params={"limit": limit, "after_id": after_id},
             )
             async for row in cur:
                 yield (
-                    ArealressursFlate.from_db(row, row["posisjon_geojson"]),
-                    row["omrade_geojson"],
-                )
-
-    @staticmethod
-    async def get_all_arealressursgrense(
-        conn: Connection, limit: int | None = None, after_id: str | None = None
-    ) -> AsyncGenerator[Tuple[ArealressursGrense, str], None]:
-        """Stream arealressursgrense rows using a named cursor (ar5_grenser_stream).
-
-        Yields (model, grense_geojson) tuples one at a time, keeping memory
-        usage constant regardless of result size. Supports keyset pagination:
-        pass after_id to start from the row after the given lokalid, ordered
-        by lokalid. limit=None returns all matching rows.
-        """
-        async with conn.cursor(name="ar5_grenser_stream") as cur:
-            await cur.execute(
-                AREALRESSURSGRENSE_SELECT
-                + """
-                WHERE (%(after_id)s::text IS NULL OR identifikasjon_lokal_id::text > %(after_id)s::text)
-                ORDER BY identifikasjon_lokal_id
-                LIMIT %(limit)s
-                """,
-                params={"limit": limit, "after_id": after_id},
-            )
-            async for row in cur:
-                yield (
-                    ArealressursGrense.from_db(row),
-                    row["grense_geojson"],
+                    SELECT_MODEL_LOOKUP[collection_id]["model"].from_db(row),
+                    row["main_geometry"],
                 )
 
     @staticmethod

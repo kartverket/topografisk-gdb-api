@@ -24,15 +24,15 @@ class Accessor(Enum):
 # some None type error somewhere?
 DB_ACCESSORS = {
     "arealressursflate": {
-        Accessor.GET_ONE: FKBAR5DAO.get_arealressursflate,
-        Accessor.GET_LIST: FKBAR5DAO.get_all_arealressursflate,
+        Accessor.GET_ONE: FKBAR5DAO.get_feature,
+        Accessor.GET_LIST: FKBAR5DAO.get_feature_collection,
         Accessor.CREATE: FKBAR5DAO.create_arealressursflate,
         Accessor.PATCH: FKBAR5DAO.patch_arealressursflate,
         Accessor.DELETE: None,
     },
     "arealressursgrense": {
-        Accessor.GET_ONE: FKBAR5DAO.get_arealressursgrense,
-        Accessor.GET_LIST: FKBAR5DAO.get_all_arealressursgrense,
+        Accessor.GET_ONE: FKBAR5DAO.get_feature,
+        Accessor.GET_LIST: FKBAR5DAO.get_feature_collection,
         Accessor.CREATE: FKBAR5DAO.create_arealressursgrense,
         Accessor.PATCH: None,
         Accessor.DELETE: None,
@@ -73,9 +73,15 @@ async def get_feature_geojson(
 
     Sketch function that fits the signature in FeatureService.
     """
-    model, geometry = await get_accessor(collection_id, Accessor.GET_ONE)(
-        feature_id, conn
-    )
+    accessor = get_accessor(collection_id, Accessor.GET_ONE)
+    if collection_id in {"arealressursgrense", "arealressursflate"}:
+        model, geometry = await accessor(
+            conn=conn, collection_id=collection_id, feature_id=feature_id
+        )
+    else:
+        model, geometry = await accessor(collection_id, Accessor.GET_ONE)(
+            feature_id, conn
+        )
     return FeatureGeoJSON(
         id=model.identifikasjon.lokal_id,
         geometry=orjson.loads(geometry),
@@ -96,7 +102,9 @@ async def stream_feature_collection(
     when the returned page is full.
     """
     # TODO: Implement other features, include type hinting
-    generator = get_accessor(collection_id, Accessor.GET_LIST)(conn, limit, after_id)
+    generator = get_accessor(collection_id, Accessor.GET_LIST)(
+        conn=conn, limit=limit, after_id=after_id, collection_id=collection_id
+    )
     count = 0
     feature_id = None
     yield b'{"type":"FeatureCollection","features":['
