@@ -8,11 +8,11 @@ from typing import Optional
 from pydantic import Field
 
 from app.models.fkb_felles import (
-    FKBFelles,
-    Posisjonskvalitet,
-    Identifikasjon,
     CaseInsensitiveStrEnum,
-    Datafangstmetode
+    Datafangstmetode,
+    FKBFelles,
+    Identifikasjon,
+    Posisjonskvalitet,
 )
 
 
@@ -44,7 +44,6 @@ class Hoydereferanse(CaseInsensitiveStrEnum):
     ukjent = "ukjent"
 
 
-
 # ---------------------------------------------------------------------------
 # Feature types
 # ---------------------------------------------------------------------------
@@ -57,6 +56,22 @@ class JernbaneplattformkantProperties(FKBFelles):
     medium: Medium
     eksternpeker: Optional[str] = None
 
+    @staticmethod
+    def from_db(row: dict) -> "JernbaneplattformkantProperties":
+        return JernbaneplattformkantProperties(
+            identifikasjon=Identifikasjon(
+                lokal_id=row["lokalid"],
+                navnerom=row["identifikasjon_navnerom"],
+                versjon_id=row["identifikasjon_versjonid"],
+            ),
+            oppdateringsdato=row["oppdateringsdato"],
+            datafangstdato=row["datafangstdato"],
+            kvalitet=Posisjonskvalitet(
+                datafangstmetode=Datafangstmetode(row["kvalitet_datafangstmetode"])
+            ),
+            medium=Medium(row["medium"]),
+        )
+
 
 # https://sosi.geonorge.no/Produktspesifikasjoner/FKB-Bane/5.0.1/#spormidt
 class SpormidtProperties(FKBFelles):
@@ -67,66 +82,54 @@ class SpormidtProperties(FKBFelles):
     jernbanetype: Jernbanetype
     hoydereferanse: Hoydereferanse = Field(alias="høydereferanse")
 
-def db_to_jernbaneplattformkant(dict: dict) -> JernbaneplattformkantProperties:
-        return JernbaneplattformkantProperties(
+    @staticmethod
+    def from_db(row: dict) -> "SpormidtProperties":
+        return SpormidtProperties(
             identifikasjon=Identifikasjon(
-                lokal_id=dict["lokalid"],
-                navnerom=dict["identifikasjon_navnerom"],
-                versjon_id=dict["identifikasjon_versjonid"]
+                lokal_id=row["lokalid"],
+                navnerom=row["identifikasjon_navnerom"],
+                versjon_id=row["identifikasjon_versjonid"],
             ),
-            oppdateringsdato=dict["oppdateringsdato"],
-            datafangstdato=dict["datafangstdato"],
+            oppdateringsdato=row["oppdateringsdato"],
+            datafangstdato=row["datafangstdato"],
             kvalitet=Posisjonskvalitet(
-                datafangstmetode=Datafangstmetode(dict["kvalitet_datafangstmetode"])
+                datafangstmetode=Datafangstmetode(row["kvalitet_datafangstmetode"])
             ),
-            medium=Medium(dict["medium"])
+            medium=Medium(row["medium"]),
+            jernbanetype=Jernbanetype(row["jernbanetype"]),
+            hoydereferanse=Hoydereferanse(row["hoydereferanse"]),
         )
+
 
 def json_to_jernbaneplattformkant(dict: dict) -> JernbaneplattformkantProperties:
-        return JernbaneplattformkantProperties(
-            identifikasjon=Identifikasjon(
-                lokal_id=dict["identifikasjon"]["lokalId"],
-                navnerom=dict["identifikasjon"]["navnerom"],
-                versjon_id=dict["identifikasjon"]["versjonId"]
-            ),
-            oppdateringsdato=dict["oppdateringsdato"],
-            datafangstdato=dict["datafangstdato"],
-            kvalitet=Posisjonskvalitet(
-                datafangstmetode=Datafangstmetode(dict["kvalitet"]["datafangstmetode"])
-            ),
-            medium=Medium(dict["medium"])
-        )
+    return JernbaneplattformkantProperties(
+        identifikasjon=Identifikasjon(
+            lokal_id=dict["identifikasjon"]["lokalId"],
+            navnerom=dict["identifikasjon"]["navnerom"],
+            versjon_id=dict["identifikasjon"]["versjonId"],
+        ),
+        oppdateringsdato=dict["oppdateringsdato"],
+        datafangstdato=dict["datafangstdato"],
+        kvalitet=Posisjonskvalitet(
+            datafangstmetode=Datafangstmetode(dict["kvalitet"]["datafangstmetode"])
+        ),
+        medium=Medium(dict["medium"]),
+    )
 
-def db_to_spormidt(dict: dict) -> SpormidtProperties:
-        return SpormidtProperties(
-            identifikasjon=Identifikasjon(
-                lokal_id=dict["lokalid"],
-                navnerom=dict["identifikasjon_navnerom"],
-                versjon_id=dict["identifikasjon_versjonid"]
-            ),
-            oppdateringsdato=dict["oppdateringsdato"],
-            datafangstdato=dict["datafangstdato"],
-            kvalitet=Posisjonskvalitet(
-                datafangstmetode=Datafangstmetode(dict["kvalitet_datafangstmetode"])
-            ),
-            medium=Medium(dict["medium"]),
-            jernbanetype=Jernbanetype(dict["jernbanetype"]),
-            hoydereferanse=Hoydereferanse(dict["hoydereferanse"])
-        )
 
 def json_to_spormidt(dict: dict) -> SpormidtProperties:
-        return SpormidtProperties(
-            identifikasjon=Identifikasjon(
-                lokal_id=dict["identifikasjon"]["lokalId"],
-                navnerom=dict["identifikasjon"]["navnerom"],
-                versjon_id=dict["identifikasjon"]["versjonId"]
-            ),
-            oppdateringsdato=dict["oppdateringsdato"],
-            datafangstdato=dict["datafangstdato"],
-            kvalitet=Posisjonskvalitet(
-                datafangstmetode=Datafangstmetode(dict["kvalitet"]["datafangstmetode"])
-            ),
-            medium=Medium(dict["medium"]),
-            jernbanetype=Jernbanetype(dict["jernbanetype"]),
-            hoydereferanse=Hoydereferanse(dict["høydereferanse"])
-        )
+    return SpormidtProperties(
+        identifikasjon=Identifikasjon(
+            lokal_id=dict["identifikasjon"]["lokalId"],
+            navnerom=dict["identifikasjon"]["navnerom"],
+            versjon_id=dict["identifikasjon"]["versjonId"],
+        ),
+        oppdateringsdato=dict["oppdateringsdato"],
+        datafangstdato=dict["datafangstdato"],
+        kvalitet=Posisjonskvalitet(
+            datafangstmetode=Datafangstmetode(dict["kvalitet"]["datafangstmetode"])
+        ),
+        medium=Medium(dict["medium"]),
+        jernbanetype=Jernbanetype(dict["jernbanetype"]),
+        hoydereferanse=Hoydereferanse(dict["høydereferanse"]),
+    )

@@ -4,12 +4,9 @@ from typing import AsyncGenerator, Tuple
 
 from psycopg import Connection, Cursor
 
-from app.models.exceptions import FeatureNotFoundError
 from app.models.fkb_bane import (
     JernbaneplattformkantProperties,
     SpormidtProperties,
-    db_to_jernbaneplattformkant,
-    db_to_spormidt,
     json_to_jernbaneplattformkant,
     json_to_spormidt,
 )
@@ -36,26 +33,6 @@ class PostGISBackend:
             )
 
     @staticmethod
-    async def get_jernbaneplattformkant(
-        id: str, conn: Connection
-    ) -> Tuple[JernbaneplattformkantProperties, dict]:
-        result = await conn.execute(
-            query="""
-                SELECT *, ST_AsGeoJSON(grense)::text AS grense_geojson FROM fkb_bane.jernbaneplattformkant 
-                WHERE lokalid = %(id)s
-            """,
-            params={"id": id},
-        )
-        jernbaneplattformkant_row = await result.fetchone()
-
-        if not jernbaneplattformkant_row:
-            raise FeatureNotFoundError()
-
-        return db_to_jernbaneplattformkant(
-            jernbaneplattformkant_row
-        ), jernbaneplattformkant_row["grense_geojson"]
-
-    @staticmethod
     async def get_all_jernbaneplattformkant(
         conn: Connection,
         limit: int | None = None,
@@ -75,7 +52,7 @@ class PostGISBackend:
             )
             async for row in cur:
                 yield (
-                    db_to_jernbaneplattformkant(row),
+                    JernbaneplattformkantProperties.from_db(row),
                     row["grense_geojson"],
                 )
 
@@ -156,24 +133,6 @@ class PostGISBackend:
         return row["lokalid"]
 
     @staticmethod
-    async def get_spormidt(
-        id: str, conn: Connection
-    ) -> Tuple[SpormidtProperties, dict]:
-        result = await conn.execute(
-            query="""
-                SELECT *, ST_AsGeoJSON(senterlinje)::text AS senterlinje_geojson FROM fkb_bane.spormidt
-                WHERE lokalid = %(id)s
-            """,
-            params={"id": id},
-        )
-        spormidt_row = await result.fetchone()
-
-        if not spormidt_row:
-            raise FeatureNotFoundError()
-
-        return db_to_spormidt(spormidt_row), spormidt_row["senterlinje_geojson"]
-
-    @staticmethod
     async def get_all_spormidt(
         conn: Connection,
         limit: int | None = None,
@@ -193,7 +152,7 @@ class PostGISBackend:
             )
             async for row in cur:
                 yield (
-                    db_to_spormidt(row),
+                    SpormidtProperties.from_db(row),
                     row["senterlinje_geojson"],
                 )
 

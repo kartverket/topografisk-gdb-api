@@ -2,19 +2,33 @@ from typing import AsyncGenerator, Tuple
 
 from psycopg import Connection, Cursor
 
-import app.db.SQL as SQL  # noqa
+import app.db.ar5_sql as ar5_sql  # noqa
+import app.db.jernbane_sql as jernbane_sql
 from app.models.exceptions import FeatureNotFoundError
 from app.models.fkb_ar5 import ArealressursFlate, ArealressursGrense
+from app.models.fkb_bane import JernbaneplattformkantProperties, SpormidtProperties
 from app.models.ogc import FeatureGeoJSON
 
 SELECT_MODEL_LOOKUP = {
     "arealressursgrense": {
-        "select": SQL.AREALRESSURSGRENSE_SELECT,
+        "select": ar5_sql.AREALRESSURSGRENSE_SELECT,
         "model": ArealressursGrense,
+        "sql_queries": ar5_sql,
     },
     "arealressursflate": {
-        "select": SQL.AREALRESSURSFLATE_SELECT,
+        "select": ar5_sql.AREALRESSURSFLATE_SELECT,
         "model": ArealressursFlate,
+        "sql_queries": ar5_sql,
+    },
+    "jernbaneplattformkant": {
+        "select": jernbane_sql.JERNBANEPLATTFORM_SELECT,
+        "model": JernbaneplattformkantProperties,
+        "sql_queries": jernbane_sql,
+    },
+    "spormidt": {
+        "select": jernbane_sql.SPORMIDT_SELECT,
+        "model": SpormidtProperties,
+        "sql_queries": jernbane_sql,
     },
 }
 
@@ -32,8 +46,11 @@ class FKBAR5DAO:
         raw GeoJSON string of the main geometry column.
         Raises FeatureNotFoundError if no row matches.
         """
+        select_model = SELECT_MODEL_LOOKUP[collection_id]
         result = await conn.execute(
-            SELECT_MODEL_LOOKUP[collection_id]["select"] + SQL.WHERE_ID_EQUALS,
+            " ".join(
+                [select_model["select"], select_model["sql_queries"].WHERE_ID_EQUALS]
+            ),
             params={"lokalid": feature_id},
         )
         row = await result.fetchone()
@@ -65,7 +82,7 @@ class FKBAR5DAO:
         cur: Cursor
         async with conn.cursor() as cur:
             await cur.execute(
-                SELECT_MODEL_LOOKUP[collection_id]["select"] + SQL.AFTER_ID_LIMIT,
+                SELECT_MODEL_LOOKUP[collection_id]["select"] + ar5_sql.AFTER_ID_LIMIT,
                 params={"limit": limit, "after_id": after_id},
             )
             async for row in cur:

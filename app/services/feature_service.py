@@ -24,28 +24,24 @@ class Accessor(Enum):
 # some None type error somewhere?
 DB_ACCESSORS = {
     "arealressursflate": {
-        Accessor.GET_ONE: FKBAR5DAO.get_feature,
         Accessor.GET_LIST: FKBAR5DAO.get_feature_collection,
         Accessor.CREATE: FKBAR5DAO.create_arealressursflate,
         Accessor.PATCH: FKBAR5DAO.patch_arealressursflate,
         Accessor.DELETE: None,
     },
     "arealressursgrense": {
-        Accessor.GET_ONE: FKBAR5DAO.get_feature,
         Accessor.GET_LIST: FKBAR5DAO.get_feature_collection,
         Accessor.CREATE: FKBAR5DAO.create_arealressursgrense,
         Accessor.PATCH: None,
         Accessor.DELETE: None,
     },
     "jernbaneplattformkant": {
-        Accessor.GET_ONE: PostGISBackend.get_jernbaneplattformkant,
         Accessor.GET_LIST: PostGISBackend.get_all_jernbaneplattformkant,
         Accessor.CREATE: PostGISBackend.create_jernbaneplattformkant,
         Accessor.PATCH: None,
         Accessor.DELETE: None,
     },
     "spormidt": {
-        Accessor.GET_ONE: PostGISBackend.get_spormidt,
         Accessor.GET_LIST: PostGISBackend.get_all_spormidt,
         Accessor.CREATE: PostGISBackend.create_spormidt,
         Accessor.PATCH: None,
@@ -73,15 +69,9 @@ async def get_feature_geojson(
 
     Sketch function that fits the signature in FeatureService.
     """
-    accessor = get_accessor(collection_id, Accessor.GET_ONE)
-    if collection_id in {"arealressursgrense", "arealressursflate"}:
-        model, geometry = await accessor(
-            conn=conn, collection_id=collection_id, feature_id=feature_id
-        )
-    else:
-        model, geometry = await accessor(collection_id, Accessor.GET_ONE)(
-            feature_id, conn
-        )
+    model, geometry = await FKBAR5DAO.get_feature(
+        conn=conn, collection_id=collection_id, feature_id=feature_id
+    )
     return FeatureGeoJSON(
         id=model.identifikasjon.lokal_id,
         geometry=orjson.loads(geometry),
@@ -102,9 +92,14 @@ async def stream_feature_collection(
     when the returned page is full.
     """
     # TODO: Implement other features, include type hinting
-    generator = get_accessor(collection_id, Accessor.GET_LIST)(
-        conn=conn, limit=limit, after_id=after_id, collection_id=collection_id
-    )
+    if collection_id in ("spormidt", "jernbaneplattformkant"):
+        generator = get_accessor(collection_id, Accessor.GET_LIST)(
+            conn=conn, limit=limit, after_id=after_id
+        )
+    else:
+        generator = get_accessor(collection_id, Accessor.GET_LIST)(
+            conn=conn, limit=limit, after_id=after_id, collection_id=collection_id
+        )
     count = 0
     feature_id = None
     yield b'{"type":"FeatureCollection","features":['
