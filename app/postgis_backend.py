@@ -33,30 +33,6 @@ class PostGISBackend:
             )
 
     @staticmethod
-    async def get_all_jernbaneplattformkant(
-        conn: Connection,
-        limit: int | None = None,
-        after_id: str | None = None,
-    ) -> AsyncGenerator[Tuple[JernbaneplattformkantProperties, str], None]:
-        cur: Cursor
-        async with conn.cursor(name="jernbaneplattformkant_stream") as cur:
-            await cur.execute(
-                query="""
-                SELECT *, ST_AsGeoJSON(grense)::text AS grense_geojson
-                FROM fkb_bane.jernbaneplattformkant
-                WHERE (%(after_id)s::text IS NULL OR lokalid::text > %(after_id)s::text)
-                ORDER BY lokalid
-                LIMIT %(limit)s
-                """,
-                params={"limit": limit, "after_id": after_id},
-            )
-            async for row in cur:
-                yield (
-                    JernbaneplattformkantProperties.from_db(row),
-                    row["grense_geojson"],
-                )
-
-    @staticmethod
     async def create_jernbaneplattformkant(
         properties: dict, geometry: Geometry, conn: Connection
     ) -> JernbaneplattformkantProperties:
@@ -131,30 +107,6 @@ class PostGISBackend:
             return None
 
         return row["lokalid"]
-
-    @staticmethod
-    async def get_all_spormidt(
-        conn: Connection,
-        limit: int | None = None,
-        after_id: str | None = None,
-    ) -> AsyncGenerator[Tuple[SpormidtProperties, str], None]:
-        cur: Cursor
-        async with conn.cursor(name="spormidt_stream") as cur:
-            await cur.execute(
-                query="""
-                SELECT *, ST_AsGeoJSON(senterlinje)::text AS senterlinje_geojson
-                FROM fkb_bane.spormidt
-                WHERE (%(after_id)s::text IS NULL OR lokalid::text > %(after_id)s::text)
-                ORDER BY lokalid
-                LIMIT %(limit)s
-                """,
-                params={"limit": limit, "after_id": after_id},
-            )
-            async for row in cur:
-                yield (
-                    SpormidtProperties.from_db(row),
-                    row["senterlinje_geojson"],
-                )
 
     @staticmethod
     async def create_spormidt(properties: dict, geometry: Geometry, conn: Connection):

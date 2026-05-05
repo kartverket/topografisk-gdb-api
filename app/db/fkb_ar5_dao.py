@@ -3,7 +3,7 @@ from typing import AsyncGenerator, Tuple
 from psycopg import Connection, Cursor
 
 import app.db.ar5_sql as ar5_sql  # noqa
-import app.db.jernbane_sql as jernbane_sql
+import app.db.jernbane_sql as jernbane_sql  # noqa
 from app.models.exceptions import FeatureNotFoundError
 from app.models.fkb_ar5 import ArealressursFlate, ArealressursGrense
 from app.models.fkb_bane import JernbaneplattformkantProperties, SpormidtProperties
@@ -80,9 +80,15 @@ class FKBAR5DAO:
         by lokalid. limit=None returns all matching rows.
         """
         cur: Cursor
+        select_model = SELECT_MODEL_LOOKUP[collection_id]
         async with conn.cursor() as cur:
             await cur.execute(
-                SELECT_MODEL_LOOKUP[collection_id]["select"] + ar5_sql.AFTER_ID_LIMIT,
+                " ".join(
+                    [
+                        select_model["select"],
+                        select_model["sql_queries"].AFTER_ID_LIMIT,
+                    ]
+                ),
                 params={"limit": limit, "after_id": after_id},
             )
             async for row in cur:
@@ -92,9 +98,7 @@ class FKBAR5DAO:
                 )
 
     @staticmethod
-    async def create_arealressursflate(feature: FeatureGeoJSON, conn: Connection):
-        raise NotImplementedError()
-
+    async def create_simple_feature(): ...
     @staticmethod
     async def create_arealressursgrense(feature: FeatureGeoJSON, conn: Connection):
         raise NotImplementedError()
