@@ -8,6 +8,10 @@ from app.models.ogc import FeatureGeoJSON
 
 # Need to unpack for now because of postgis topology
 # TODO: Fix in declarative setup later if possible
+COMMON_SELECT = """
+
+"""
+
 AREALRESSURSFLATE_SELECT = """
 SELECT
     -- identity
@@ -24,13 +28,13 @@ SELECT
     klassifiseringsmetode,
     informasjon,
     opphav,
-    registreringsversjon::text,
+    registreringsversjon,
 
     -- enum codes
-    arealtype::text,
-    treslag::text,
-    skogbonitet::text,
-    grunnforhold::text,
+    arealtype,
+    treslag,
+    skogbonitet,
+    grunnforhold,
 
     -- geometry
     ST_AsGeoJSON(ST_Transform(omrade::geometry, 4326))::text  AS omrade_geojson,
@@ -54,15 +58,15 @@ SELECT
 
     -- text fields
     opphav,
-    registreringsversjon::text,
+    registreringsversjon,
 
     -- enum codes
-    avgrensing_type::text,
+    avgrensing_type,
     
     -- composite
-    (topo_ar5ngis.edge_attributes.kvalitet).datafangstmetode::text      AS datafangstmetode,
-    (topo_ar5ngis.edge_attributes.kvalitet).noyaktighet::integer        AS noyaktighet,
-    (topo_ar5ngis.edge_attributes.kvalitet).synbarhet::integer          AS synbarhet,
+    (topo_ar5ngis.edge_attributes.kvalitet).datafangstmetode      AS datafangstmetode,
+    (topo_ar5ngis.edge_attributes.kvalitet).noyaktighet        AS noyaktighet,
+    (topo_ar5ngis.edge_attributes.kvalitet).synbarhet          AS synbarhet,
 
     -- geometry
     ST_AsGeoJSON(ST_Transform(grense::geometry, 4326))::text  AS grense_geojson

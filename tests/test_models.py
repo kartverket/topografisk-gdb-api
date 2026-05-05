@@ -105,7 +105,7 @@ class TestDatafangstmetode(unittest.TestCase):
 class TestSynbarhet(unittest.TestCase):
     def test_valid_values(self):
         for i in range(4):
-            Synbarhet(i)  # Asserts no error
+            Synbarhet(str(i))  # Asserts no error
 
     def test_invalid_values(self):
         for i in (-1, 4):
