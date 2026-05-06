@@ -117,7 +117,7 @@ async def get_conformance():
 )  # Oversikt over alle datasett API-et vårt tilbyr
 async def get_collections(request: Request):
     return Collections(
-        collections=map(lambda id: collection_from_id(id, request), COLLECTIONS),
+        collections=map(lambda cid: collection_from_id(cid, request), COLLECTIONS),
         links=[
             Link(
                 href=f"{request.base_url}collections",
@@ -209,8 +209,7 @@ async def create_feature(
 
 @router.patch(
     "/collections/{collection_id}/items/{feature_id}",
-    response_model=FeatureGeoJSON,
-    status_code=200,
+    status_code=204,
 )
 async def update_feature(
     collection_id: str,
@@ -218,7 +217,7 @@ async def update_feature(
     patch: dict,
     conn: Connection = Depends(get_db_conn),
 ):
-    return await fs.patch_feature_geojson(collection_id, feature_id, patch, conn)
+    await fs.patch_feature_geojson(collection_id, feature_id, patch, conn)
 
 
 @router.delete("/collections/{collection_id}/items/{feature_id}", status_code=200)

@@ -7,6 +7,7 @@ bytes; routes wrap these with Response(content=..., media_type="application/geo+
 
 import datetime
 from enum import Enum
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import orjson
 from psycopg import Connection
@@ -44,7 +45,7 @@ async def get_feature_collection(
     Byteserialisation is chosen to avoid round-tripping through stdlib JSON
     """
     # TODO: Implement other features, include type hinting
-    rows = await dao.get_feature_collection(
+    rows = await dao.get_features(
         conn=conn, limit=limit, after_id=after_id, collection_id=collection_id
     )
     features = [
@@ -64,13 +65,12 @@ async def get_feature_collection(
     }
     if limit is not None and len(features) == limit and features:
         last_id = features[-1]["id"]
-        sep = "&" if "?" in request_url else "?"
+        parsed = urlparse(request_url)
+        params = parse_qs(parsed.query, keep_blank_values=True)
+        params["after_id"] = [last_id]
+        next_url = urlunparse(parsed._replace(query=urlencode(params, doseq=True)))
         body["links"] = [
-            {
-                "rel": "next",
-                "href": f"{request_url}{sep}after_id={last_id}",
-                "type": "application/geo+json",
-            }
+            {"rel": "next", "href": next_url, "type": "application/geo+json"}
         ]
     return orjson.dumps(body)
 
@@ -78,14 +78,14 @@ async def get_feature_collection(
 async def patch_feature_geojson(
     collection_id: str, feature_id: str, patch: dict, conn: Connection
 ):
-    target = await get_feature_geojson(collection_id, feature_id, conn)
+    model, _ = await dao.get_feature(conn, collection_id, feature_id)
+    properties = model.model_dump()
     for key, value in patch.items():
-        if isinstance(target.properties[key], Enum):
-            target.properties[key] = type(target.properties[key])(patch.get(key))
+        if isinstance(properties[key], Enum):
+            properties[key] = type(properties[key])(value)
         else:
-            target.properties[key] = patch.get(key)
-    await dao.patch_nongeometry_attributes(target, conn)
-    return target
+            properties[key] = value
+    await dao.patch_nongeometry_attributes(properties, conn)
 
 
 async def create_feature_geojson(

@@ -46,7 +46,7 @@ class TestGetFeatureGeoJSON(IsolatedAsyncioTestCase):
 
 class TestGetFeatureCollection(IsolatedAsyncioTestCase):
     async def _collect(self, **kwargs) -> dict:
-        with patch("app.db.dao.get_feature_collection", side_effect=mock_get_all):
+        with patch("app.db.dao.get_features", side_effect=mock_get_all):
             return orjson.loads(await get_feature_collection(**kwargs))
 
     async def test_returns_feature_collection(self):
@@ -94,6 +94,19 @@ class TestGetFeatureCollection(IsolatedAsyncioTestCase):
         )
         links = {link["rel"]: link["href"] for link in body.get("links", [])}
         self.assertIn("next", links)
+        self.assertIn("after_id=id-2", links["next"])
+
+    async def test_next_link_does_not_stack_after_id(self):
+        body = await self._collect(
+            collection_id="arealressursflate",
+            limit=2,
+            after_id="id-0",
+            conn=None,
+            request_url="http://test/collections/arealressursflate/items?limit=2&after_id=id-0",
+        )
+        links = {link["rel"]: link["href"] for link in body.get("links", [])}
+        self.assertIn("next", links)
+        self.assertEqual(1, links["next"].count("after_id="))
         self.assertIn("after_id=id-2", links["next"])
 
     async def test_no_next_link_when_page_not_full(self):
