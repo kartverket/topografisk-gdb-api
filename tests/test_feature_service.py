@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from app.models.fkb_felles import Identifikasjon
 from app.models.ogc import FeatureGeoJSON
-from app.services.feature_service import get_feature_geojson, stream_feature_collection
+from app.services.feature_service import get_feature_collection, get_feature_geojson
 
 MOCK_GEOMETRY = '{"type":"Polygon","coordinates":[[[10.0,59.0],[10.1,59.0],[10.1,59.1],[10.0,59.0]]]}'
 
@@ -50,7 +50,7 @@ class TestStreamFeatureCollection(IsolatedAsyncioTestCase):
             "app.services.feature_service.get_accessor", return_value=mock_get_all
         ):
             chunks = []
-            async for chunk in stream_feature_collection(**kwargs):
+            async for chunk in get_feature_collection(**kwargs):
                 chunks.append(chunk)
             return json.loads(b"".join(chunks))
 

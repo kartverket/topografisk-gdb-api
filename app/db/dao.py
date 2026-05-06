@@ -1,13 +1,13 @@
-from typing import AsyncGenerator, Tuple
+from typing import Tuple
 
-from psycopg import Connection, Cursor
+from psycopg import Connection
 
 import app.db.ar5_sql as ar5_sql  # noqa
 import app.db.jernbane_sql as jernbane_sql  # noqa
 from app.models.exceptions import FeatureNotFoundError
 from app.models.fkb_ar5 import ArealressursFlate, ArealressursGrense
 from app.models.fkb_bane import JernbaneplattformkantProperties, SpormidtProperties
-from app.models.ogc import FeatureGeoJSON
+from app.models.ogc import Collections, FeatureGeoJSON
 
 SQL_MODEL_LOOKUP = {
     "arealressursgrense": {
@@ -69,7 +69,7 @@ async def get_feature_collection(
     collection_id: str,
     limit: int,
     after_id: str | None = None,
-) -> AsyncGenerator[Tuple[ArealressursFlate, str], None]:
+) -> list:
     """Stream feature collection rows.
 
     Yields (model, geometry) tuples one at a time, keeping memory
@@ -77,23 +77,13 @@ async def get_feature_collection(
     pass after_id to start from the row after the given lokalid, ordered
     by lokalid. limit=None returns all matching rows.
     """
-    cur: Cursor
     model = SQL_MODEL_LOOKUP[collection_id]
-    async with conn.cursor() as cur:
-        await cur.execute(
-            " ".join(
-                [
-                    model["select"],
-                    model["sql_queries"].AFTER_ID_LIMIT,
-                ]
-            ),
-            params={"limit": limit, "after_id": after_id},
-        )
-        async for row in cur:
-            yield (
-                SQL_MODEL_LOOKUP[collection_id]["model"].from_db(row),
-                row["main_geometry"],
-            )
+    result = await conn.execute(
+        " ".join([model["select"], model["sql_queries"].AFTER_ID_LIMIT]),
+        params={"limit": limit, "after_id": after_id},
+    )
+    rows = await result.fetchall()
+    return [(model["model"].from_db(row), row["main_geometry"]) for row in rows]
 
 
 async def create_simple_feature(

@@ -1,6 +1,5 @@
 import datetime
 from enum import Enum
-from typing import AsyncGenerator
 
 import orjson
 from psycopg import Connection
@@ -26,55 +25,49 @@ async def get_feature_geojson(
     )
 
 
-async def stream_feature_collection(
+async def get_feature_collection(
     collection_id: str,
     limit: int | None,
     after_id: str | None,
     conn: Connection,
     request_url: str,
-) -> AsyncGenerator[bytes, None]:
-    """Stream a GeoJSON FeatureCollection as bytes, one feature at a time.
+) -> dict:
+    """Return a GeoJSON FeatureCollection serialised as bytes.
 
     The closing object includes numberReturned, timeStamp, and a rel:next link
     when the returned page is full.
+    Byteserialisation is chosen to avoid round-tripping through stdlib JSON
     """
     # TODO: Implement other features, include type hinting
-    generator = dao.get_feature_collection(
+    rows = await dao.get_feature_collection(
         conn=conn, limit=limit, after_id=after_id, collection_id=collection_id
     )
-    count = 0
-    feature_id = None
-    yield b'{"type":"FeatureCollection","features":['
-    async for model, geometry in generator:
-        if count:  # Add commas after first feature
-            yield b","
-        count += 1
-        feature_id = model.identifikasjon.lokal_id
-        feature_bytes = (
-            b'{"type":"Feature", "id":'
-            + orjson.dumps(feature_id)
-            + b', "geometry":'
-            + geometry.encode()
-            + b', "properties":'
-            + orjson.dumps(model.model_dump())
-            + b"}"
-        )
-        yield feature_bytes
-    tail = {
-        "numberReturned": count,
+    features = [
+        {
+            "type": "Feature",
+            "id": model.identifikasjon.lokal_id,
+            "geometry": orjson.Fragment(geometry.encode()),
+            "properties": model.model_dump(),
+        }
+        for model, geometry in rows
+    ]
+    body = {
+        "type": "FeatureCollection",
+        "features": features,
+        "numberReturned": len(features),
         "timeStamp": datetime.datetime.now(datetime.UTC).isoformat(),
     }
-    if limit is not None and count == limit:
-        query_param = (
-            f"&after_id={feature_id}"
-            if "?" in request_url
-            else f"?after_id={feature_id}"
-        )
-        next_url = f"{request_url}{query_param}"
-        tail["links"] = [
-            {"rel": "next", "href": next_url, "type": "application/geo+json"}
+    if limit is not None and len(features) == limit and features:
+        last_id = features[-1]["id"]
+        sep = "&" if "?" in request_url else "?"
+        body["links"] = [
+            {
+                "rel": "next",
+                "href": f"{request_url}{sep}after_id={last_id}",
+                "type": "application/geo+json",
+            }
         ]
-    yield b"]," + orjson.dumps(tail)[1:]  # Close last feature, strip leading '{'
+    return orjson.dumps(body)
 
 
 async def patch_feature_geojson(
