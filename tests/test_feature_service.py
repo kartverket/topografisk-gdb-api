@@ -1,4 +1,4 @@
-import json
+import orjson
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import patch
 
@@ -22,20 +22,20 @@ def make_generic_feature(lokal_id: str) -> GenericFeature:
     )
 
 
-async def mock_get_all(conn, limit, after_id):
-    yield (make_generic_feature("id-1"), MOCK_GEOMETRY)
-    yield (make_generic_feature("id-2"), MOCK_GEOMETRY)
+async def mock_get_all(conn, collection_id, limit, after_id=None):
+    return [
+        (make_generic_feature("id-1"), MOCK_GEOMETRY),
+        (make_generic_feature("id-2"), MOCK_GEOMETRY),
+    ]
 
 
-async def mock_get_one(feature_id, conn):
+async def mock_get_one(conn, collection_id, feature_id):
     return (make_generic_feature("id-1"), MOCK_GEOMETRY)
 
 
 class TestGetFeatureGeoJSON(IsolatedAsyncioTestCase):
     async def test_returns_feature_geojson(self):
-        with patch(
-            "app.services.feature_service.get_accessor", return_value=mock_get_one
-        ):
+        with patch("app.db.dao.get_feature", side_effect=mock_get_one):
             feature = await get_feature_geojson("arealressursflate", "id-1", None)
 
         self.assertIsInstance(feature, FeatureGeoJSON)
@@ -44,15 +44,10 @@ class TestGetFeatureGeoJSON(IsolatedAsyncioTestCase):
         self.assertIn("label", feature.properties)
 
 
-class TestStreamFeatureCollection(IsolatedAsyncioTestCase):
+class TestGetFeatureCollection(IsolatedAsyncioTestCase):
     async def _collect(self, **kwargs) -> dict:
-        with patch(
-            "app.services.feature_service.get_accessor", return_value=mock_get_all
-        ):
-            chunks = []
-            async for chunk in get_feature_collection(**kwargs):
-                chunks.append(chunk)
-            return json.loads(b"".join(chunks))
+        with patch("app.db.dao.get_feature_collection", side_effect=mock_get_all):
+            return orjson.loads(await get_feature_collection(**kwargs))
 
     async def test_returns_feature_collection(self):
         body = await self._collect(
