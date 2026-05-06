@@ -9,7 +9,7 @@ from app.models.fkb_ar5 import ArealressursFlate, ArealressursGrense
 from app.models.fkb_bane import JernbaneplattformkantProperties, SpormidtProperties
 from app.models.ogc import FeatureGeoJSON
 
-SELECT_MODEL_LOOKUP = {
+SQL_MODEL_LOOKUP = {
     "arealressursgrense": {
         "select": ar5_sql.AREALRESSURSGRENSE_SELECT,
         "model": ArealressursGrense,
@@ -22,11 +22,13 @@ SELECT_MODEL_LOOKUP = {
     },
     "jernbaneplattformkant": {
         "select": jernbane_sql.JERNBANEPLATTFORM_SELECT,
+        "create": jernbane_sql.JERNBANEPLATTFORM_CREATE,
         "model": JernbaneplattformkantProperties,
         "sql_queries": jernbane_sql,
     },
     "spormidt": {
         "select": jernbane_sql.SPORMIDT_SELECT,
+        "create": jernbane_sql.SPORMIDT_CREATE,
         "model": SpormidtProperties,
         "sql_queries": jernbane_sql,
     },
@@ -46,11 +48,9 @@ class FKBAR5DAO:
         raw GeoJSON string of the main geometry column.
         Raises FeatureNotFoundError if no row matches.
         """
-        select_model = SELECT_MODEL_LOOKUP[collection_id]
+        model = SQL_MODEL_LOOKUP[collection_id]
         result = await conn.execute(
-            " ".join(
-                [select_model["select"], select_model["sql_queries"].WHERE_ID_EQUALS]
-            ),
+            " ".join([model["select"], model["sql_queries"].WHERE_ID_EQUALS]),
             params={"lokalid": feature_id},
         )
         row = await result.fetchone()
@@ -61,7 +61,7 @@ class FKBAR5DAO:
             )
 
         return (
-            SELECT_MODEL_LOOKUP[collection_id]["model"].from_db(row),
+            SQL_MODEL_LOOKUP[collection_id]["model"].from_db(row),
             row["main_geometry"],
         )
 
@@ -80,25 +80,36 @@ class FKBAR5DAO:
         by lokalid. limit=None returns all matching rows.
         """
         cur: Cursor
-        select_model = SELECT_MODEL_LOOKUP[collection_id]
+        model = SQL_MODEL_LOOKUP[collection_id]
         async with conn.cursor() as cur:
             await cur.execute(
                 " ".join(
                     [
-                        select_model["select"],
-                        select_model["sql_queries"].AFTER_ID_LIMIT,
+                        model["select"],
+                        model["sql_queries"].AFTER_ID_LIMIT,
                     ]
                 ),
                 params={"limit": limit, "after_id": after_id},
             )
             async for row in cur:
                 yield (
-                    SELECT_MODEL_LOOKUP[collection_id]["model"].from_db(row),
+                    SQL_MODEL_LOOKUP[collection_id]["model"].from_db(row),
                     row["main_geometry"],
                 )
 
     @staticmethod
-    async def create_simple_feature(): ...
+    async def create_simple_feature(
+        conn: Connection, collection_id: str, properties: dict, geometry
+    ):
+        model = SQL_MODEL_LOOKUP[collection_id]["model"]
+        query = SQL_MODEL_LOOKUP[collection_id]["create"]
+        result = await conn.execute(
+            query=query,
+            params=model.from_post_json(properties).to_create_params(geometry),
+        )
+        row = await result.fetchone()
+        return row["lokalid"]
+
     @staticmethod
     async def create_arealressursgrense(feature: FeatureGeoJSON, conn: Connection):
         raise NotImplementedError()

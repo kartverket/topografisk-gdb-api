@@ -1,4 +1,5 @@
 import datetime
+import uuid
 from enum import Enum
 from typing import AsyncGenerator, Tuple
 
@@ -6,6 +7,7 @@ import orjson
 from psycopg import Connection
 
 from app.db.fkb_ar5_dao import FKBAR5DAO
+from app.models.fkb_bane import JernbaneplattformkantProperties, SpormidtProperties
 from app.models.fkb_felles import FKBFelles
 from app.models.ogc import FeatureGeoJSON
 from app.postgis_backend import PostGISBackend
@@ -25,12 +27,6 @@ class Accessor(Enum):
 DB_ACCESSORS = {
     "arealressursflate": {
         Accessor.PATCH: FKBAR5DAO.patch_arealressursflate,
-    },
-    "jernbaneplattformkant": {
-        Accessor.CREATE: PostGISBackend.create_jernbaneplattformkant,
-    },
-    "spormidt": {
-        Accessor.CREATE: PostGISBackend.create_spormidt,
     },
 }
 
@@ -131,7 +127,15 @@ async def patch_feature_geojson(
 async def create_feature_geojson(
     collection_id: str, feature: FeatureGeoJSON, conn: Connection
 ):
-    created_id = await get_accessor(collection_id, Accessor.CREATE)(
-        feature.properties, feature.geometry, conn
+    """splits feature into geometry and properties and forward
+    to DAO for creation of object
+
+    Changes incoming when dealing with topology
+    """
+    created_id = await FKBAR5DAO.create_simple_feature(
+        conn=conn,
+        collection_id=collection_id,
+        properties=feature.properties,
+        geometry=feature.geometry,
     )
     return created_id
