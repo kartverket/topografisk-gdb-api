@@ -159,7 +159,7 @@ async def get_features(  # noqa
     return Response(
         content=await fs.get_feature_collection(
             collection_id=collection_id,
-            limit=max(limit, settings.MAX_PAGE_SIZE),
+            limit=min(limit, settings.MAX_PAGE_SIZE),
             after_id=after_id,
             conn=conn,
             request_url=str(request.url),
@@ -180,7 +180,10 @@ async def get_feature(
         raise HTTPException(status_code=404, detail="Collection not found")
 
     try:
-        return await fs.get_feature_geojson(collection_id, feature_id, conn)
+        return Response(
+            content=await fs.get_feature_geojson(collection_id, feature_id, conn),
+            media_type="application/geo+json",
+        )
     except FeatureNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

@@ -1,3 +1,10 @@
+"""
+Translates DAO results into GeoJSON for the route layer.
+
+Both get_feature_geojson and get_feature_collection return orjson-serialised
+bytes; routes wrap these with Response(content=..., media_type="application/geo+json").
+"""
+
 import datetime
 from enum import Enum
 
@@ -10,19 +17,17 @@ from app.models.ogc import FeatureGeoJSON
 
 async def get_feature_geojson(
     collection_id: str, feature_id: str, conn: Connection
-) -> FeatureGeoJSON:
-    """Fetch a single feature and return it as a plain GeoJSON dict.
-
-    Sketch function that fits the signature in FeatureService.
-    """
+) -> bytes:
     model, geometry = await dao.get_feature(
         conn=conn, collection_id=collection_id, feature_id=feature_id
     )
-    return FeatureGeoJSON(
-        id=model.identifikasjon.lokal_id,
-        geometry=orjson.loads(geometry),
-        properties=model.model_dump(),
-    )
+    body = {
+        "type": "Feature",
+        "id": model.identifikasjon.lokal_id,
+        "geometry": orjson.Fragment(geometry.encode()),
+        "properties": model.model_dump(),
+    }
+    return orjson.dumps(body)
 
 
 async def get_feature_collection(

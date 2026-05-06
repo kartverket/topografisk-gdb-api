@@ -1,3 +1,14 @@
+"""
+Data access layer. Executes SQL and maps rows to domain models
+via SQL_MODEL_LOOKUP.
+
+Temporary: SQL is hard-coded per collection until replaced by a
+declarative schema-driven setup.
+
+To add a collection or operation, write proper SQL and attach it
+to SQL_MODEL_LOOKUP.
+"""
+
 from typing import Tuple
 
 from psycopg import Connection
@@ -7,7 +18,7 @@ import app.db.jernbane_sql as jernbane_sql  # noqa
 from app.models.exceptions import FeatureNotFoundError
 from app.models.fkb_ar5 import ArealressursFlate, ArealressursGrense
 from app.models.fkb_bane import JernbaneplattformkantProperties, SpormidtProperties
-from app.models.ogc import Collections, FeatureGeoJSON
+from app.models.ogc import FeatureGeoJSON
 
 SQL_MODEL_LOOKUP = {
     "arealressursgrense": {

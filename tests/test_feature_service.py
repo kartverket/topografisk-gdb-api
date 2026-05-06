@@ -5,7 +5,6 @@ from unittest.mock import patch
 from pydantic import BaseModel
 
 from app.models.fkb_felles import Identifikasjon
-from app.models.ogc import FeatureGeoJSON
 from app.services.feature_service import get_feature_collection, get_feature_geojson
 
 MOCK_GEOMETRY = '{"type":"Polygon","coordinates":[[[10.0,59.0],[10.1,59.0],[10.1,59.1],[10.0,59.0]]]}'
@@ -36,12 +35,13 @@ async def mock_get_one(conn, collection_id, feature_id):
 class TestGetFeatureGeoJSON(IsolatedAsyncioTestCase):
     async def test_returns_feature_geojson(self):
         with patch("app.db.dao.get_feature", side_effect=mock_get_one):
-            feature = await get_feature_geojson("arealressursflate", "id-1", None)
+            result = await get_feature_geojson("arealressursflate", "id-1", None)
 
-        self.assertIsInstance(feature, FeatureGeoJSON)
-        self.assertEqual("id-1", feature.id)
-        self.assertEqual("Polygon", feature.geometry.type)
-        self.assertIn("label", feature.properties)
+        feature = orjson.loads(result)
+        self.assertEqual("Feature", feature["type"])
+        self.assertEqual("id-1", feature["id"])
+        self.assertEqual("Polygon", feature["geometry"]["type"])
+        self.assertIn("label", feature["properties"])
 
 
 class TestGetFeatureCollection(IsolatedAsyncioTestCase):
