@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from psycopg import Connection
 
+import app.models.ogc as ogc_models
+import app.services.feature_service as fs
 from app.config import settings
 from app.database_manager import get_db_conn
 from app.models.exceptions import FeatureNotFoundError
@@ -17,12 +19,6 @@ from app.models.ogc import (
     FeatureGeoJSON,
     LandingPage,
     Link,
-)
-from app.services.feature_service import (
-    create_feature_geojson,
-    get_feature_geojson,
-    patch_feature_geojson,
-    stream_feature_collection,
 )
 
 router = APIRouter(tags=["OGC API Features - FKB Bane"])
@@ -169,7 +165,7 @@ async def get_features(
         raise HTTPException(status_code=404, detail="Collection not found")
 
     return StreamingResponse(
-        stream_feature_collection(
+        fs.stream_feature_collection(
             collection_id, limit, after_id, conn, str(request.url)
         ),
         media_type="application/geo+json",
@@ -188,7 +184,7 @@ async def get_feature(
         raise HTTPException(status_code=404, detail="Collection not found")
 
     try:
-        return await get_feature_geojson(collection_id, feature_id, conn)
+        return await fs.get_feature_geojson(collection_id, feature_id, conn)
     except FeatureNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -205,7 +201,7 @@ async def create_feature(
     if collection_id not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    created_id = await create_feature_geojson(collection_id, feature, conn)
+    created_id = await fs.create_feature_geojson(collection_id, feature, conn)
     headers = {
         "Location": f"{request.base_url}collections/{collection_id}/items/{created_id}"
     }
@@ -223,7 +219,7 @@ async def update_feature(
     patch: dict,
     conn: Connection = Depends(get_db_conn),
 ):
-    return await patch_feature_geojson(collection_id, feature_id, patch, conn)
+    return await fs.patch_feature_geojson(collection_id, feature_id, patch, conn)
 
 
 @router.delete("/collections/{collection_id}/items/{feature_id}", status_code=200)

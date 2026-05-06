@@ -1,46 +1,12 @@
 import datetime
-import uuid
 from enum import Enum
-from typing import AsyncGenerator, Tuple
+from typing import AsyncGenerator
 
 import orjson
 from psycopg import Connection
 
-from app.db.fkb_ar5_dao import FKBAR5DAO
-from app.models.fkb_bane import JernbaneplattformkantProperties, SpormidtProperties
-from app.models.fkb_felles import FKBFelles
+import app.db.dao as dao  # noqa
 from app.models.ogc import FeatureGeoJSON
-from app.postgis_backend import PostGISBackend
-
-
-class Accessor(Enum):
-    GET_ONE = 1
-    GET_LIST = 2
-    CREATE = 3
-    PATCH = 4
-    DELETE = 5
-
-
-# TODO: remove nonexisting keys such as Accessor.DELETE?
-# In that way we fail with a bang (KeyError) instead of
-# some None type error somewhere?
-DB_ACCESSORS = {
-    "arealressursflate": {
-        Accessor.PATCH: FKBAR5DAO.patch_arealressursflate,
-    },
-}
-
-
-def get_accessor(collection_id: str, accessor_type: Accessor):
-    return DB_ACCESSORS[collection_id][accessor_type]
-
-
-def to_featuregeojson(featuredata: Tuple[FKBFelles, str]):
-    return FeatureGeoJSON(
-        id=featuredata[0].identifikasjon.lokal_id,
-        geometry=orjson.loads(featuredata[1]),
-        properties=featuredata[0],
-    )
 
 
 async def get_feature_geojson(
@@ -50,7 +16,7 @@ async def get_feature_geojson(
 
     Sketch function that fits the signature in FeatureService.
     """
-    model, geometry = await FKBAR5DAO.get_feature(
+    model, geometry = await dao.get_feature(
         conn=conn, collection_id=collection_id, feature_id=feature_id
     )
     return FeatureGeoJSON(
@@ -73,7 +39,7 @@ async def stream_feature_collection(
     when the returned page is full.
     """
     # TODO: Implement other features, include type hinting
-    generator = FKBAR5DAO.get_feature_collection(
+    generator = dao.get_feature_collection(
         conn=conn, limit=limit, after_id=after_id, collection_id=collection_id
     )
     count = 0
@@ -120,7 +86,7 @@ async def patch_feature_geojson(
             target.properties[key] = type(target.properties[key])(patch.get(key))
         else:
             target.properties[key] = patch.get(key)
-    await get_accessor(collection_id, Accessor.PATCH)(target, conn)
+    await dao.patch_nongeometry_attributes(target, conn)
     return target
 
 
@@ -130,9 +96,9 @@ async def create_feature_geojson(
     """splits feature into geometry and properties and forward
     to DAO for creation of object
 
-    Changes incoming when dealing with topology
+    Changes required when dealing with topology
     """
-    created_id = await FKBAR5DAO.create_simple_feature(
+    created_id = await dao.create_simple_feature(
         conn=conn,
         collection_id=collection_id,
         properties=feature.properties,
