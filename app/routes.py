@@ -17,6 +17,7 @@ from app.models.ogc import (
     LandingPage,
     Link,
 )
+from app.utils.routes_utils import bbox_is_valid
 
 router = APIRouter(tags=["OGC API Features - FKB Bane"])
 
@@ -154,9 +155,14 @@ async def get_features(  # noqa
     if collection_id not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Collection not found")
 
+    if bbox is not None and not bbox_is_valid(bbox):
+        raise InvalidBoundingBoxError(bbox)
+
     return Response(
         content=await fs.get_feature_collection(
             collection_id=collection_id,
+            bbox=bbox,
+            datetime_query=datetime,
             limit=min(limit, settings.MAX_PAGE_SIZE),
             after_id=after_id,
             conn=conn,

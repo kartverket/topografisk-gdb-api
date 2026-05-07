@@ -29,7 +29,7 @@ def make_arealressursflate(lokal_id: str, posisjon: str | None) -> ArealressursF
     )
 
 
-async def mock_get_all(conn, collection_id, limit, after_id=None):
+async def mock_get_all(conn, collection_id, bbox, datetime_query, limit, after_id=None):
     all_features = [
         (make_arealressursflate("id-1", MOCK_POSISJON), MOCK_OMRADE),
         (make_arealressursflate("id-2", None), MOCK_OMRADE),

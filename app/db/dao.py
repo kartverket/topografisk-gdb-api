@@ -9,7 +9,7 @@ To add a collection or operation, write proper SQL and attach it
 to SQL_MODEL_LOOKUP.
 """
 
-from typing import Tuple
+from typing import List, Tuple
 
 from psycopg import Connection
 
@@ -78,6 +78,8 @@ async def get_features(
     conn: Connection,
     collection_id: str,
     limit: int,
+    bbox: List[float] | None = None,
+    datetime_query: str | None = None,
     after_id: str | None = None,
 ) -> list:
     """Returns a list of features structured as (properties, geometry)

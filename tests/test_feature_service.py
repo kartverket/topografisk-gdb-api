@@ -21,7 +21,7 @@ def make_generic_feature(lokal_id: str) -> GenericFeature:
     )
 
 
-async def mock_get_all(conn, collection_id, limit, after_id=None):
+async def mock_get_all(conn, bbox, datetime_query, collection_id, limit, after_id=None):
     return [
         (make_generic_feature("id-1"), MOCK_GEOMETRY),
         (make_generic_feature("id-2"), MOCK_GEOMETRY),
@@ -107,6 +107,8 @@ class TestGetFeatureCollection(IsolatedAsyncioTestCase):
     async def test_next_link_does_not_stack_after_id(self):
         body = await self._collect(
             collection_id="arealressursflate",
+            bbox=None,
+            datetime_query=None,
             limit=2,
             after_id="id-0",
             conn=None,
