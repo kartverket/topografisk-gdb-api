@@ -3,16 +3,17 @@ FKB-Bane 5.0.1 — hand-written Pydantic models.
 Source: https://sosi.geonorge.no/Produktspesifikasjoner/FKB-Bane/5.0.1/
 """
 
+import uuid
 from typing import Optional
 
 from pydantic import Field
 
 from app.models.fkb_felles import (
-    FKBFelles,
-    Posisjonskvalitet,
-    Identifikasjon,
     CaseInsensitiveStrEnum,
-    Datafangstmetode
+    Datafangstmetode,
+    FKBFelles,
+    Identifikasjon,
+    Posisjonskvalitet,
 )
 
 
@@ -44,7 +45,6 @@ class Hoydereferanse(CaseInsensitiveStrEnum):
     ukjent = "ukjent"
 
 
-
 # ---------------------------------------------------------------------------
 # Feature types
 # ---------------------------------------------------------------------------
@@ -57,6 +57,66 @@ class JernbaneplattformkantProperties(FKBFelles):
     medium: Medium
     eksternpeker: Optional[str] = None
 
+    @staticmethod
+    def from_db(row: dict) -> "JernbaneplattformkantProperties":
+        return JernbaneplattformkantProperties(
+            identifikasjon=Identifikasjon(
+                lokal_id=row["lokalid"],
+                navnerom=row["identifikasjon_navnerom"],
+                versjon_id=row["identifikasjon_versjonid"],
+            ),
+            oppdateringsdato=row["oppdateringsdato"],
+            datafangstdato=row["datafangstdato"],
+            kvalitet=Posisjonskvalitet(
+                datafangstmetode=Datafangstmetode(row["kvalitet_datafangstmetode"])
+            ),
+            medium=Medium(row["medium"]),
+        )
+
+    @staticmethod
+    def from_post_json(post_json: dict) -> "JernbaneplattformkantProperties":
+        return JernbaneplattformkantProperties(
+            identifikasjon=Identifikasjon(
+                lokal_id=post_json["identifikasjon"]["lokalId"],
+                navnerom=post_json["identifikasjon"]["navnerom"],
+                versjon_id=post_json["identifikasjon"]["versjonId"],
+            ),
+            oppdateringsdato=post_json["oppdateringsdato"],
+            datafangstdato=post_json["datafangstdato"],
+            kvalitet=Posisjonskvalitet(
+                datafangstmetode=Datafangstmetode(
+                    post_json["kvalitet"]["datafangstmetode"]
+                )
+            ),
+            medium=Medium(post_json["medium"]),
+        )
+
+    def to_create_params(self, geometry) -> dict:
+        """Create params for sql-create query
+
+        Temporary solution. Do not be afraid to change
+        SHould mostly disappear long term.
+        """
+        return {
+            "lokalid": uuid.uuid4(),
+            "identifikasjon_navnerom": self.identifikasjon.navnerom,
+            "identifikasjon_versjonid": self.identifikasjon.versjon_id,
+            "oppdateringsdato": self.oppdateringsdato,
+            "sluttdato": self.sluttdato,
+            "datafangstdato": self.datafangstdato,
+            "verifiseringsdato": self.verifiseringsdato,
+            "registreringsversjon": self.registreringsversjon,
+            "informasjon": self.informasjon,
+            "kvalitet_datafangstmetode": self.kvalitet.datafangstmetode,
+            "kvalitet_noyaktighet": self.kvalitet.noyaktighet,
+            "kvalitet_synbarhet": self.kvalitet.synbarhet,
+            "kvalitet_datafangstmetodehoyde": self.kvalitet.datafangstmetode_hoyde,
+            "kvalitet_noyaktighethoyde": self.kvalitet.noyaktighet_hoyde,
+            "grense": geometry.wkt,
+            "medium": self.medium,
+            "eksternpeker": self.eksternpeker,
+        }
+
 
 # https://sosi.geonorge.no/Produktspesifikasjoner/FKB-Bane/5.0.1/#spormidt
 class SpormidtProperties(FKBFelles):
@@ -67,66 +127,68 @@ class SpormidtProperties(FKBFelles):
     jernbanetype: Jernbanetype
     hoydereferanse: Hoydereferanse = Field(alias="høydereferanse")
 
-def db_to_jernbaneplattformkant(dict: dict) -> JernbaneplattformkantProperties:
-        return JernbaneplattformkantProperties(
-            identifikasjon=Identifikasjon(
-                lokal_id=dict["lokalid"],
-                navnerom=dict["identifikasjon_navnerom"],
-                versjon_id=dict["identifikasjon_versjonid"]
-            ),
-            oppdateringsdato=dict["oppdateringsdato"],
-            datafangstdato=dict["datafangstdato"],
-            kvalitet=Posisjonskvalitet(
-                datafangstmetode=Datafangstmetode(dict["kvalitet_datafangstmetode"])
-            ),
-            medium=Medium(dict["medium"])
-        )
-
-def json_to_jernbaneplattformkant(dict: dict) -> JernbaneplattformkantProperties:
-        return JernbaneplattformkantProperties(
-            identifikasjon=Identifikasjon(
-                lokal_id=dict["identifikasjon"]["lokalId"],
-                navnerom=dict["identifikasjon"]["navnerom"],
-                versjon_id=dict["identifikasjon"]["versjonId"]
-            ),
-            oppdateringsdato=dict["oppdateringsdato"],
-            datafangstdato=dict["datafangstdato"],
-            kvalitet=Posisjonskvalitet(
-                datafangstmetode=Datafangstmetode(dict["kvalitet"]["datafangstmetode"])
-            ),
-            medium=Medium(dict["medium"])
-        )
-
-def db_to_spormidt(dict: dict) -> SpormidtProperties:
+    @staticmethod
+    def from_db(row: dict) -> "SpormidtProperties":
         return SpormidtProperties(
             identifikasjon=Identifikasjon(
-                lokal_id=dict["lokalid"],
-                navnerom=dict["identifikasjon_navnerom"],
-                versjon_id=dict["identifikasjon_versjonid"]
+                lokal_id=row["lokalid"],
+                navnerom=row["identifikasjon_navnerom"],
+                versjon_id=row["identifikasjon_versjonid"],
             ),
-            oppdateringsdato=dict["oppdateringsdato"],
-            datafangstdato=dict["datafangstdato"],
+            oppdateringsdato=row["oppdateringsdato"],
+            datafangstdato=row["datafangstdato"],
             kvalitet=Posisjonskvalitet(
-                datafangstmetode=Datafangstmetode(dict["kvalitet_datafangstmetode"])
+                datafangstmetode=Datafangstmetode(row["kvalitet_datafangstmetode"])
             ),
-            medium=Medium(dict["medium"]),
-            jernbanetype=Jernbanetype(dict["jernbanetype"]),
-            hoydereferanse=Hoydereferanse(dict["hoydereferanse"])
+            medium=Medium(row["medium"]),
+            jernbanetype=Jernbanetype(row["jernbanetype"]),
+            hoydereferanse=Hoydereferanse(row["hoydereferanse"]),
         )
 
-def json_to_spormidt(dict: dict) -> SpormidtProperties:
+    @staticmethod
+    def from_post_json(post_json: dict) -> "SpormidtProperties":
         return SpormidtProperties(
             identifikasjon=Identifikasjon(
-                lokal_id=dict["identifikasjon"]["lokalId"],
-                navnerom=dict["identifikasjon"]["navnerom"],
-                versjon_id=dict["identifikasjon"]["versjonId"]
+                lokal_id=post_json["identifikasjon"]["lokalId"],
+                navnerom=post_json["identifikasjon"]["navnerom"],
+                versjon_id=post_json["identifikasjon"]["versjonId"],
             ),
-            oppdateringsdato=dict["oppdateringsdato"],
-            datafangstdato=dict["datafangstdato"],
+            oppdateringsdato=post_json["oppdateringsdato"],
+            datafangstdato=post_json["datafangstdato"],
             kvalitet=Posisjonskvalitet(
-                datafangstmetode=Datafangstmetode(dict["kvalitet"]["datafangstmetode"])
+                datafangstmetode=Datafangstmetode(
+                    post_json["kvalitet"]["datafangstmetode"]
+                )
             ),
-            medium=Medium(dict["medium"]),
-            jernbanetype=Jernbanetype(dict["jernbanetype"]),
-            hoydereferanse=Hoydereferanse(dict["høydereferanse"])
+            medium=Medium(post_json["medium"]),
+            jernbanetype=Jernbanetype(post_json["jernbanetype"]),
+            hoydereferanse=Hoydereferanse(post_json["høydereferanse"]),
         )
+
+    def to_create_params(self, geometry) -> dict:
+        """Create params for sql-create query
+
+        Temporary solution. Do not be afraid to change
+        SHould mostly disappear long term.
+        """
+        return {
+            "lokalid": uuid.uuid4(),  # This should not happen at db-level
+            "identifikasjon_navnerom": self.identifikasjon.navnerom,
+            "identifikasjon_versjonid": self.identifikasjon.versjon_id,
+            "oppdateringsdato": self.oppdateringsdato,
+            "sluttdato": self.sluttdato,
+            "datafangstdato": self.datafangstdato,
+            "verifiseringsdato": self.verifiseringsdato,
+            "registreringsversjon": self.registreringsversjon,
+            "informasjon": self.informasjon,
+            "kvalitet_datafangstmetode": self.kvalitet.datafangstmetode,
+            "kvalitet_noyaktighet": self.kvalitet.noyaktighet,
+            "kvalitet_synbarhet": self.kvalitet.synbarhet,
+            "kvalitet_datafangstmetodehoyde": self.kvalitet.datafangstmetode_hoyde,
+            "kvalitet_noyaktighethoyde": self.kvalitet.noyaktighet_hoyde,
+            "senterlinje": geometry.wkt,
+            "jernbanetype": self.jernbanetype,
+            "hoydereferanse": self.hoydereferanse,
+            "medium": self.medium,
+            "eksternpeker": self.eksternpeker,
+        }

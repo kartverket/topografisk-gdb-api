@@ -1,9 +1,10 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response
 from psycopg import Connection
 
+import app.services.feature_service as fs
 from app.config import settings
 from app.database_manager import get_db_conn
 from app.models.exceptions import FeatureNotFoundError
@@ -17,12 +18,6 @@ from app.models.ogc import (
     FeatureGeoJSON,
     LandingPage,
     Link,
-)
-from app.services.feature_service import (
-    create_feature_geojson,
-    get_feature_geojson,
-    patch_feature_geojson,
-    stream_feature_collection,
 )
 
 router = APIRouter(tags=["OGC API Features - FKB Bane"])
@@ -122,7 +117,7 @@ async def get_conformance():
 )  # Oversikt over alle datasett API-et vårt tilbyr
 async def get_collections(request: Request):
     return Collections(
-        collections=map(lambda id: collection_from_id(id, request), COLLECTIONS),
+        collections=map(lambda cid: collection_from_id(cid, request), COLLECTIONS),
         links=[
             Link(
                 href=f"{request.base_url}collections",
@@ -149,7 +144,7 @@ async def get_collection(collection_id: str, request: Request):
     response_model=FeatureCollectionGeoJSON,
     status_code=200,
 )  # Hent flere features
-async def get_features(
+async def get_features(  # noqa
     collection_id: str,
     request: Request,
     bbox: List[float] = Query(default=[]),
@@ -158,19 +153,16 @@ async def get_features(
     after_id: str | None = None,
     conn: Connection = Depends(get_db_conn),
 ):
-    # Check max page size. Checked here instead of in Query(le=1000) for easier testing
-    # TODO: lacks fastapi direct documenttation of max_page_size
-    if limit > settings.MAX_PAGE_SIZE:
-        raise HTTPException(
-            status_code=400, detail=f"limit cannot exceed {settings.MAX_PAGE_SIZE}"
-        )
-
     if collection_id not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    return StreamingResponse(
-        stream_feature_collection(
-            collection_id, limit, after_id, conn, str(request.url)
+    return Response(
+        content=await fs.get_feature_collection(
+            collection_id=collection_id,
+            limit=min(limit, settings.MAX_PAGE_SIZE),
+            after_id=after_id,
+            conn=conn,
+            request_url=str(request.url),
         ),
         media_type="application/geo+json",
     )
@@ -188,7 +180,10 @@ async def get_feature(
         raise HTTPException(status_code=404, detail="Collection not found")
 
     try:
-        return await get_feature_geojson(collection_id, feature_id, conn)
+        return Response(
+            content=await fs.get_feature_geojson(collection_id, feature_id, conn),
+            media_type="application/geo+json",
+        )
     except FeatureNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -205,7 +200,7 @@ async def create_feature(
     if collection_id not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    created_id = await create_feature_geojson(collection_id, feature, conn)
+    created_id = await fs.create_feature_geojson(collection_id, feature, conn)
     headers = {
         "Location": f"{request.base_url}collections/{collection_id}/items/{created_id}"
     }
@@ -214,8 +209,7 @@ async def create_feature(
 
 @router.patch(
     "/collections/{collection_id}/items/{feature_id}",
-    response_model=FeatureGeoJSON,
-    status_code=200,
+    status_code=204,
 )
 async def update_feature(
     collection_id: str,
@@ -223,7 +217,7 @@ async def update_feature(
     patch: dict,
     conn: Connection = Depends(get_db_conn),
 ):
-    return await patch_feature_geojson(collection_id, feature_id, patch, conn)
+    await fs.patch_feature_geojson(collection_id, feature_id, patch, conn)
 
 
 @router.delete("/collections/{collection_id}/items/{feature_id}", status_code=200)
