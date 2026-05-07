@@ -9,9 +9,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.database_manager import get_db_connection_pool
+from app.database_manager import get_db_connection_pool, initialize_schema
 from app.exception_handlers import EXCEPTION_HANDLERS
-from app.postgis_backend import PostGISBackend
 from app.routes import router
 
 
@@ -25,7 +24,7 @@ async def lifespan(app: FastAPI):
     connection_pool = get_db_connection_pool(settings.connection_url)
     await connection_pool.open()
     async with connection_pool.connection() as conn:
-        await PostGISBackend.initialize_schema(conn)
+        await initialize_schema(conn)
     print("✓ Connected to PostGIS")
 
     yield {"connection_pool": connection_pool}
