@@ -42,10 +42,10 @@ class Datafangstmetode(CaseInsensitiveStrEnum):
 
 # https://register.geonorge.no/sosi-kodelister/fkb/generell/5.0/synbarhet
 class Synbarhet(Enum):
-    fullt_synlig = 0  # Fullt synlig / gjenfinnbart
-    vanskelig = 1  # Vanskelig å definere presist
-    middels = 2  # Middels synlig / gjenkjennbart
-    ikke_synlig = 3  # Ikke synlig / gjenkjennbart
+    fullt_synlig = "0"  # Fullt synlig / gjenfinnbart
+    vanskelig = "1"  # Vanskelig å definere presist
+    middels = "2"  # Middels synlig / gjenkjennbart
+    ikke_synlig = "3"  # Ikke synlig / gjenkjennbart
 
 
 class FKBBase(BaseModel):

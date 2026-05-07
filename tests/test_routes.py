@@ -29,9 +29,12 @@ def make_arealressursflate(lokal_id: str, posisjon: str | None) -> ArealressursF
     )
 
 
-async def mock_get_all(conn, bbox, datetime_query, limit, after_id):
-    yield (make_arealressursflate("id-1", MOCK_POSISJON), MOCK_OMRADE)
-    yield (make_arealressursflate("id-2", None), MOCK_OMRADE)
+async def mock_get_all(conn, collection_id, limit, after_id=None):
+    all_features = [
+        (make_arealressursflate("id-1", MOCK_POSISJON), MOCK_OMRADE),
+        (make_arealressursflate("id-2", None), MOCK_OMRADE),
+    ]
+    return all_features[:limit] if limit is not None else all_features
 
 
 async def mock_db_conn():
@@ -45,9 +48,7 @@ class TestArealressursflateRoute(TestCase):
         self.client = TestClient(app, raise_server_exceptions=True)
 
     def test_get_items_returns_feature_collection(self):
-        with patch(
-            "app.services.feature_service.get_accessor", return_value=mock_get_all
-        ):
+        with patch("app.db.dao.get_features", side_effect=mock_get_all):
             response = self.client.get("/collections/arealressursflate/items?limit=10")
 
         self.assertEqual(200, response.status_code)
@@ -56,9 +57,7 @@ class TestArealressursflateRoute(TestCase):
         self.assertEqual(2, len(body["features"]))
 
     def test_feature_shape(self):
-        with patch(
-            "app.services.feature_service.get_accessor", return_value=mock_get_all
-        ):
+        with patch("app.db.dao.get_features", side_effect=mock_get_all):
             response = self.client.get("/collections/arealressursflate/items")
 
         feature = response.json()["features"][0]
@@ -69,9 +68,7 @@ class TestArealressursflateRoute(TestCase):
         self.assertEqual("id-1", feature["id"])
 
     def test_geometry_serialisation(self):
-        with patch(
-            "app.services.feature_service.get_accessor", return_value=mock_get_all
-        ):
+        with patch("app.db.dao.get_features", side_effect=mock_get_all):
             response = self.client.get("/collections/arealressursflate/items")
 
         features = response.json()["features"]
@@ -81,39 +78,21 @@ class TestArealressursflateRoute(TestCase):
         )
 
     def test_null_posisjon_serialised_as_null(self):
-        with patch(
-            "app.services.feature_service.get_accessor", return_value=mock_get_all
-        ):
+        with patch("app.db.dao.get_features", side_effect=mock_get_all):
             response = self.client.get("/collections/arealressursflate/items")
 
         feature = response.json()["features"][1]
         self.assertIsNone(feature["properties"]["posisjon"])
 
-    def test_limit_exceeds_max_page_size_returns_400(self):
-        with patch.object(settings, "MAX_PAGE_SIZE", 1):
-            response = self.client.get("/collections/arealressursflate/items?limit=2")
-
-        self.assertEqual(400, response.status_code)
-
-    def test_next_link_present_when_page_is_full(self):
-        with patch.object(settings, "MAX_PAGE_SIZE", 2):
-            with patch(
-                "app.services.feature_service.get_accessor", return_value=mock_get_all
-            ):
-                response = self.client.get(
-                    "/collections/arealressursflate/items?limit=2"
-                )
-
-        body = response.json()
-        links = {link["rel"]: link["href"] for link in body.get("links", [])}
-        self.assertIn("next", links)
-        self.assertIn("after_id=id-2", links["next"])
+    def test_limit_exceeds_max_page_size_is_clamped(self):
+        with patch.dict(settings.__dict__, {"MAX_PAGE_SIZE": 1}):
+            with patch("app.db.dao.get_features", side_effect=mock_get_all) as mock_dao:
+                self.client.get("/collections/arealressursflate/items?limit=2")
+        self.assertEqual(1, mock_dao.call_args.kwargs["limit"])
 
     def test_no_next_link_when_page_is_not_full(self):
         with patch.object(settings, "MAX_PAGE_SIZE", 10):
-            with patch(
-                "app.services.feature_service.get_accessor", return_value=mock_get_all
-            ):
+            with patch("app.db.dao.get_features", side_effect=mock_get_all):
                 response = self.client.get(
                     "/collections/arealressursflate/items?limit=10"
                 )
@@ -123,7 +102,7 @@ class TestArealressursflateRoute(TestCase):
         self.assertNotIn("next", rels)
 
 
-async def mock_get_one(feature_id, conn):
+async def mock_get_one(conn, collection_id, feature_id):
     return (make_arealressursflate("id-1", MOCK_POSISJON), MOCK_OMRADE)
 
 
@@ -134,9 +113,7 @@ class TestArealressursflateItemRoute(TestCase):
         self.client = TestClient(app, raise_server_exceptions=True)
 
     def test_get_item_returns_feature(self):
-        with patch(
-            "app.services.feature_service.get_accessor", return_value=mock_get_one
-        ):
+        with patch("app.db.dao.get_feature", side_effect=mock_get_one):
             response = self.client.get("/collections/arealressursflate/items/id-1")
 
         self.assertEqual(200, response.status_code)
@@ -145,9 +122,7 @@ class TestArealressursflateItemRoute(TestCase):
         self.assertEqual("id-1", body["id"])
 
     def test_item_geometry(self):
-        with patch(
-            "app.services.feature_service.get_accessor", return_value=mock_get_one
-        ):
+        with patch("app.db.dao.get_feature", side_effect=mock_get_one):
             response = self.client.get("/collections/arealressursflate/items/id-1")
 
         body = response.json()

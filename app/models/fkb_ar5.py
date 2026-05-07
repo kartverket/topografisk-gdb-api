@@ -84,8 +84,8 @@ class ArealressursGrense(FKBFelles):
         return ArealressursGrense(
             identifikasjon=Identifikasjon(
                 lokal_id=row["lokalid"],
-                navnerom=row["identifikasjon_navnerom"],
-                versjon_id=row["identifikasjon_versjonid"],
+                navnerom=row["navnerom"],
+                versjon_id=row["versjonid"],
             ),
             oppdateringsdato=row["oppdateringsdato"],
             datafangstdato=row["datafangstdato"],
@@ -114,12 +114,12 @@ class ArealressursFlate(FKBFelles):
     )
 
     @staticmethod
-    def from_db(row: dict, posisjon: str) -> "ArealressursFlate":
+    def from_db(row: dict) -> "ArealressursFlate":
         return ArealressursFlate(
             identifikasjon=Identifikasjon(
                 lokal_id=row["lokalid"],
-                navnerom=row["identifikasjon_navnerom"],
-                versjon_id=row["identifikasjon_versjonid"],
+                navnerom=row["navnerom"],
+                versjon_id=row["versjonid"],
             ),
             oppdateringsdato=row["oppdateringsdato"],
             datafangstdato=row["datafangstdato"],
@@ -129,5 +129,5 @@ class ArealressursFlate(FKBFelles):
             skogbonitet=row["skogbonitet"],
             grunnforhold=row["grunnforhold"],
             klassifiseringsmetode=row["klassifiseringsmetode"],
-            posisjon=orjson.loads(posisjon) if posisjon else None,
+            posisjon=orjson.loads(row["posisjon"]) if row["posisjon"] else None,
         )
