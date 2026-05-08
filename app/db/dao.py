@@ -9,7 +9,7 @@ To add a collection or operation, write proper SQL and attach it
 to SQL_MODEL_LOOKUP.
 """
 
-from typing import Tuple
+from typing import List, Tuple
 
 from psycopg import Connection
 
@@ -22,23 +22,27 @@ from app.models.fkb_bane import JernbaneplattformkantProperties, SpormidtPropert
 SQL_DATASET_LOOKUP = {
     "arealressursgrense": {
         "select": ar5_sql.AREALRESSURSGRENSE_SELECT,
+        "bbox": ar5_sql.AREALRESSURSGRENSE_BBOX,
         "model": ArealressursGrense,
         "sql_queries": ar5_sql,
     },
     "arealressursflate": {
         "select": ar5_sql.AREALRESSURSFLATE_SELECT,
+        "bbox": ar5_sql.AREALRESSURSFLATE_BBOX,
         "model": ArealressursFlate,
         "sql_queries": ar5_sql,
     },
     "jernbaneplattformkant": {
         "select": fkb_bane_sql.JERNBANEPLATTFORM_SELECT,
         "create": fkb_bane_sql.JERNBANEPLATTFORM_CREATE,
+        "bbox": fkb_bane_sql.JERNBANEPLATTFORM_BBOX,
         "model": JernbaneplattformkantProperties,
         "sql_queries": fkb_bane_sql,
     },
     "spormidt": {
         "select": fkb_bane_sql.SPORMIDT_SELECT,
         "create": fkb_bane_sql.SPORMIDT_CREATE,
+        "bbox": fkb_bane_sql.SPORMIDT_BBOX,
         "model": SpormidtProperties,
         "sql_queries": fkb_bane_sql,
     },
@@ -78,6 +82,8 @@ async def get_features(
     conn: Connection,
     collection_id: str,
     limit: int,
+    bbox: List[float] | None = None,
+    datetime_query: str | None = None,
     after_id: str | None = None,
 ) -> list:
     """Returns a list of features structured as (properties, geometry)
@@ -88,9 +94,22 @@ async def get_features(
     by lokalid. limit=None returns all matching rows.
     """
     dataset = SQL_DATASET_LOOKUP[collection_id]
+
+    selector = dataset["sql_queries"].AFTER_ID_LIMIT
+    if bbox is not None:
+        selector = dataset["bbox"]
+
+    params = {"limit": limit, "after_id": after_id}
+
+    if bbox is not None:
+        params["lower_left_x"] = bbox[0]
+        params["lower_left_y"] = bbox[1]
+        params["upper_right_x"] = bbox[2]
+        params["upper_right_y"] = bbox[3]
+
     result = await conn.execute(
-        " ".join([dataset["select"], dataset["sql_queries"].AFTER_ID_LIMIT]),
-        params={"limit": limit, "after_id": after_id},
+        query=" ".join([dataset["select"], selector]),
+        params=params,
     )
     rows = await result.fetchall()
     return [(dataset["model"].from_db(row), row["main_geometry"]) for row in rows]

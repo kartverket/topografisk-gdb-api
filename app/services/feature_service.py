@@ -33,6 +33,8 @@ async def get_feature_geojson(
 
 async def get_feature_collection(
     collection_id: str,
+    bbox: str | None,
+    datetime_query: str | None,
     limit: int | None,
     after_id: str | None,
     conn: Connection,
@@ -44,9 +46,19 @@ async def get_feature_collection(
     when the returned page is full.
     Byteserialisation is chosen to avoid round-tripping through stdlib JSON
     """
+
+    bbox_array = None
+    if bbox is not None:
+        bbox_array = bbox.split(",")
+
     # TODO: Implement other features, include type hinting
     rows = await dao.get_features(
-        conn=conn, limit=limit, after_id=after_id, collection_id=collection_id
+        conn=conn,
+        limit=limit,
+        after_id=after_id,
+        collection_id=collection_id,
+        bbox=bbox_array,
+        datetime_query=datetime_query,
     )
     features = [
         {

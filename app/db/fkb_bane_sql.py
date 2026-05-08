@@ -8,7 +8,18 @@ AFTER_ID_LIMIT = """
     ORDER BY lokalid
     LIMIT %(limit)s
 """
-
+JERNBANEPLATTFORM_BBOX = """
+    WHERE (%(after_id)s::text IS NULL OR lokalid::text > %(after_id)s::text)
+    AND ST_Intersects(ST_Transform(grense, 4326), ST_MakeEnvelope(%(lower_left_x)s, %(lower_left_y)s, %(upper_right_x)s, %(upper_right_y)s, 4326))
+    ORDER BY lokalid
+    LIMIT %(limit)s
+"""
+SPORMIDT_BBOX = """
+    WHERE (%(after_id)s::text IS NULL OR lokalid::text > %(after_id)s::text)
+    AND ST_Intersects(ST_Transform(senterlinje, 4326), ST_MakeEnvelope(%(lower_left_x)s, %(lower_left_y)s, %(upper_right_x)s, %(upper_right_y)s, 4326))
+    ORDER BY lokalid
+    LIMIT %(limit)s
+"""
 
 CREATE_COMMON_NAMES = """
     lokalid,

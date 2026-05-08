@@ -29,7 +29,7 @@ def make_arealressursflate(lokal_id: str, posisjon: str | None) -> ArealressursF
     )
 
 
-async def mock_get_all(conn, collection_id, limit, after_id=None):
+async def mock_get_all(conn, collection_id, bbox, datetime_query, limit, after_id=None):
     all_features = [
         (make_arealressursflate("id-1", MOCK_POSISJON), MOCK_OMRADE),
         (make_arealressursflate("id-2", None), MOCK_OMRADE),
@@ -100,6 +100,30 @@ class TestArealressursflateRoute(TestCase):
         body = response.json()
         rels = [link["rel"] for link in body.get("links", [])]
         self.assertNotIn("next", rels)
+
+    def test_valid_bbox_accepted(self):
+        with patch("app.db.dao.get_features", side_effect=mock_get_all):
+            response = self.client.get(
+                "/collections/arealressursflate/items?bbox=0,0,10,10"
+            )
+
+        self.assertEqual(200, response.status_code)
+
+    def test_too_small_bbox_returns_bad_request(self):
+        with patch("app.db.dao.get_features", side_effect=mock_get_all):
+            response = self.client.get(
+                "/collections/arealressursflate/items?bbox=0,0,10"
+            )
+
+        self.assertEqual(400, response.status_code)
+
+    def test_non_numeric_bbox_returns_bad_request(self):
+        with patch("app.db.dao.get_features", side_effect=mock_get_all):
+            response = self.client.get(
+                "/collections/arealressursflate/items?bbox=0,0,10,a"
+            )
+
+        self.assertEqual(400, response.status_code)
 
 
 async def mock_get_one(conn, collection_id, feature_id):
