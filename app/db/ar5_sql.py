@@ -71,3 +71,16 @@ AFTER_ID_LIMIT = """
     ORDER BY identifikasjon_lokal_id
     LIMIT %(limit)s
 """
+
+AREALRESSURSFLATE_BBOX = """
+    WHERE (%(after_id)s::text IS NULL OR identifikasjon_lokal_id::text > %(after_id)s::text)
+    AND ST_Intersects(ST_Transform(omrade, 4326), ST_MakeEnvelope(%(lower_left_x)s, %(lower_left_y)s, %(upper_right_x)s, %(upper_right_y)s, 4326))
+    ORDER BY identifikasjon_lokal_id
+    LIMIT %(limit)s
+"""
+AREALRESSURSGRENSE_BBOX = """
+    WHERE (%(after_id)s::text IS NULL OR identifikasjon_lokal_id::text > %(after_id)s::text)
+    AND ST_Intersects(ST_Transform(grense, 4326), ST_MakeEnvelope(%(lower_left_x)s, %(lower_left_y)s, %(upper_right_x)s, %(upper_right_y)s, 4326))
+    ORDER BY identifikasjon_lokal_id
+    LIMIT %(limit)s
+"""
