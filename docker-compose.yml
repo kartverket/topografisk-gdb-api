@@ -11,6 +11,7 @@ services:
     volumes:
       - ./ar5_nibio_db_init.sql:/docker-entrypoint-initdb.d/01_ar5_db_nibio.sql
       - ./alter_nibio_schema.sql:/docker-entrypoint-initdb.d/02_ar5_db_nibio.sql
+      - ./ar5_api_featurizers.sql:/docker-entrypoint-initdb.d/03_ar5_api_featurizers.sql
       # Persist data across restarts
       - postgres_data:/var/lib/postgresql
     healthcheck:
