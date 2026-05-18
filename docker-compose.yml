@@ -26,6 +26,9 @@ services:
     container_name: postgis-api
     environment:
       APP_ENV: production
+      AR5_BASE_URL: http://localhost:8000/ar5
+      PYGEOAPI_CONFIG: /app/ar5.yaml
+      PYGEOAPI_OPENAPI: /app/openapi.ar5.yaml
     ports:
       - "8000:8000"
     depends_on:

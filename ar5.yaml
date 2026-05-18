@@ -1,0 +1,102 @@
+server:
+  bind:
+    host: 0.0.0.0
+    port: 5000
+  url: ${AR5_BASE_URL}
+  mimetype: application/json; charset=UTF-8
+  encoding: utf-8
+  language: nb-NO
+  cors: true
+  pretty_print: true
+  limit: 10
+  map:
+    url: https://tile.openstreetmap.org/{z}/{x}/{y}.png
+    attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap contributors</a>'
+
+logging:
+  level: ERROR
+  logfile: /tmp/pygeoapi-ar5.log
+
+metadata:
+  identification:
+    title: AR5 API
+    description: AR5 land-use topology collections
+    keywords:
+      - AR5
+      - FKB
+      - areal
+    keywords_type: theme
+    terms_of_service: null
+    url: ''
+  license:
+    name: CC-BY 4.0
+    url: https://creativecommons.org/licenses/by/4.0/
+  provider:
+    name: NIBIO
+    url: https://nibio.no
+  contact:
+    name: null
+    position: null
+    address: null
+    city: null
+    stateorprovince: null
+    postalcode: null
+    country: null
+    phone: null
+    fax: null
+    email: null
+    url: null
+    hours: null
+    instructions: null
+    role: pointOfContact
+
+resources:
+  arealressursflate:
+    type: collection
+    title: Arealressursflate
+    description: AR5 land-use polygons
+    keywords:
+      - ar5
+      - arealressurs
+    links: []
+    extents:
+      spatial:
+        bbox: [-180, -90, 180, 90]
+        crs: http://www.opengis.net/def/crs/OGC/1.3/CRS84
+      temporal:
+        begin: null
+        end: null
+    providers:
+      - type: feature
+        name: app.providers.ar5_provider.Ar5FeatureProvider
+        data: postgresql
+        id_field: identifikasjon_lokal_id
+        table: topo_ar5ngis.face_attributes
+        featurizer: ar5_api.arealressursflate_feature
+        geometry_column: omrade
+        native_srid: 4258
+
+  arealressursgrense:
+    type: collection
+    title: Arealressursgrense
+    description: AR5 land-use boundary lines
+    keywords:
+      - ar5
+      - arealressurs
+    links: []
+    extents:
+      spatial:
+        bbox: [-180, -90, 180, 90]
+        crs: http://www.opengis.net/def/crs/OGC/1.3/CRS84
+      temporal:
+        begin: null
+        end: null
+    providers:
+      - type: feature
+        name: app.providers.ar5_provider.Ar5FeatureProvider
+        data: postgresql
+        id_field: identifikasjon_lokal_id
+        table: topo_ar5ngis.edge_attributes
+        featurizer: ar5_api.arealressursgrense_feature
+        geometry_column: grense
+        native_srid: 4258
