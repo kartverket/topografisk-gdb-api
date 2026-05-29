@@ -1,0 +1,55 @@
+{
+  "description": "Insert a closed ring to create a new surface. The ring is added as a single border; the enclosed area becomes an ArealressursFlate.",
+  "request": {
+    "method": "POST",
+    "path": "/ar5/processes/add_border_split_surface/execution",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "inputs": {
+        "feature": {
+          "value": {
+            "type": "Feature",
+            "geometry": {
+              "type": "LineString",
+              "crs": { "type": "name", "properties": { "name": "EPSG:4326" } },
+              "coordinates": [
+                [10.3850, 63.4305],
+                [10.3860, 63.4305],
+                [10.3860, 63.4315],
+                [10.3850, 63.4315],
+                [10.3850, 63.4305]
+              ]
+            },
+            "properties": {}
+          },
+          "mediaType": "application/geo+json"
+        }
+      },
+      "outputs": {
+        "changelog": { "transmissionMode": "value" },
+        "summary":   { "transmissionMode": "value" }
+      },
+      "response": "document"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "changelog": [
+        { "fid": "00000000-0000-0000-0000-000000000005", "typ": "B", "act": "C", "frm": null },
+        { "fid": "00000000-0000-0000-0000-000000000006", "typ": "S", "act": "C", "frm": null }
+      ],
+      "summary": {
+        "totalCreated": 2,
+        "totalModified": 0,
+        "totalDeleted": 0,
+        "totalSplit": 0
+      }
+    }
+  }
+}

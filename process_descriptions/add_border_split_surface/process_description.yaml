@@ -1,0 +1,107 @@
+id: add_border_split_surface
+version: 1.0.0
+title: Add border and split surface
+description: >
+  Inserts a line geometry as a new topological border. Surfaces intersected
+  by the border are split and surrounding topology is updated. Returns a
+  changelog of all affected features.
+
+metadata:
+  - href: /ar5/docs/processes/add_border_split_surface
+    rel: describedby
+    type: text/html
+    title: Process documentation with examples
+
+jobControlOptions:
+  - sync-execute
+outputTransmission:
+  - value
+
+inputs:
+
+  feature:
+    title: Border geometry
+    description: >
+      GeoJSON Feature with a LineString or MultiLineString geometry
+      representing the border to insert. Properties are mapped to border
+      layer columns via server-side column mapping configuration.
+    minOccurs: 1
+    maxOccurs: 1
+    schema:
+      allOf:
+        - format: geojson-feature
+        - type: object
+          properties:
+            geometry:
+              oneOf:
+                - $ref: https://geojson.org/schema/LineString.json
+                - $ref: https://geojson.org/schema/MultiLineString.json
+
+  # Andre input som er oversett?
+
+outputs:
+
+  changelog:
+    title: Changelog
+    description: >
+      Ordered list of all features created, modified, split-from, or deleted
+      as a consequence of the operation.
+    schema:
+      type: array
+      items:
+        type: object
+        required: [fid, typ, act]
+        properties:
+          fid:
+            type: string
+            description: feature id
+          typ:
+            type: string
+            enum: [S, B]
+            description: S=ArealressursFlate, B=Arealressursgrense
+          act:
+            type: string
+            enum: [M, C, S, D]
+            description: M=modified, C=created, S=split-from, D=deleted
+          frm:
+            type: string
+            nullable: true
+            description: Source fid for derived features; null otherwise
+
+  features:
+    title: Affected features
+    description: >
+      GeoJSON FeatureCollection of all features referenced in the changelog,
+      with current geometry and attributes. For map clients that need to
+      redraw without a second fetch.
+    schema:
+      allOf:
+        - format: geojson-feature-collection
+        - $ref: https://geojson.org/schema/FeatureCollection.json
+
+  summary:
+    title: Summary
+    description: Counts of affected features by action type.
+    schema:
+      type: object
+      # PLACEHOLDER: vocabulary - Part 11 style (totalInserted/totalUpdated)
+      # or topology-specific terms?
+      properties:
+        totalCreated:
+          type: integer
+        totalModified:
+          type: integer
+        totalDeleted:
+          type: integer
+        totalSplit:
+          type: integer
+
+  parsed:  # Fill out relevant details after discussion with Lars
+    title: Relevant changes
+    description: >
+      Interpreted view of the operation result. Intended for
+      clients that want to update their state directly without parsing
+      act/typ codes. The raw changelog is always available for audit purposes.
+    schema:
+      type: object
+      # PLACEHOLDER: schema to be defined

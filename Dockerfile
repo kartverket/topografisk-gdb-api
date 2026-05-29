@@ -28,6 +28,8 @@ COPY --from=base /venv /venv
 # Copy application code (relative to deployments/)
 COPY app ./app
 COPY ar5.yaml openapi.ar5.yaml ./
+COPY process_descriptions ./process_descriptions
+
 
 # Expose port
 EXPOSE 8000

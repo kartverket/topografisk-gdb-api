@@ -688,6 +688,109 @@ paths:
       summary: This document
       tags:
       - server
+  /processes:
+    get:
+      description: Processes
+      operationId: getProcesses
+      parameters:
+      - $ref: '#/components/parameters/f'
+      responses:
+        '200':
+          $ref: https://schemas.opengis.net/ogcapi/processes/part1/1.0/openapi/responses/ProcessList.yaml
+        default:
+          $ref: '#/components/responses/default'
+      summary: Processes
+      tags:
+      - server
+  /processes/add_border_split_surface:
+    get:
+      description: 'Inserts a line geometry as a new topological border. Surfaces
+        intersected by the border are split and surrounding topology is updated. Returns
+        a changelog of all affected features.
+
+        '
+      operationId: describeAdd_border_split_surfaceProcess
+      parameters:
+      - $ref: '#/components/parameters/f'
+      responses:
+        '200':
+          $ref: '#/components/responses/200'
+        default:
+          $ref: '#/components/responses/default'
+      summary: Get process metadata
+      tags:
+      - add_border_split_surface
+  /processes/add_border_split_surface/execution:
+    post:
+      description: 'Inserts a line geometry as a new topological border. Surfaces
+        intersected by the border are split and surrounding topology is updated. Returns
+        a changelog of all affected features.
+
+        '
+      operationId: executeAdd_border_split_surfaceJob
+      parameters:
+      - description: Indicates client preferences, including whether the client is
+          capable of asynchronous processing.
+        in: header
+        name: Prefer
+        required: false
+        schema:
+          enum:
+          - respond-sync
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: https://schemas.opengis.net/ogcapi/processes/part1/1.0/openapi/schemas/execute.yaml
+        description: Mandatory execute request JSON
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                items:
+                  properties:
+                    act:
+                      description: M=modified, C=created, S=split-from, D=deleted
+                      enum:
+                      - M
+                      - C
+                      - S
+                      - D
+                      type: string
+                    fid:
+                      description: feature id
+                      type: string
+                    frm:
+                      description: Source fid for derived features; null otherwise
+                      nullable: true
+                      type: string
+                    typ:
+                      description: S=ArealressursFlate, B=Arealressursgrense
+                      enum:
+                      - S
+                      - B
+                      type: string
+                  required:
+                  - fid
+                  - typ
+                  - act
+                  type: object
+                type: array
+          description: Process output schema
+        '201':
+          $ref: https://schemas.opengis.net/ogcapi/processes/part1/1.0/openapi/responses/ExecuteAsync.yaml
+        '404':
+          $ref: https://schemas.opengis.net/ogcapi/processes/part1/1.0/openapi/responses/NotFound.yaml
+        '500':
+          $ref: https://schemas.opengis.net/ogcapi/processes/part1/1.0/openapi/responses/ServerError.yaml
+        default:
+          $ref: '#/components/responses/default'
+      summary: Process Add border and split surface execution
+      tags:
+      - add_border_split_surface
 servers:
 - description: AR5 land-use topology collections
   url: http://localhost:8000/ar5

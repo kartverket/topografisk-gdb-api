@@ -100,3 +100,8 @@ resources:
         featurizer: ar5_api.arealressursgrense_feature
         geometry_column: grense
         native_srid: 4258
+
+  add_border_split_surface:
+    type: process
+    processor:
+      name: app.processes.ar5_processes.AddBorderSplitSurfaceProcessor

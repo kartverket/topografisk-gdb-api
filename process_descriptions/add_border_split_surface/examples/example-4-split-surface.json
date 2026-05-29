@@ -1,0 +1,55 @@
+{
+  "description": "Insert a line through an existing surface to split it in two. Run after example-3. The original surface is kept as modified (one half); a new surface is created as the other half (keepModifiedSurface=true behaviour).",
+  "request": {
+    "method": "POST",
+    "path": "/ar5/processes/add_border_split_surface/execution",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "inputs": {
+        "feature": {
+          "value": {
+            "type": "Feature",
+            "geometry": {
+              "type": "LineString",
+              "crs": { "type": "name", "properties": { "name": "EPSG:4326" } },
+              "coordinates": [
+                [10.3855, 63.4300],
+                [10.3855, 63.4320]
+              ]
+            },
+            "properties": {}
+          },
+          "mediaType": "application/geo+json"
+        }
+      },
+      "outputs": {
+        "changelog": { "transmissionMode": "value" },
+        "summary":   { "transmissionMode": "value" }
+      },
+      "response": "document"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "changelog": [
+        { "fid": "00000000-0000-0000-0000-000000000007", "typ": "B", "act": "S", "frm": "00000000-0000-0000-0000-000000000005" },
+        { "fid": "00000000-0000-0000-0000-000000000005", "typ": "B", "act": "M", "frm": null },
+        { "fid": "00000000-0000-0000-0000-000000000008", "typ": "B", "act": "C", "frm": null },
+        { "fid": "00000000-0000-0000-0000-000000000006", "typ": "S", "act": "M", "frm": null },
+        { "fid": "00000000-0000-0000-0000-000000000009", "typ": "S", "act": "S", "frm": "00000000-0000-0000-0000-000000000006" }
+      ],
+      "summary": {
+        "totalCreated": 1,
+        "totalModified": 2,
+        "totalDeleted": 0,
+        "totalSplit": 2
+      }
+    }
+  }
+}
