@@ -1,0 +1,8 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: topografisk-gdb-api
+spec:
+  type: documentation
+  owner: topografisk_grunndatabase
+  lifecycle: experimental
