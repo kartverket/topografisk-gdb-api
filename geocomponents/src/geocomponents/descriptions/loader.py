@@ -19,7 +19,6 @@ from .models import (
     BUILTIN_SQL_TYPES,
     CodeList,
     Commons,
-    CollectionDef,
     DatasetDef,
     FieldDef,
     FieldType,

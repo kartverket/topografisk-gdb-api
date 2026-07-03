@@ -2,7 +2,7 @@
 
 Drives the mounted OGC API over HTTP (Starlette TestClient) and asserts the
 observable behaviour — endpoints, per-collection capability (CRUD vs 405), bbox,
-links, PATCH partial update, declared processes. No geocomp internals are
+links, PATCH partial update, declared processes. No geocomponents internals are
 touched beyond building the app the way ``serve`` does, so any server exposing
 the same HTTP contract passes.
 
@@ -12,12 +12,14 @@ assertions pin the examples.
 
 from __future__ import annotations
 
+from http import HTTPStatus
+
 import orjson
 import pytest
 from starlette.testclient import TestClient
 
-from geocomp.api.pygeoapi_provider import PygeoapiProvider
-from geocomp.gateway.mounter import build_gateway
+from geocomponents.api.pygeoapi_provider import PygeoapiProvider
+from geocomponents.gateway.mounter import build_gateway
 
 BASE_URL = "http://localhost:8000"
 _GEOM_MULTIPOLYGON = {
@@ -42,16 +44,31 @@ def _api(dataset_name: str) -> str:
 def test_landing_and_collections_listed_for_every_dataset(client, datasets):
     for d in datasets:
         api = _api(d.name)
-        assert client.get(f"{api}/?f=json").status_code == 200
+        assert client.get(f"{api}/?f=json").status_code == HTTPStatus.OK
         listed = client.get(f"{api}/collections?f=json").json()["collections"]
         assert {c["id"] for c in listed} == {c.name for c in d.collections}
+
+
+def test_html_landing_is_isolated_per_dataset(datasets):
+    # Regression: pygeoapi memoizes the translated config in a process-global
+    # cache keyed only by locale, which leaked the first dataset's HTML chrome
+    # (links/title/static) into every dataset's page. Landing-page HTML needs no
+    # DB, so this runs without one. (Vacuous with a single dataset.)
+    client = TestClient(
+        build_gateway(datasets, PygeoapiProvider(dsn="host=unused"), base_url=BASE_URL))
+    for d in datasets:
+        html = client.get(f"{_api(d.name)}/?f=html").text
+        assert f"/datasets/{d.name}/ogc_api" in html
+        for other in datasets:
+            if other.name != d.name:
+                assert f"/datasets/{other.name}/ogc_api" not in html
 
 
 def test_items_return_featurecollection_with_links(client, datasets):
     for d in datasets:
         for coll in d.collections:
             r = client.get(f"{_api(d.name)}/collections/{coll.name}/items?f=json")
-            assert r.status_code == 200
+            assert r.status_code == HTTPStatus.OK
             fc = r.json()
             assert fc["type"] == "FeatureCollection"
             assert isinstance(fc["links"], list) and fc["links"]  # pygeoapi envelope
@@ -72,16 +89,16 @@ def test_capability_matches_feature_model(client, datasets):
                 # Every write verb is rejected with 405.
                 assert client.post(items, content=empty,
                                    headers={"content-type": "application/geo+json"}
-                                   ).status_code == 405
+                                   ).status_code == HTTPStatus.METHOD_NOT_ALLOWED
                 assert client.put(f"{items}/x", content=empty,
                                   headers={"content-type": "application/geo+json"}
-                                  ).status_code == 405
+                                  ).status_code == HTTPStatus.METHOD_NOT_ALLOWED
                 assert client.patch(f"{items}/x", content=empty,
                                     headers={"content-type": "application/geo+json"}
-                                    ).status_code == 405
-                assert client.delete(f"{items}/x").status_code == 405
+                                    ).status_code == HTTPStatus.METHOD_NOT_ALLOWED
+                assert client.delete(f"{items}/x").status_code == HTTPStatus.METHOD_NOT_ALLOWED
                 # ...but reads still work.
-                assert client.get(f"{items}?f=json").status_code == 200
+                assert client.get(f"{items}?f=json").status_code == HTTPStatus.OK
 
 
 def test_declared_processes_are_exactly_what_the_dataset_lists(client, datasets):
@@ -101,21 +118,21 @@ def test_golden_cadastre_crud_and_patch_roundtrip(client):
     r = client.post(f"{api}/collections/parcels/items",
                     content=orjson.dumps(feat).decode(),
                     headers={"content-type": "application/geo+json"})
-    assert r.status_code == 201
+    assert r.status_code == HTTPStatus.CREATED
     fid = r.headers["Location"].rstrip("/").split("/")[-1]
 
     # PATCH changes only 'label'; 'source' is untouched.
     r = client.patch(f"{api}/collections/parcels/items/{fid}",
                      content=orjson.dumps({"properties": {"label": "B"}}).decode(),
                      headers={"content-type": "application/geo+json"})
-    assert r.status_code == 204
+    assert r.status_code == HTTPStatus.NO_CONTENT
     props = client.get(f"{api}/collections/parcels/items/{fid}?f=json").json()["properties"]
     assert props["label"] == "B"
     assert props["source"] == "golden"
 
-    assert client.delete(f"{api}/collections/parcels/items/{fid}").status_code == 200
+    assert client.delete(f"{api}/collections/parcels/items/{fid}").status_code == HTTPStatus.OK
     assert client.get(
-        f"{api}/collections/parcels/items/{fid}?f=json").status_code == 404
+        f"{api}/collections/parcels/items/{fid}?f=json").status_code == HTTPStatus.NOT_FOUND
 
 
 def test_golden_bbox_filter(client):
@@ -151,5 +168,5 @@ def test_golden_process_execution_echoes(client):
     r = client.post(f"{_api('cadastre')}/processes/hello/execution",
                     content=orjson.dumps({"inputs": {"name": "world"}}).decode(),
                     headers={"content-type": "application/json"})
-    assert r.status_code == 200
+    assert r.status_code == HTTPStatus.OK
     assert "Dataset echoes: world" in r.text

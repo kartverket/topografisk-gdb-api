@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from geocomp.api.pygeoapi_provider import PROVIDER_PATH, build_config
-from geocomp.descriptions.loader import load_resolved_datasets
+from geocomponents.api.pygeoapi_provider import PROVIDER_PATH, build_config
+from geocomponents.descriptions.loader import load_resolved_datasets
 
 DESCRIPTIONS = Path(__file__).resolve().parents[1] / "descriptions"
 PUBLIC_URL = "http://example.org/datasets/cadastre/ogc_api"

@@ -1,5 +1,5 @@
 [project]
-name = "geocomp"
+name = "geocomponents"
 version = "0.1.0"
 description = "Description-driven, swappable components for storing, distributing and updating geographic data"
 readme = "README.md"
@@ -16,12 +16,12 @@ dependencies = [
 ]
 
 [project.scripts]
-geocomp = "geocomp.cli:app"
+geocomponents = "geocomponents.cli:app"
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
-    "httpx>=0.27",
+    "httpx2>=2.5",
 ]
 
 [build-system]
@@ -29,7 +29,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/geocomp"]
+packages = ["src/geocomponents"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

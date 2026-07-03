@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from geocomp.descriptions.loader import load_resolved_datasets
-from geocomp.schema.build import build_schema_plan
-from geocomp.schema.functions import dispatch_statements, function_statements
-from geocomp.schema.plan import OPERATIONS, READ_OPS
+from geocomponents.descriptions.loader import load_resolved_datasets
+from geocomponents.schema.build import build_schema_plan
+from geocomponents.schema.functions import dispatch_statements, function_statements
+from geocomponents.schema.plan import OPERATIONS, READ_OPS
 
 DESCRIPTIONS = Path(__file__).resolve().parents[1] / "descriptions"
 
@@ -16,7 +16,7 @@ def _plan(name="cadastre"):
 def test_dispatch_exposes_the_six_feature_entrypoints_taking_dataset_and_collection():
     sql = "\n".join(dispatch_statements())
     for op in OPERATIONS:
-        assert f"function geocomp.feature_{op}(" in sql
+        assert f"function ogc.feature_{op}(" in sql
     # The fixed entrypoints route by OGC identifiers, not physical names.
     assert "dataset text, collection text" in sql
 

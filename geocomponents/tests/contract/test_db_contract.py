@@ -1,9 +1,9 @@
-"""Language-agnostic DB contract: the ``geocomp.feature_*`` dispatch surface.
+"""Language-agnostic DB contract: the ``ogc.feature_*`` dispatch surface.
 
 These tests connect to PostGIS and call ONLY the public dispatch functions with
 OGC identifiers ``(dataset, collection)`` — never a table or internal function
-name, never any geocomp Python internals. Any database that exposes the same
-``geocomp.feature_*`` contract (in any language) passes them unchanged.
+name, never any geocomponents Python internals. Any database that exposes the same
+``ogc.feature_*`` contract (in any language) passes them unchanged.
 
 They are *generic*: the checks are derived from each dataset description, so they
 apply to any dataset. A couple of *fixed* golden assertions pin the examples.
@@ -49,19 +49,19 @@ def _sample_feature(coll):
 
 
 # -- thin wrappers over the contract surface --------------------------------
-def _items(cur, ds, coll, bbox=None, lim=10, off=0, with_matched=True):
-    cur.execute("select geocomp.feature_items(%s,%s,%s,%s,%s,%s)",
+def _items(cur, ds, coll, bbox=None, lim=10, off=0, with_matched=True):  # noqa: PLR0913 - mirrors the ogc.feature_items dispatch signature
+    cur.execute("select ogc.feature_items(%s,%s,%s,%s,%s,%s)",
                 (ds, coll, bbox, lim, off, with_matched))
     return cur.fetchone()[0]
 
 
 def _item(cur, ds, coll, fid):
-    cur.execute("select geocomp.feature_item(%s,%s,%s)", (ds, coll, fid))
+    cur.execute("select ogc.feature_item(%s,%s,%s)", (ds, coll, fid))
     return cur.fetchone()[0]
 
 
 def _create(cur, ds, coll, feature):
-    cur.execute("select geocomp.feature_create(%s,%s,%s)",
+    cur.execute("select ogc.feature_create(%s,%s,%s)",
                 (ds, coll, orjson.dumps(feature).decode()))
     return cur.fetchone()[0]
 
@@ -107,7 +107,7 @@ def test_simple_collections_support_full_crud_roundtrip(datasets, conn):
                 changed = next((f for f in coll.fields if f.name != "source"), None)
                 if changed and witness:
                     cur.execute(
-                        "select geocomp.feature_update(%s,%s,%s,%s)",
+                        "select ogc.feature_update(%s,%s,%s,%s)",
                         (d.name, coll.name, fid, orjson.dumps(
                             {"properties": {changed.name: _value(changed.sql_type, 1)}}
                         ).decode()))
@@ -115,7 +115,7 @@ def test_simple_collections_support_full_crud_roundtrip(datasets, conn):
                     assert props[changed.name] == _value(changed.sql_type, 1)
                     assert props["source"] == "orig"  # untouched
 
-                cur.execute("select geocomp.feature_delete(%s,%s,%s)",
+                cur.execute("select ogc.feature_delete(%s,%s,%s)",
                             (d.name, coll.name, fid))
                 assert cur.fetchone()[0] is True
                 assert _item(cur, d.name, coll.name, fid) is None
@@ -150,5 +150,5 @@ def test_golden_parcels_feature_shape(conn):
         assert feat["geometry"]["type"] == "MultiPolygon"
         assert {"label", "municipality", "status", "area_m2", "source",
                 "created_at", "updated_at"} <= set(feat["properties"])
-        cur.execute("select geocomp.feature_delete(%s,%s,%s)",
+        cur.execute("select ogc.feature_delete(%s,%s,%s)",
                     ("cadastre", "parcels", fid))

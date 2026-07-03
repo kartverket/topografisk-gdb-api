@@ -31,7 +31,7 @@ def build_gateway(
     base_url: str,
 ) -> FastAPI:
     base_url = base_url.rstrip("/")
-    app = FastAPI(title="geocomp gateway")
+    app = FastAPI(title="geocomponents gateway")
 
     mounts: list[DatasetMount] = []
     for dataset in datasets:
@@ -40,6 +40,10 @@ def build_gateway(
         sub_app = provider.build_app(dataset, public_url)
         app.mount(path, sub_app)
         mounts.append(DatasetMount(dataset, path, public_url))
+
+    @app.get("/healthz")
+    def healthz():
+        return {"status": "ok"}
 
     @app.get("/datasets")
     def list_datasets():

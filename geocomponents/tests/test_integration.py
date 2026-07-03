@@ -6,11 +6,13 @@ HTTP CRUD roundtrip. If any seam is broken, this single readable test fails.
 
 from __future__ import annotations
 
+from http import HTTPStatus
+
 import orjson
 from starlette.testclient import TestClient
 
-from geocomp.api.pygeoapi_provider import PygeoapiProvider
-from geocomp.gateway.mounter import build_gateway
+from geocomponents.api.pygeoapi_provider import PygeoapiProvider
+from geocomponents.gateway.mounter import build_gateway
 
 API = "/datasets/cadastre/ogc_api"
 PARCEL = {
@@ -32,7 +34,7 @@ def test_description_to_api_crud_roundtrip(db, datasets):
     r = client.post(f"{API}/collections/parcels/items",
                     content=orjson.dumps(PARCEL).decode(),
                     headers={"content-type": "application/geo+json"})
-    assert r.status_code == 201
+    assert r.status_code == HTTPStatus.CREATED
     fid = r.headers["Location"].rstrip("/").split("/")[-1]
 
     # 3. read it back
@@ -50,6 +52,6 @@ def test_description_to_api_crud_roundtrip(db, datasets):
     assert match["properties"]["label"] == "updated"
 
     # 6. delete -> gone
-    assert client.delete(f"{API}/collections/parcels/items/{fid}").status_code == 200
+    assert client.delete(f"{API}/collections/parcels/items/{fid}").status_code == HTTPStatus.OK
     assert client.get(
-        f"{API}/collections/parcels/items/{fid}?f=json").status_code == 404
+        f"{API}/collections/parcels/items/{fid}?f=json").status_code == HTTPStatus.NOT_FOUND

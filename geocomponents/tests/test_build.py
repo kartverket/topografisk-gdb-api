@@ -1,10 +1,11 @@
 from pathlib import Path
 
-from geocomp.descriptions.loader import load_resolved_datasets
-from geocomp.schema.build import build_schema_plan
-from geocomp.schema.plan import OPERATIONS, READ_OPS
+from geocomponents.descriptions.loader import load_resolved_datasets
+from geocomponents.schema.build import build_schema_plan
+from geocomponents.schema.plan import OPERATIONS, READ_OPS
 
 DESCRIPTIONS = Path(__file__).resolve().parents[1] / "descriptions"
+WGS84_SRID = 4326
 
 
 def _cadastre_plan():
@@ -37,7 +38,7 @@ def test_standard_columns_and_geometry_present():
     assert {"id", "created_at", "updated_at"} <= names
     assert parcels.table.id_column == "id"
     assert parcels.table.geometry.geometry_type == "MultiPolygon"
-    assert parcels.table.geometry.srid == 4326
+    assert parcels.table.geometry.srid == WGS84_SRID
 
 
 def test_relationship_becomes_fk_column():

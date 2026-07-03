@@ -1,4 +1,4 @@
-# geocomp — description-driven geographic data components
+# geocomponents — description-driven geographic data components
 
 A sketch of components for **storing, distributing and updating geographic data**,
 where a neutral **dataset description** is the single source of truth and both the
@@ -13,12 +13,12 @@ descriptions/*.yaml                      ← source of truth (datasets, collecti
         ├── DB SEAM  ───► SchemaPlan ───► PostGIS:
         │                                   • tables                          (schema/postgis.py)
         │                                   • internal _<collection>_<op> fns (schema/functions.py)
-        │                                   • fixed geocomp.feature_* dispatch    (schema/functions.py)
+        │                                   • fixed ogc.feature_* dispatch    (schema/functions.py)
         │
         └── API SEAM ───► DatasetApiProvider  (api/base.py)
                             └─ pygeoapi impl   (api/pygeoapi_provider.py)
                                  wires each collection to DbFunctionProvider,
-                                 which calls ONLY geocomp.feature_*(dataset, collection, …)
+                                 which calls ONLY ogc.feature_*(dataset, collection, …)
                                           │
                                           ▼
                                  GATEWAY (gateway/mounter.py)
@@ -28,7 +28,7 @@ descriptions/*.yaml                      ← source of truth (datasets, collecti
 
 ### Two design rules that drive everything
 1. **The API never names physical artefacts.** It only ever calls a fixed
-   dispatch layer `geocomp.feature_items / feature_item / feature_create /
+   dispatch layer `ogc.feature_items / feature_item / feature_create /
    feature_replace / feature_update / feature_delete`, passing the **OGC
    identifiers** `(dataset, collection)` as arguments. Table names and
    per-collection function names stay inside the database. The contract is *the
@@ -52,16 +52,21 @@ descriptions/*.yaml                      ← source of truth (datasets, collecti
 | `api/` | one description → one mountable OGC API app | new `DatasetApiProvider` |
 | `gateway/` | many apps → one service + dataset index | composition root (no pygeoapi import) |
 
-## Run it
+## Run it (local)
+
+The whole stack runs in Docker Compose. The app services read the **same discrete
+`DB_*` variables** used in production (no special local config path), and your
+`src/` is mounted into the container so code edits take effect on a restart — no
+rebuild:
 
 ```bash
-uv sync
-docker compose up -d db            # PostGIS on localhost:55432
-
-uv run geocomp validate            # load + validate descriptions
-uv run geocomp apply-schema        # create dispatch layer, tables, functions
-uv run geocomp serve               # one OGC API per dataset on :8000
+docker compose up --build
+# db  →  migrate (geocomponents apply-schema)  →  api (geocomponents serve) on :8000
 ```
+
+`docker compose up db` brings up just PostGIS (used by the host-run tests below).
+The image's entrypoint is the `geocomponents` CLI (`validate` | `apply-schema` |
+`serve`); the compose services simply run those subcommands.
 
 Then:
 
@@ -84,7 +89,7 @@ independently of the API:
 
 ```sql
 -- with_matched=false omits the (potentially expensive) numberMatched count
-select geocomp.feature_items('cadastre', 'parcels', null, 10, 0, true);
+select ogc.feature_items('cadastre', 'parcels', null, 10, 0, true);
 ```
 
 ## Tests
@@ -94,7 +99,7 @@ their real surfaces, so a reimplementation in another language passes unchanged:
 
 - `tests/test_*.py` — unit tests for loader/build/functions/config (**no DB**).
 - `tests/contract/test_db_contract.py` — the DB contract: calls only
-  `geocomp.feature_*` (SQL surface).
+  `ogc.feature_*` (SQL surface).
 - `tests/contract/test_api_contract.py` — the HTTP OGC API contract.
 - `tests/test_integration.py` — one end-to-end happy path.
 
@@ -105,6 +110,13 @@ fixed golden assertions.
 uv run pytest        # unit tests run without Docker; contract/integration
                      # tests auto-skip if PostGIS isn't up (docker compose up -d db)
 ```
+
+## Deployment
+
+The engine is shipped as a **engine container image** and deployed to Kubernetes + CloudSQL by a separate
+apps repo. See **[DEPLOY.md](DEPLOY.md)** for the operational contract: the `DB_*`
+connection vars and `GEOCOMPONENTS_*` settings, the *apply-schema-then-serve*
+lifecycle, and the `/healthz` (liveness) + `/datasets` (readiness) probes.
 
 ## Future components (designed-for, not built)
 - **GML/UML → description factory** (targets the same loader/meta-schema; commons is the integration point).

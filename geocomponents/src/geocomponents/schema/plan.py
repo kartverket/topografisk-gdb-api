@@ -24,14 +24,15 @@ OPERATIONS = READ_OPS + WRITE_OPS
 # generated per-collection functions. This keeps the description + OGC as the
 # contract and lets the physical layout change underneath without touching the API.
 #
-# The prefix is a neutral namespace marker (these operate on GeoJSON features),
-# not a claim of OGC-specificity; bare verbs like ``create`` collide with SQL
-# reserved words, so we keep ``feature_``.
-DISPATCH_SCHEMA = "geocomp"
+# The schema name is deliberately *product-neutral* (``ogc``, the standard this
+# surface implements) rather than the package name, so the wire contract is
+# decoupled from any future rebrand of the tool. The ``feature_`` prefix is kept
+# because bare verbs like ``create`` collide with SQL reserved words.
+DISPATCH_SCHEMA = "ogc"
 
 
 def dispatch_function(operation: str) -> str:
-    """Public, stable entrypoint the API calls, e.g. ``geocomp.feature_items``."""
+    """Public, stable entrypoint the API calls, e.g. ``ogc.feature_items``."""
     return f"{DISPATCH_SCHEMA}.feature_{operation}"
 
 
