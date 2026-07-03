@@ -1,0 +1,60 @@
+"""Shared fixtures for the DB-backed contract + integration suites.
+
+The unit tests (loader/build/functions/config) need no database. These fixtures
+back the ``tests/contract/`` and integration suites: they connect to PostGIS,
+apply the schema once, and **skip** (rather than fail) if the database is
+unreachable — so ``uv run pytest`` still runs the DB-free tests without Docker.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import psycopg
+import pytest
+
+from geocomp.config import database_dsn
+from geocomp.descriptions.loader import load_resolved_datasets
+from geocomp.schema import functions, postgis
+from geocomp.schema.build import build_schema_plan
+
+DESCRIPTIONS_DIR = Path(__file__).resolve().parents[1] / "descriptions"
+
+
+@pytest.fixture(scope="session")
+def datasets():
+    return load_resolved_datasets(DESCRIPTIONS_DIR)
+
+
+@pytest.fixture(scope="session")
+def db(datasets):
+    """A DSN to a database with the schema applied; skips if DB is unreachable."""
+    dsn = database_dsn()
+    try:
+        conn = psycopg.connect(dsn, connect_timeout=2)
+    except psycopg.OperationalError as err:
+        pytest.skip(f"PostGIS not reachable ({err}); run `docker compose up -d db`")
+
+    with conn:
+        # Fresh slate so re-runs after signature changes don't leave stale overloads.
+        conn.autocommit = True
+        for d in datasets:
+            conn.execute(f"drop schema if exists {d.name} cascade")
+        conn.execute("drop schema if exists geocomp cascade")
+        conn.autocommit = False
+        functions.apply_dispatch(conn)
+        for d in datasets:
+            plan = build_schema_plan(d)
+            postgis.apply_tables(conn, plan)
+            functions.apply_functions(conn, plan)
+    return dsn
+
+
+@pytest.fixture
+def conn(db):
+    """A fresh autocommit connection for a test (closed afterwards)."""
+    connection = psycopg.connect(db, autocommit=True)
+    try:
+        yield connection
+    finally:
+        connection.close()

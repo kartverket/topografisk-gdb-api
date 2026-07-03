@@ -1,0 +1,59 @@
+# A dataset = a container of several OGC collections (feature types).
+# Becomes one PostgreSQL schema and one self-contained OGC API mounted at
+# /datasets/cadastre/ogc_api/...
+
+name: cadastre
+title: Cadastre
+description: Example cadastral dataset (parcels and buildings).
+
+# Processes this dataset exposes (must be known to the process registry).
+processes:
+  - hello
+
+collections:
+  - name: parcels
+    title: Parcels
+    description: Land parcels.
+    geometry:
+      type: MultiPolygon
+      srid: 4326
+    fields:
+      - name: label
+        type: string
+        required: true
+      - name: municipality
+        type_ref: municipality_code
+      - name: status
+        codelist: parcel_status
+      - name: area_m2
+        type: number
+
+  - name: buildings
+    title: Buildings
+    description: Buildings, each sited on a parcel.
+    geometry:
+      type: MultiPolygon
+      srid: 4326
+    fields:
+      - name: use
+        type: string
+      - name: floors
+        type: integer
+    relationships:
+      # Cross-collection reference within the same dataset: adds parcel_id FK.
+      - name: parcel
+        target: parcels
+
+  - name: blocks
+    title: Blocks
+    description: >-
+      City blocks whose boundaries are shared between neighbours (topology).
+      Reads only for now; per-feature CRUD is unsafe on shared geometry and will
+      arrive via processes + OGC Features Part 11 (Transactions).
+    feature_model: topology
+    geometry:
+      type: MultiPolygon
+      srid: 4326
+    fields:
+      - name: code
+        type: string
