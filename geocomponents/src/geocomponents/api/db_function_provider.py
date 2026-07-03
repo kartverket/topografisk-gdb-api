@@ -1,7 +1,7 @@
 """A pygeoapi feature provider that calls *only* the generic DB dispatch layer.
 
 pygeoapi loads this by dotted path (see ``pygeoapi_provider.py``). Every method
-forwards to ``geocomp.feature_*(dataset, collection, ...)`` — the provider never
+forwards to ``ogc.feature_*(dataset, collection, ...)`` — the provider never
 references a table name or a per-collection function name. It passes OGC
 identifiers (dataset, collection) it was configured with, and returns the
 GeoJSON the database produced. pygeoapi then adds the OGC links/paging envelope.
@@ -28,7 +28,7 @@ def _as_feature_dict(item) -> dict:
 
 
 class DbFunctionProvider(BaseProvider):
-    """Forwarder onto ``geocomp.feature_*``; holds no SQL of its own beyond the call."""
+    """Forwarder onto ``ogc.feature_*``; holds no SQL of its own beyond the call."""
 
     def __init__(self, provider_def):
         super().__init__(provider_def)
@@ -53,7 +53,7 @@ class DbFunctionProvider(BaseProvider):
         return self._field_defs
 
     # -- read -------------------------------------------------------------
-    def query(
+    def query(  # noqa: PLR0913 - signature dictated by pygeoapi's BaseProvider.query
         self,
         offset=0,
         limit=10,
@@ -75,7 +75,7 @@ class DbFunctionProvider(BaseProvider):
         eff_limit = 0 if resulttype == "hits" else limit
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
-                "select geocomp.feature_items(%s, %s, %s, %s, %s, %s)",
+                "select ogc.feature_items(%s, %s, %s, %s, %s, %s)",
                 (self.dataset, self.collection, bbox_arg, eff_limit, offset,
                  self.with_matched),
             )
@@ -84,7 +84,7 @@ class DbFunctionProvider(BaseProvider):
     def get(self, identifier, **kwargs) -> dict:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
-                "select geocomp.feature_item(%s, %s, %s)",
+                "select ogc.feature_item(%s, %s, %s)",
                 (self.dataset, self.collection, identifier),
             )
             feature = cur.fetchone()[0]
@@ -97,7 +97,7 @@ class DbFunctionProvider(BaseProvider):
         feature = _as_feature_dict(item)
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
-                "select geocomp.feature_create(%s, %s, %s)",
+                "select ogc.feature_create(%s, %s, %s)",
                 (self.dataset, self.collection, orjson.dumps(feature).decode()),
             )
             return str(cur.fetchone()[0])
@@ -107,7 +107,7 @@ class DbFunctionProvider(BaseProvider):
         feature = _as_feature_dict(item)
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
-                "select geocomp.feature_replace(%s, %s, %s, %s)",
+                "select ogc.feature_replace(%s, %s, %s, %s)",
                 (self.dataset, self.collection, identifier, orjson.dumps(feature).decode()),
             )
             ok = cur.fetchone()[0]
@@ -120,7 +120,7 @@ class DbFunctionProvider(BaseProvider):
         feature = _as_feature_dict(item)
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
-                "select geocomp.feature_update(%s, %s, %s, %s)",
+                "select ogc.feature_update(%s, %s, %s, %s)",
                 (self.dataset, self.collection, identifier, orjson.dumps(feature).decode()),
             )
             ok = cur.fetchone()[0]
@@ -131,7 +131,7 @@ class DbFunctionProvider(BaseProvider):
     def delete(self, identifier) -> bool:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
-                "select geocomp.feature_delete(%s, %s, %s)",
+                "select ogc.feature_delete(%s, %s, %s)",
                 (self.dataset, self.collection, identifier),
             )
             ok = cur.fetchone()[0]

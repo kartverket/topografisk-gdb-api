@@ -1,4 +1,4 @@
-"""geocomp command line: validate | apply-schema | serve.
+"""geocomponents command line: validate | apply-schema | serve.
 
 This is the composition root for the running system. It wires the description
 loader, the schema generator (DB seam), and the pygeoapi adapter (API seam) into
@@ -41,7 +41,7 @@ def apply_schema():
     datasets = load_resolved_datasets(config.descriptions_dir())
     with psycopg.connect(config.database_dsn()) as conn:
         functions.apply_dispatch(conn)
-        typer.echo("applied dispatch layer (geocomp.feature_*)")
+        typer.echo("applied dispatch layer (ogc.feature_*)")
         for d in datasets:
             plan = build_schema_plan(d)
             postgis.apply_tables(conn, plan)

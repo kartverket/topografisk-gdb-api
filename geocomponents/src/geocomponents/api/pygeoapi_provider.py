@@ -2,7 +2,7 @@
 
 For one dataset it builds:
   * a pygeoapi config whose resources are the dataset's collections, each wired
-    to :class:`DbFunctionProvider` (so data access goes through ``geocomp.ogc_*``),
+    to :class:`DbFunctionProvider` (so data access goes through ``ogc.feature_*``),
   * a per-dataset ``API`` object (constructed directly, *not* from pygeoapi's
     env-global app), and
   * a thin Starlette sub-app whose routes only delegate to pygeoapi's OGC
@@ -24,6 +24,7 @@ from __future__ import annotations
 import pygeoapi.api as core_api
 import pygeoapi.api.itemtypes as itemtypes_api
 import pygeoapi.api.processes as processes_api
+import pygeoapi.l10n as _l10n
 from pygeoapi.api import API, APIRequest, apply_gzip
 from pygeoapi.openapi import get_oas
 from pygeoapi.plugin import load_plugin
@@ -38,8 +39,26 @@ from ..config import database_dsn
 from ..descriptions.models import ResolvedCollection, ResolvedDataset
 from ..processes.registry import PROCESS_REGISTRY
 
-PROVIDER_PATH = "geocomp.api.db_function_provider.DbFunctionProvider"
+PROVIDER_PATH = "geocomponents.api.db_function_provider.DbFunctionProvider"
 CRS84 = "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
+
+
+# pygeoapi's HTML rendering memoizes the *translated config* in the module-global
+# ``l10n._cfg_cache`` keyed only by locale (see ``l10n.translate_struct``). That
+# assumes a single global config per process — but we run one ``API`` per dataset
+# in one process, so the first dataset's config would be cached and reused for
+# every dataset's HTML chrome (links/title/static). Replace the cache with a
+# no-op mapping so each render translates its own per-instance config. JSON never
+# uses this path; the cost is only re-translating a small config on HTML renders.
+class _NoConfigCache(dict):
+    def get(self, key, default=None):  # noqa: D401 - always miss
+        return None
+
+    def __setitem__(self, key, value):  # never retain
+        pass
+
+
+_l10n._cfg_cache = _NoConfigCache()
 
 
 # --------------------------------------------------------------------------
@@ -133,9 +152,9 @@ def build_config(dataset: ResolvedDataset, public_url: str, dsn: str) -> dict:
                 "name": "CC-BY 4.0",
                 "url": "https://creativecommons.org/licenses/by/4.0/",
             },
-            "provider": {"name": "geocomp", "url": public_url},
+            "provider": {"name": "geocomponents", "url": public_url},
             "contact": {
-                "name": "geocomp",
+                "name": "geocomponents",
                 "position": "",
                 "address": "",
                 "city": "",
@@ -212,60 +231,86 @@ def _build_starlette_app(api_: API) -> Starlette:
         cid = request.path_params.get("collection_id")
         return await _execute(api_, core_api.describe_collections, request, cid)
 
-    async def collection_items(request: Request):
-        cid = request.path_params["collection_id"]
-        if request.method == "OPTIONS":
-            # Advertise per-collection capability: POST only when editable.
-            allow = "GET, HEAD, OPTIONS" + (", POST" if _editable(cid) else "")
-            return _options(allow)
-        if request.method == "POST":
-            ct = request.headers.get("content-type", "")
-            if ct.startswith("application/geo+json") or ct.startswith("application/json"):
-                if not _editable(cid):
-                    return _not_editable()
-                return await _execute(
-                    api_, itemtypes_api.manage_collection_item, request,
-                    "create", cid, skip_valid_check=True)
-            return await _execute(
-                api_, itemtypes_api.get_collection_items, request, cid,
-                skip_valid_check=True)
+    # -- /items : one handler per verb, dispatched by a map (see routes) ----
+    async def _list_items(request: Request, cid):
         return await _execute(
             api_, itemtypes_api.get_collection_items, request, cid,
             skip_valid_check=True)
 
+    async def _options_items(_request: Request, cid):
+        # POST advertised only when editable.
+        write_verbs = ", POST" if _editable(cid) else ""
+        return _options("GET, HEAD, OPTIONS" + write_verbs)
+
+    async def _post_items(request: Request, cid):
+        # OGC overloads POST: a JSON/GeoJSON body is a Part-4 *create*; any other
+        # content-type is a Part-3 *query* (e.g. CQL in the body).
+        ct = request.headers.get("content-type", "")
+        if not (ct.startswith("application/geo+json")
+                or ct.startswith("application/json")):
+            return await _list_items(request, cid)
+        if not _editable(cid):
+            return _not_editable()
+        return await _execute(
+            api_, itemtypes_api.manage_collection_item, request,
+            "create", cid, skip_valid_check=True)
+
+    items_handlers = {
+        "OPTIONS": _options_items, "GET": _list_items, "HEAD": _list_items,
+        "POST": _post_items,
+    }
+
+    async def collection_items(request: Request):
+        cid = request.path_params["collection_id"]
+        return await items_handlers[request.method](request, cid)
+
+    # -- /items/{item_id} : one handler per verb, dispatched by a map -------
+    async def _get_item(request: Request, cid, iid):
+        return await _execute(
+            api_, itemtypes_api.get_collection_item, request, cid, iid)
+
+    async def _options_item(_request: Request, cid, _iid):
+        # Writable verbs (PUT/PATCH/DELETE) advertised only when editable.
+        write_verbs = ", PUT, PATCH, DELETE" if _editable(cid) else ""
+        return _options("GET, HEAD, OPTIONS" + write_verbs)
+
+    async def _put_item(request: Request, cid, iid):
+        if not _editable(cid):
+            return _not_editable()
+        return await _execute(
+            api_, itemtypes_api.manage_collection_item, request,
+            "update", cid, iid, skip_valid_check=True)
+
+    async def _delete_item(request: Request, cid, iid):
+        if not _editable(cid):
+            return _not_editable()
+        return await _execute(
+            api_, itemtypes_api.manage_collection_item, request,
+            "delete", cid, iid, skip_valid_check=True)
+
+    async def _patch_item(request: Request, cid, iid):
+        if not _editable(cid):
+            return _not_editable()
+        # PATCH (partial update) isn't routed by pygeoapi's
+        # manage_collection_item, so we call the provider's patch() directly.
+        provider = load_plugin("provider", _resource(cid)["providers"][0])
+        try:
+            provider.patch(iid, await request.body())
+        except ProviderItemNotFoundError:
+            return JSONResponse(
+                {"code": "NotFound", "description": f"item {iid} not found"},
+                status_code=404)
+        return Response(status_code=204)
+
+    item_handlers = {
+        "OPTIONS": _options_item, "GET": _get_item, "HEAD": _get_item,
+        "PUT": _put_item, "PATCH": _patch_item, "DELETE": _delete_item,
+    }
+
     async def collection_item(request: Request):
         cid = request.path_params["collection_id"]
         iid = request.path_params["item_id"]
-        editable = _editable(cid)
-        if request.method == "OPTIONS":
-            # Writable verbs (PUT/PATCH/DELETE) advertised only when editable.
-            allow = "GET, HEAD, OPTIONS" + (
-                ", PUT, PATCH, DELETE" if editable else "")
-            return _options(allow)
-        if request.method in ("PUT", "PATCH", "DELETE") and not editable:
-            return _not_editable()
-        if request.method == "PUT":
-            return await _execute(
-                api_, itemtypes_api.manage_collection_item, request,
-                "update", cid, iid, skip_valid_check=True)
-        if request.method == "DELETE":
-            return await _execute(
-                api_, itemtypes_api.manage_collection_item, request,
-                "delete", cid, iid, skip_valid_check=True)
-        if request.method == "PATCH":
-            # PATCH (partial update) isn't routed by pygeoapi's
-            # manage_collection_item, so we call the provider's patch() directly.
-            provider = load_plugin("provider", _resource(cid)["providers"][0])
-            body = await request.body()
-            try:
-                provider.patch(iid, body)
-            except ProviderItemNotFoundError:
-                return JSONResponse(
-                    {"code": "NotFound", "description": f"item {iid} not found"},
-                    status_code=404)
-            return Response(status_code=204)
-        return await _execute(
-            api_, itemtypes_api.get_collection_item, request, cid, iid)
+        return await item_handlers[request.method](request, cid, iid)
 
     async def processes(request: Request):
         pid = request.path_params.get("process_id")

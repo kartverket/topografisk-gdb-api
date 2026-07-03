@@ -21,7 +21,7 @@ class DatasetMount:
 
 def dataset_index(mounts: list[DatasetMount]) -> dict:
     return {
-        "title": "geocomp datasets",
+        "title": "geocomponents datasets",
         "description": "Each dataset is served as its own OGC API.",
         "datasets": [
             {

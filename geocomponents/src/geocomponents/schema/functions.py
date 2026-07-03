@@ -2,7 +2,7 @@
 
 Two layers, mirroring the DB/API contract decision:
 
-* **Dispatch layer** (``geocomp.ogc_*``) — a *fixed*, generic set of functions
+* **Dispatch layer** (``ogc.feature_*``) — a *fixed*, generic set of functions
   the API calls with OGC identifiers ``(dataset, collection)`` as arguments. It
   is written once, lists no datasets, and routes by naming convention to the
   internal functions via dynamic SQL. **This is the only thing the API names.**
@@ -14,6 +14,9 @@ Two layers, mirroring the DB/API contract decision:
 Feature shaping lives here; OGC hypermedia links / paging envelopes do not
 (those depend on the API mount path and are added by pygeoapi).
 """
+# ruff: noqa: S608 - This module *generates* SQL DDL; every interpolated value is
+# an identifier from the SchemaPlan (schema/table/column/function names + SRID),
+# derived from the validated dataset descriptions. Not subject to SQL-injection
 
 from __future__ import annotations
 
@@ -35,7 +38,7 @@ _AUDIT = ("created_at", "updated_at")
 # Dispatch layer (fixed; generated once, independent of any dataset)
 # ==========================================================================
 def dispatch_statements() -> list[str]:
-    """The stable ``geocomp.ogc_*`` entrypoints the API calls.
+    """The stable ``ogc.feature_*`` entrypoints the API calls.
 
     Each routes to ``<dataset>._<collection>_<op>`` by convention using dynamic
     SQL, so adding a dataset never requires changing the dispatcher.

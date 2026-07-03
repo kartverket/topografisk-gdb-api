@@ -2,7 +2,7 @@
 
 Its only job is to prove the Processes plumbing is live per dataset. Real
 processes will be backed by generated DB functions (the same pattern as the
-``geocomp.ogc_*`` dispatch layer), but this one just echoes its input so the
+``ogc.feature_*`` dispatch layer), but this one just echoes its input so the
 ``/processes`` surface works end to end.
 """
 

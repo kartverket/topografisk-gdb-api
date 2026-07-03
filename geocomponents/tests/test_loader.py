@@ -2,13 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from geocomp.descriptions.loader import (
+from geocomponents.descriptions.loader import (
     DescriptionError,
-    load_commons,
     load_resolved_datasets,
     resolve_dataset,
 )
-from geocomp.descriptions.models import Commons, DatasetDef
+from geocomponents.descriptions.models import Commons, DatasetDef
 
 DESCRIPTIONS = Path(__file__).resolve().parents[1] / "descriptions"
 

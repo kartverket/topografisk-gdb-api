@@ -8,17 +8,29 @@ unreachable — so ``uv run pytest`` still runs the DB-free tests without Docker
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import psycopg
 import pytest
 
-from geocomp.config import database_dsn
-from geocomp.descriptions.loader import load_resolved_datasets
-from geocomp.schema import functions, postgis
-from geocomp.schema.build import build_schema_plan
+from geocomponents.config import database_dsn
+from geocomponents.descriptions.loader import load_resolved_datasets
+from geocomponents.schema import functions, postgis
+from geocomponents.schema.build import build_schema_plan
 
 DESCRIPTIONS_DIR = Path(__file__).resolve().parents[1] / "descriptions"
+
+# Host-run tests target the local compose DB unless DB_* is already set (e.g. in
+# CI). This lives in the test harness so production config stays fail-loud.
+_COMPOSE_DSN = (
+    "host=localhost port=55432 dbname=geocomponents "
+    "user=geocomponents password=geocomponents"
+)
+
+
+def _test_dsn() -> str:
+    return database_dsn() if "DB_HOST" in os.environ else _COMPOSE_DSN
 
 
 @pytest.fixture(scope="session")
@@ -29,7 +41,7 @@ def datasets():
 @pytest.fixture(scope="session")
 def db(datasets):
     """A DSN to a database with the schema applied; skips if DB is unreachable."""
-    dsn = database_dsn()
+    dsn = _test_dsn()
     try:
         conn = psycopg.connect(dsn, connect_timeout=2)
     except psycopg.OperationalError as err:
@@ -40,7 +52,7 @@ def db(datasets):
         conn.autocommit = True
         for d in datasets:
             conn.execute(f"drop schema if exists {d.name} cascade")
-        conn.execute("drop schema if exists geocomp cascade")
+        conn.execute("drop schema if exists ogc cascade")
         conn.autocommit = False
         functions.apply_dispatch(conn)
         for d in datasets:
