@@ -34,6 +34,14 @@ def client(db, datasets):
     return TestClient(gw)
 
 
+@pytest.fixture
+def offline_client(datasets):
+    # The OpenAPI doc, the feature schema, collection links and parameter
+    # rejection are all derived from the description and need no database.
+    gw = build_gateway(datasets, PygeoapiProvider(dsn="host=unused"), base_url=BASE_URL)
+    return TestClient(gw)
+
+
 def _api(dataset_name: str) -> str:
     return f"/datasets/{dataset_name}/ogc_api"
 
@@ -105,6 +113,65 @@ def test_declared_processes_are_exactly_what_the_dataset_lists(client, datasets)
     for d in datasets:
         listed = client.get(f"{_api(d.name)}/processes?f=json").json()["processes"]
         assert {p["id"] for p in listed} == set(d.processes)
+
+
+# ===========================================================================
+# OpenAPI / interface honesty (no DB): the advertised surface matches reality
+# ===========================================================================
+def test_openapi_omits_unimplemented_job_management(offline_client, datasets):
+    # Processes run synchronously with no job store; the async /jobs paths that
+    # pygeoapi would advertise are pruned so nothing dangles.
+    for d in datasets:
+        oas = offline_client.get(f"{_api(d.name)}/openapi?f=json").json()
+        assert not any(p.startswith("/jobs") for p in oas["paths"])
+
+
+def test_openapi_post_items_documents_only_a_geojson_create(offline_client):
+    # The create example must describe a GeoJSON Feature with the collection's
+    # exact geometry — not an empty schema, and not the CQL2 query-by-POST body
+    # (application/json + a 200 FeatureCollection) that pygeoapi bundles in.
+    oas = offline_client.get(f"{_api('cadastre')}/openapi?f=json").json()
+    post = oas["paths"]["/collections/parcels/items"]["post"]
+    assert list(post["requestBody"]["content"]) == ["application/geo+json"]
+    assert "200" not in post["responses"] and "201" in post["responses"]
+    schema = post["requestBody"]["content"]["application/geo+json"]["schema"]
+    assert schema["properties"]["type"]["enum"] == ["Feature"]
+    assert schema["properties"]["geometry"]["properties"]["type"]["enum"] == ["MultiPolygon"]
+    # A complete, postable example: right geometry type *with* coordinates.
+    example = schema["example"]
+    assert example["geometry"]["type"] == "MultiPolygon"
+    assert example["geometry"]["coordinates"]  # non-empty
+
+
+def test_collection_schema_endpoint_describes_the_feature(offline_client, datasets):
+    for d in datasets:
+        for coll in d.collections:
+            r = offline_client.get(f"{_api(d.name)}/collections/{coll.name}/schema")
+            assert r.status_code == HTTPStatus.OK
+            schema = r.json()
+            assert schema["properties"]["type"]["enum"] == ["Feature"]
+            assert (schema["properties"]["geometry"]["properties"]["type"]["enum"]
+                    == [coll.geometry_type])
+
+
+def test_collections_do_not_advertise_the_deferred_queryables(offline_client, datasets):
+    # queryables belongs with real filtering (deferred to the DB dispatch); the
+    # schema link, now routed, stays.
+    for d in datasets:
+        for coll in d.collections:
+            links = offline_client.get(
+                f"{_api(d.name)}/collections/{coll.name}?f=json").json()["links"]
+            rels = [ln["rel"] for ln in links]
+            assert not any(r.rstrip("/").endswith("queryables") for r in rels)
+            assert any(r.rstrip("/").endswith("schema") for r in rels)
+            assert "items" in rels
+
+
+def test_cql_filter_is_refused_until_the_db_supports_it(offline_client):
+    # Better an honest 400 than silently returning unfiltered results.
+    r = offline_client.get(
+        f"{_api('cadastre')}/collections/parcels/items?filter=label='x'")
+    assert r.status_code == HTTPStatus.BAD_REQUEST
 
 
 # ===========================================================================

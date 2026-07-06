@@ -21,6 +21,7 @@ provider; the gateway never imports pygeoapi.
 
 from __future__ import annotations
 
+import orjson
 import pygeoapi.api as core_api
 import pygeoapi.api.itemtypes as itemtypes_api
 import pygeoapi.api.processes as processes_api
@@ -104,6 +105,9 @@ def _collection_resource(dataset: str, coll: ResolvedCollection, dsn: str) -> di
                 "dataset": dataset,
                 "collection": coll.name,
                 "fields": _provider_fields(coll),
+                # Geometry type/srid so the provider can describe its own schema.
+                "geometry_type": coll.geometry_type,
+                "srid": coll.srid,
             }
         ],
     }
@@ -207,6 +211,100 @@ def _options(allow: str) -> Response:
     return Response(status_code=200, headers={"Allow": allow})
 
 
+def _filtering_unsupported() -> Response:
+    """400 for CQL filtering, which the DB dispatch doesn't implement yet.
+
+    ``ogc.feature_items`` only honours bbox/limit/offset; a ``filter`` would be
+    silently ignored, so we refuse it plainly. Real CQL will arrive when the DB
+    dispatch grows a filter argument (then ``/queryables`` returns too).
+    """
+    return JSONResponse(
+        {"code": "InvalidParameter",
+         "description": "CQL filtering (filter/filter-lang) is not supported yet"},
+        status_code=400,
+    )
+
+
+def _tailor_oas(oas: dict) -> dict:
+    """Trim the generated OpenAPI to what this service actually serves.
+
+    Two mismatches to fix:
+
+    * pygeoapi advertises async job management (``/jobs``) whenever a process
+      exists, but we execute processes synchronously with no job store, so those
+      paths would 404. Drop them.
+    * pygeoapi conflates OGC Features **Part 3** (query-by-POST with a CQL2 body,
+      an ``application/json`` request body + a ``200`` FeatureCollection reply)
+      into the **Part 4** create POST on ``/items``. We only implement create, so
+      the docs showed a CQL2 filter as the create example. Keep the create half
+      (``application/geo+json`` body + ``201``) and drop the query half.
+    """
+    paths = oas.get("paths", {})
+    for path in ("/jobs", "/jobs/{jobId}", "/jobs/{jobId}/results"):
+        paths.pop(path, None)
+    for path, item in paths.items():
+        if not path.endswith("/items"):
+            continue
+        post = item.get("post")
+        if not post:
+            continue
+        # The create body is application/geo+json; the CQL2 query body is
+        # application/json — remove it so the create example isn't a filter.
+        post.get("requestBody", {}).get("content", {}).pop("application/json", None)
+        # 200 is the query result; a create yields 201.
+        post.get("responses", {}).pop("200", None)
+    return oas
+
+
+async def _describe_collections(api_: API, request: Request, cid) -> Response:
+    """``describe_collections`` with the dangling ``/queryables`` link removed."""
+    api_request = await APIRequest.from_starlette(request, api_.locales)
+    if not api_request.is_valid():
+        headers, status, content = api_.get_format_exception(api_request)
+    else:
+        headers, status, content = core_api.describe_collections(api_, api_request, cid)
+        if "json" in headers.get("Content-Type", "").lower():
+            content = orjson.dumps(_strip_queryables_links(orjson.loads(content)))
+            headers.pop("Content-Length", None)
+        content = apply_gzip(headers, content)
+    return Response(content, status_code=status, headers=headers)
+
+
+def _collection_schema(api_: API, cid) -> Response:
+    """Serve the feature JSON Schema from the provider (backs the schema link)."""
+    res = api_.config["resources"].get(cid)
+    if res is None:
+        return JSONResponse(
+            {"code": "NotFound", "description": f"collection {cid} not found"},
+            status_code=404)
+    provider = load_plugin("provider", res["providers"][0])
+    _mimetype, doc = provider.get_schema()
+    return JSONResponse(doc, media_type="application/schema+json")
+
+
+def _strip_queryables_links(obj):
+    """Remove dangling ``queryables`` hypermedia links (endpoint deferred).
+
+    ``describe_collections`` always links each collection to ``/queryables``,
+    which we don't route yet. Walk the response and drop those links so the
+    machine contract doesn't promise an endpoint that 404s. The ``schema`` link
+    is left intact — it now resolves.
+    """
+    if isinstance(obj, dict):
+        links = obj.get("links")
+        if isinstance(links, list):
+            obj["links"] = [
+                ln for ln in links
+                if not str(ln.get("rel", "")).rstrip("/").endswith("queryables")
+            ]
+        for value in obj.values():
+            _strip_queryables_links(value)
+    elif isinstance(obj, list):
+        for value in obj:
+            _strip_queryables_links(value)
+    return obj
+
+
 def _build_starlette_app(api_: API) -> Starlette:
     def _resource(cid):
         return api_.config["resources"].get(cid)
@@ -228,11 +326,18 @@ def _build_starlette_app(api_: API) -> Starlette:
         return await _execute(api_, core_api.conformance, request)
 
     async def collections(request: Request):
-        cid = request.path_params.get("collection_id")
-        return await _execute(api_, core_api.describe_collections, request, cid)
+        return await _describe_collections(
+            api_, request, request.path_params.get("collection_id"))
+
+    async def schema(request: Request):
+        return _collection_schema(api_, request.path_params["collection_id"])
 
     # -- /items : one handler per verb, dispatched by a map (see routes) ----
     async def _list_items(request: Request, cid):
+        # CQL filtering isn't in the DB dispatch yet; refuse rather than ignore.
+        if (request.query_params.get("filter") is not None
+                or request.query_params.get("filter-lang") is not None):
+            return _filtering_unsupported()
         return await _execute(
             api_, itemtypes_api.get_collection_items, request, cid,
             skip_valid_check=True)
@@ -328,6 +433,7 @@ def _build_starlette_app(api_: API) -> Starlette:
         Route("/conformance", conformance),
         Route("/collections", collections),
         Route("/collections/{collection_id}", collections),
+        Route("/collections/{collection_id}/schema", schema),
         Route("/collections/{collection_id}/items", collection_items,
               methods=["GET", "POST", "OPTIONS"]),
         Route("/collections/{collection_id}/items/{item_id}", collection_item,
@@ -355,6 +461,6 @@ class PygeoapiProvider:
 
     def build_app(self, dataset: ResolvedDataset, public_url: str) -> ASGIApp:
         config = build_config(dataset, public_url.rstrip("/"), self._dsn)
-        openapi = get_oas(config)
+        openapi = _tailor_oas(get_oas(config))
         api_ = API(config, openapi)
         return _build_starlette_app(api_)

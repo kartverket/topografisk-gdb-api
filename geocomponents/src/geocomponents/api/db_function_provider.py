@@ -18,6 +18,7 @@ from pygeoapi.provider.base import (
     BaseProvider,
     ProviderItemNotFoundError,
     ProviderQueryError,
+    SchemaType,
 )
 
 
@@ -25,6 +26,50 @@ def _as_feature_dict(item) -> dict:
     if isinstance(item, (bytes, bytearray, str)):
         return orjson.loads(item)
     return item
+
+
+def _example_geometry(geometry_type: str) -> dict:
+    """A small valid example geometry so the docs show real coordinates.
+
+    Swagger builds the POST example from the schema; without this the geometry
+    example has a type but no coordinates, which isn't a postable feature.
+    """
+    ring = [[10.0, 60.0], [10.5, 60.0], [10.5, 60.5], [10.0, 60.0]]
+    coordinates = {
+        "Point": [10.0, 60.0],
+        "MultiPoint": [[10.0, 60.0], [10.5, 60.5]],
+        "LineString": [[10.0, 60.0], [10.5, 60.5]],
+        "MultiLineString": [[[10.0, 60.0], [10.5, 60.5]]],
+        "Polygon": [ring],
+        "MultiPolygon": [[ring]],
+    }
+    if geometry_type == "GeometryCollection":
+        return {"type": "GeometryCollection", "geometries": []}
+    return {"type": geometry_type,
+            "coordinates": coordinates.get(geometry_type, [10.0, 60.0])}
+
+
+def _example_property(spec: dict):
+    return {"integer": 0, "number": 0, "boolean": False}.get(spec.get("type"), "string")
+
+
+def _geometry_schema(geometry_type: str, srid: int) -> dict:
+    """A GeoJSON geometry schema fixed to the collection's exact type.
+
+    The DB column is typed (``geometry(<type>, <srid>)``) and PostGIS rejects any
+    other type, so the API documents the one shape it will accept.
+    """
+    member = "geometries" if geometry_type == "GeometryCollection" else "coordinates"
+    return {
+        "type": "object",
+        "required": ["type", member],
+        "properties": {
+            "type": {"type": "string", "enum": [geometry_type]},
+            member: {"type": "array"},
+        },
+        "example": _example_geometry(geometry_type),
+        "description": f"{geometry_type} geometry (EPSG:{srid})",
+    }
 
 
 class DbFunctionProvider(BaseProvider):
@@ -36,6 +81,8 @@ class DbFunctionProvider(BaseProvider):
         self.dataset = provider_def["dataset"]
         self.collection = provider_def["collection"]
         self.geom_field = provider_def.get("geom_field", "geometry")
+        self.geometry_type = provider_def.get("geometry_type", "Point")
+        self.srid = provider_def.get("srid", 4326)
         # numberMatched is optional (a full count); default on, configurable.
         self.with_matched = provider_def.get("with_matched", True)
         # Static field metadata (no DB hit) for queryables / schema.
@@ -51,6 +98,37 @@ class DbFunctionProvider(BaseProvider):
     # -- metadata ---------------------------------------------------------
     def get_fields(self) -> dict:
         return self._field_defs
+
+    def get_schema(self, schema_type: SchemaType = SchemaType.item) -> tuple[str, dict]:
+        """The JSON Schema of a feature in this collection (a GeoJSON Feature).
+
+        Drives the OpenAPI POST/PUT request body and the ``/schema`` endpoint, so
+        the docs show the exact geometry type and attributes a feature carries.
+        Server-managed columns (``created_at``/``updated_at``) are read-only.
+        """
+        properties = {name: dict(spec) for name, spec in self._field_defs.items()}
+        properties["created_at"] = {"type": "string", "format": "date-time",
+                                    "readOnly": True}
+        properties["updated_at"] = {"type": "string", "format": "date-time",
+                                    "readOnly": True}
+        schema = {
+            "type": "object",
+            "required": ["type", "geometry", "properties"],
+            "properties": {
+                "type": {"type": "string", "enum": ["Feature"]},
+                "id": {"type": "string", "readOnly": True},
+                "geometry": _geometry_schema(self.geometry_type, self.srid),
+                "properties": {"type": "object", "properties": properties},
+            },
+            # A complete, postable example (Swagger renders this verbatim).
+            "example": {
+                "type": "Feature",
+                "geometry": _example_geometry(self.geometry_type),
+                "properties": {name: _example_property(spec)
+                               for name, spec in self._field_defs.items()},
+            },
+        }
+        return ("application/geo+json", schema)
 
     # -- read -------------------------------------------------------------
     def query(  # noqa: PLR0913 - signature dictated by pygeoapi's BaseProvider.query
