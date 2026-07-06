@@ -1,0 +1,279 @@
+{
+    "tables": [
+        {
+            "name": "sosi_kvalitet",
+            "attributes": [
+                {
+                    "name": "datafangstmetode",
+                    "type": "text"
+                },
+                {
+                    "name": "noyaktighet",
+                    "type": "integer",
+                    "default": "300"
+                },
+                {
+                    "name": "synbarhet",
+                    "type": "varchar",
+                    "default": "0"
+                }
+            ]
+        },
+        {
+            "name": "sosi_registreringsversjon",
+            "attributes": [
+                {
+                    "name": "produkt",
+                    "type": "varchar",
+                    "default": "FKB-AR5"
+                },
+                {
+                    "name": "versjon",
+                    "type": "varchar",
+                    "default": "4.5 20140301"
+                }
+            ]
+        },
+        {
+            "name": "face_attributes",
+            "attributes": [
+                {
+                    "name": "identifikasjon_lokal_id",
+                    "type": "uuid",
+                    "default": {
+                        "name": "uuid_generate_v1",
+                        "type": "function"
+                    }
+                },
+                {
+                    "name": "identifikasjon_versjon_id",
+                    "type": "timestamptz",
+                    "default": {
+                        "name": "now",
+                        "type": "function"
+                    }
+                },
+                {
+                    "name": "featuretype",
+                    "type": "varchar",
+                    "default": "ArealressursFlate"
+                },
+                {
+                    "name": "identifikasjon_navnerom",
+                    "type": "varchar"
+                },
+                {
+                    "name": "kartstandard",
+                    "type": "text",
+                    "default": "AR5"
+                },
+                {
+                    "name": "datafangstdato",
+                    "type": "date"
+                },
+                {
+                    "name": "informasjon",
+                    "type": "text"
+                },
+                {
+                    "name": "verifiseringsdato",
+                    "type": "date"
+                },
+                {
+                    "name": "klassifiseringsmetode",
+                    "type": "text"
+                },
+                {
+                    "name": "oppdateringsdato",
+                    "type": "timestamptz",
+                    "default": "now()"
+                },
+                {
+                    "name": "opphav",
+                    "type": "varchar",
+                    "default": "NIBIO_Client"
+                },
+                {
+                    "name": "arealtype",
+                    "type": "smallint",
+                    "default": "99"
+                },
+                {
+                    "name": "treslag",
+                    "type": "smallint",
+                    "default": "98"
+                },
+                {
+                    "name": "skogbonitet",
+                    "type": "smallint",
+                    "default": "98"
+                },
+                {
+                    "name": "grunnforhold",
+                    "type": "smallint",
+                    "default": "98"
+                },
+                {
+                    "name": "geometry_properties_position",
+                    "type": "geometry",
+                    "modifiers": [
+                        "Point",
+                        "4258"
+                    ]
+                },
+                {
+                    "name": "kvalitet",
+                    "type": "sosi_kvalitet"
+                },
+                {
+                    "name": "registreringsversjon",
+                    "type": "date"
+                }
+            ],
+            "primary_key": "identifikasjon_lokal_id",
+            "topogeom_columns": [
+                {
+                    "name": "omrade",
+                    "type": "areal",
+                    "allow_gaps": true,
+                    "allow_overlaps": true
+                }
+            ]
+        },
+        {
+            "name": "edge_attributes",
+            "attributes": [
+                {
+                    "name": "identifikasjon_lokal_id",
+                    "type": "uuid",
+                    "default": {
+                        "name": "uuid_generate_v1",
+                        "type": "function"
+                    }
+                },
+                {
+                    "name": "identifikasjon_versjon_id",
+                    "type": "timestamptz",
+                    "default": {
+                        "name": "now",
+                        "type": "function"
+                    }
+                },
+                {
+                    "name": "featuretype",
+                    "type": "varchar",
+                    "default": "ArealressursGrense"
+                },
+                {
+                    "name": "identifikasjon_navnerom",
+                    "type": "varchar",
+                    "comment": "Will have different values based on where in Norway"
+                },
+                {
+                    "name": "datafangstdato",
+                    "type": "date"
+                },
+                {
+                    "name": "verifiseringsdato",
+                    "type": "date"
+                },
+                {
+                    "name": "oppdateringsdato",
+                    "type": "timestamptz",
+                    "default": {
+                        "name": "now",
+                        "type": "function"
+                    }
+                },
+                {
+                    "name": "opphav",
+                    "type": "varchar",
+                    "default": "NIBIO_Client"
+                },
+                {
+                    "name": "kvalitet",
+                    "type": "sosi_kvalitet"
+                },
+                {
+                    "name": "registreringsversjon",
+                    "type": "date"
+                },
+                {
+                    "name": "avgrensing_type",
+                    "type": "smallint",
+                    "allowed_values": [
+                        4206,
+                        9300,
+                        3310,
+                        9111,
+                        7200,
+                        3001
+                    ]
+                }
+            ],
+            "primary_key": "identifikasjon_lokal_id",
+            "topogeom_columns": [
+                {
+                    "name": "grense",
+                    "type": "lineal",
+                    "allow_gaps": true,
+                    "allow_overlaps": true
+                }
+            ]
+        }
+    ],
+    "version": "1.0",
+    "topology": {
+        "srid": 4258,
+        "snap_tolerance": 0.000000001
+    },
+    "extensions": [
+        "uuid-ossp"
+    ],
+    "operations": {
+        "SurfaceMerge": {
+            "surfaceSQLFilter": "                      (             ST_Area(:S1.omrade::geometry::geography) <= CASE WHEN :S1.opphav = 'web' AND :S2.opphav = 'web' THEN 2000 ELSE 500 END             OR             ST_Area(:S2.omrade::geometry::geography) <= CASE WHEN :S1.opphav = 'web' AND :S2.opphav = 'web' THEN 2000 ELSE 500 END           )                      AND NOT           (             :S1.opphav in ('samf','vann')             OR             :S2.opphav in ('samf','vann')           ) ",
+            "sharedSurfaceAttributes": [
+                "arealtype",
+                "treslag",
+                "skogbonitet",
+                "grunnforhold"
+            ]
+        },
+        "GetFeaturesAsTopoJSON": {
+        },
+        "AddBordersSplitSurfaces": {
+            "parameters": {
+                "default": {
+                    "snapTolerance": {
+                        "units": 0.0000000001,
+                        "unitsAreMeters": false
+                    },
+                    "minAllowedNewSurfacesArea": {
+                        "units": 200,
+                        "unitsAreMeters": true
+                    },
+                    "maxAllowedNewSurfacesCount": 2,
+                    "maxAllowedSplitSurfacesCount": 1
+                },
+                "forOpenLines": {
+                    "minAllowedNewSurfacesArea": {
+                        "units": 10,
+                        "unitsAreMeters": true
+                    },
+                    "maxAllowedNewSurfacesCount": 3
+                }
+            }
+        }
+    },
+    "border_layer": {
+        "geo_column": "grense",
+        "table_name": "edge_attributes",
+        "version_column": "identifikasjon_version_id"
+    },
+    "surface_layer": {
+        "geo_column": "omrade",
+        "table_name": "face_attributes",
+        "version_column": "identifikasjon_version_id"
+    }
+}
