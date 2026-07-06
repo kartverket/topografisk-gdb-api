@@ -16,14 +16,32 @@ from .descriptions.loader import DescriptionError, load_resolved_datasets
 app = typer.Typer(add_completion=False, help="Description-driven geo components.")
 
 
-@app.command()
-def validate():
-    """Load + validate every description; report collections found."""
+def _load_datasets():
+    """Load the descriptions, or exit with a clear message.
+
+    Fails when the folder is missing/empty (0 datasets) or when a
+    description is invalid.
+    """
+    directory = config.descriptions_dir()
     try:
-        datasets = load_resolved_datasets(config.descriptions_dir())
+        datasets = load_resolved_datasets(directory)
     except DescriptionError as err:
         typer.secho(f"INVALID: {err}", fg="red")
         raise typer.Exit(code=1)
+    if not datasets:
+        typer.secho(
+            f"No dataset descriptions found in '{directory}'. Point "
+            "GEOCOMPONENTS_DESCRIPTIONS at a folder of dataset YAML files.",
+            fg="red",
+        )
+        raise typer.Exit(code=1)
+    return datasets
+
+
+@app.command()
+def validate():
+    """Load + validate every description; report collections found."""
+    datasets = _load_datasets()
     for d in datasets:
         cols = ", ".join(c.name for c in d.collections)
         typer.secho(f"OK  {d.name}: [{cols}]", fg="green")
@@ -38,7 +56,7 @@ def apply_schema():
     from .schema import functions, postgis
     from .schema.build import build_schema_plan
 
-    datasets = load_resolved_datasets(config.descriptions_dir())
+    datasets = _load_datasets()
     with psycopg.connect(config.database_dsn()) as conn:
         functions.apply_dispatch(conn)
         typer.echo("applied dispatch layer (ogc.feature_*)")
@@ -61,7 +79,7 @@ def serve(host: str = "0.0.0.0", port: int = 8000):
     from .api.pygeoapi_provider import PygeoapiProvider
     from .gateway.mounter import build_gateway
 
-    datasets = load_resolved_datasets(config.descriptions_dir())
+    datasets = _load_datasets()
     provider = PygeoapiProvider(dsn=config.database_dsn())
     gateway = build_gateway(datasets, provider, base_url=config.public_base_url())
     typer.echo(f"serving {len(datasets)} dataset(s) at {config.public_base_url()}")

@@ -1,63 +1,190 @@
-# geocomponents — description-driven geographic data components
+# geocomponents
 
-A sketch of components for **storing, distributing and updating geographic data**,
-where a neutral **dataset description** is the single source of truth and both the
-**database** and the **API** are generated from it — so either can be swapped
-without touching the descriptions or each other.
+**geocomponents turns a plain description of your geographic data into a working
+database and web API.** You describe your data once in YAML; it creates the
+PostGIS tables and a standards-based (OGC) web API to read and edit that data —
+no SQL or API code to write by hand. Change the description, re-run, and the
+database and API follow.
 
-## The idea in one picture
+## How it works
 
+You write a **description** (YAML) → run geocomponents → for each dataset you get:
+
+- a **PostGIS database** — one schema of tables, and
+- a **web API** at `/datasets/<name>/ogc_api` to read and edit the data
+  (an [OGC API — Features](https://ogcapi.ogc.org/features/) service).
+
+The description is the single source of truth: the database and the API are both
+generated from it.
+
+## Describing a dataset
+
+A description is a **folder of YAML files**. Each file is one *dataset*; an
+optional `commons.yaml` holds definitions shared by all of them. Point
+geocomponents at the folder with the `GEOCOMPONENTS_DESCRIPTIONS` setting.
+
+### A dataset
+
+```yaml
+name: cadastre           # required — becomes the DB schema and the API path
+title: Cadastre          # optional — a human-friendly name
+description: Land registry data.   # optional
+processes:               # optional — named operations to expose (see below)
+  - hello
+collections:             # the feature types in this dataset
+  - ...
 ```
-descriptions/*.yaml                      ← source of truth (datasets, collections, commons)
-        │
-        ├── DB SEAM  ───► SchemaPlan ───► PostGIS:
-        │                                   • tables                          (schema/postgis.py)
-        │                                   • internal _<collection>_<op> fns (schema/functions.py)
-        │                                   • fixed ogc.feature_* dispatch    (schema/functions.py)
-        │
-        └── API SEAM ───► DatasetApiProvider  (api/base.py)
-                            └─ pygeoapi impl   (api/pygeoapi_provider.py)
-                                 wires each collection to DbFunctionProvider,
-                                 which calls ONLY ogc.feature_*(dataset, collection, …)
-                                          │
-                                          ▼
-                                 GATEWAY (gateway/mounter.py)
-                            mounts one OGC API per dataset at
-                            /datasets/<dataset>/ogc_api  + /datasets index
+
+`name` becomes the PostgreSQL schema and the API mount path, e.g.
+`/datasets/cadastre/ogc_api`.
+
+### A collection
+
+A **collection** is one feature type (for example, parcels). Each becomes a table
+and an API collection:
+
+```yaml
+collections:
+  - name: parcels               # required — the table + collection name
+    title: Parcels
+    description: Land parcels.
+    feature_model: simple       # 'simple' (default) = read + edit
+                                # 'topology'         = read-only
+    geometry:
+      type: MultiPolygon        # shape type (see the list below)
+      srid: 4326                # coordinate system (default 4326 = WGS84)
+    fields:                     # your attributes (see below)
+      - name: label
+        type: string
+        required: true
 ```
 
-### Two design rules that drive everything
-1. **The API never names physical artefacts.** It only ever calls a fixed
-   dispatch layer `ogc.feature_items / feature_item / feature_create /
-   feature_replace / feature_update / feature_delete`, passing the **OGC
-   identifiers** `(dataset, collection)` as arguments. Table names and
-   per-collection function names stay inside the database. The contract is *the
-   dataset description + OGC*.
-2. **The database owns data shaping; the API owns hypermedia.** Generated
-   PL/pgSQL functions produce/consume GeoJSON and do the CRUD; pygeoapi adds the
-   OGC links / paging envelope (those depend on the mount URL the DB shouldn't
-   know).
-3. **The description declares capabilities.** Each collection sets a
-   `feature_model`: `simple` (OGC Features + Part 4 CRUD) or `topology`
-   (shared geometry → reads only for now; writes return **405**, CRUD arrives
-   later via processes + Part 11 Transactions). Each dataset declares which
-   `processes` to expose. A mixed dataset still declares Part 4 conformance —
-   topology collections are simply non-editable.
+- **`feature_model`** — `simple` collections can be read *and* edited
+  (create/update/delete). `topology` collections share geometry between
+  neighbouring features, so they are **read-only** for now; edit requests return
+  `405 Method Not Allowed`.
+- **`geometry`** — the shape type and coordinate system. The type is enforced
+  exactly: a `MultiPolygon` column rejects a plain `Polygon`.
 
-### Replaceability seams
-| Component | Responsibility | Swap by… |
-|---|---|---|
-| `descriptions/` | meta-schema + loader (source of truth) | — |
-| `schema/` | description → `SchemaPlan` → PostGIS tables + functions | new DB adapter on `SchemaPlan` |
-| `api/` | one description → one mountable OGC API app | new `DatasetApiProvider` |
-| `gateway/` | many apps → one service + dataset index | composition root (no pygeoapi import) |
+### Fields (attributes)
 
-## Run it (local)
+Each field is one attribute (one column). Give it a `name` and **exactly one** way
+to type it — a builtin `type`, a `type_ref` (a reusable type from `commons.yaml`),
+or a `codelist` (a controlled vocabulary from `commons.yaml`):
 
-The whole stack runs in Docker Compose. The app services read the **same discrete
-`DB_*` variables** used in production (no special local config path), and your
-`src/` is mounted into the container so code edits take effect on a restart — no
-rebuild:
+```yaml
+fields:
+  - name: label
+    type: string          # a builtin type (table below)
+    required: true        # optional, default false
+
+  - name: municipality
+    type_ref: municipality_code   # a named type defined in commons.yaml
+
+  - name: status
+    codelist: parcel_status       # a code list defined in commons.yaml
+```
+
+Builtin `type` values:
+
+| `type` | stored as |
+|---|---|
+| `string` | text |
+| `integer` | integer |
+| `number` | double precision |
+| `boolean` | boolean |
+| `date` | date |
+| `timestamp` | timestamp (with time zone) |
+| `uuid` | uuid |
+
+### Relationships
+
+A relationship links a collection to another collection **in the same dataset**.
+It adds a `<name>_id` column that points at the target:
+
+```yaml
+collections:
+  - name: buildings
+    geometry: { type: MultiPolygon, srid: 4326 }
+    relationships:
+      - name: parcel        # adds a 'parcel_id' column
+        target: parcels     # referencing the 'parcels' collection
+```
+
+### Columns you get for free
+
+Every collection automatically gets these — **do not declare them yourself**:
+
+- `id` — a unique identifier, generated for you (UUID)
+- `geometry` — the shape, typed as you specified
+- `created_at`, `updated_at` — timestamps, maintained for you
+
+In API responses (GeoJSON), `id` and `geometry` are top-level; your attributes
+plus `created_at`/`updated_at` appear under `properties`.
+
+### Shared definitions — `commons.yaml`
+
+An optional `commons.yaml` in the folder holds definitions every collection
+inherits:
+
+```yaml
+base_fields:              # extra attributes added to EVERY collection
+  - name: source
+    type: string
+    description: Where the feature came from.
+
+field_types:              # reusable named types, used via `type_ref`
+  - name: municipality_code
+    sql_type: varchar(4)
+
+code_lists:               # controlled vocabularies, used via `codelist`
+  - name: parcel_status
+    values:
+      - { code: active, label: Active }
+      - { code: retired, label: Retired }
+```
+
+### Geometry types
+
+`Point`, `MultiPoint`, `LineString`, `MultiLineString`, `Polygon`,
+`MultiPolygon`, `GeometryCollection`. `srid` defaults to `4326` (WGS84
+longitude/latitude). If you omit `geometry`, it defaults to a `Point`.
+
+### Processes
+
+`processes` lists named operations (OGC API — Processes) the dataset exposes at
+`/processes/<id>`. Each id must be registered in the process registry
+(`src/geocomponents/processes/registry.py`); the example ships a `hello` process.
+
+### A minimal dataset
+
+The smallest useful dataset — a name and one collection with a geometry and a
+field:
+
+```yaml
+name: places
+collections:
+  - name: points_of_interest
+    geometry:
+      type: Point
+    fields:
+      - name: name
+        type: string
+        required: true
+```
+
+### A working example
+
+The [`descriptions/`](descriptions/) folder is a complete, runnable example:
+`cadastre.yaml` (a `parcels` collection using a code list and a shared type, a
+`buildings` collection with a relationship, and a read-only `blocks` topology
+collection), a shared `commons.yaml`, and a second dataset `hydro.yaml`.
+
+## Running it (local)
+
+The whole stack runs in Docker Compose. The app reads the **same discrete `DB_*`
+variables** used in production (no special local config path), and your `src/` is
+mounted into the container so code edits take effect on a restart — no rebuild:
 
 ```bash
 docker compose up --build
@@ -68,58 +195,71 @@ docker compose up --build
 The image's entrypoint is the `geocomponents` CLI (`validate` | `apply-schema` |
 `serve`); the compose services simply run those subcommands.
 
-Then:
+## Using the API
 
 ```bash
+# List datasets, then one dataset's collections and features
 curl localhost:8000/datasets
 curl "localhost:8000/datasets/cadastre/ogc_api/collections/parcels/items?f=json"
 
-# Part 4 CRUD
+# Create a feature (simple collections only)
 curl -X POST localhost:8000/datasets/cadastre/ogc_api/collections/parcels/items \
   -H 'content-type: application/geo+json' \
   -d '{"type":"Feature","geometry":{"type":"MultiPolygon","coordinates":[[[[10,55],[10,56],[11,56],[11,55],[10,55]]]]},"properties":{"label":"P1","source":"demo"}}'
 
-# Processes
+# Run a process
 curl -X POST localhost:8000/datasets/cadastre/ogc_api/processes/hello/execution \
   -H 'content-type: application/json' -d '{"inputs":{"name":"world"}}'
 ```
 
-You can also call the DB directly to prove the database owns the shaping
-independently of the API:
+Open `http://localhost:8000/datasets/cadastre/ogc_api/` in a browser for the
+built-in HTML view.
 
-```sql
--- with_matched=false omits the (potentially expensive) numberMatched count
-select ogc.feature_items('cadastre', 'parcels', null, 10, 0, true);
-```
-
-## Tests
-
-Language-agnostic **contract tests** treat the components as black boxes at
-their real surfaces, so a reimplementation in another language passes unchanged:
-
-- `tests/test_*.py` — unit tests for loader/build/functions/config (**no DB**).
-- `tests/contract/test_db_contract.py` — the DB contract: calls only
-  `ogc.feature_*` (SQL surface).
-- `tests/contract/test_api_contract.py` — the HTTP OGC API contract.
-- `tests/test_integration.py` — one end-to-end happy path.
-
-Both generic (derived from a dataset description → run against any dataset) and
-fixed golden assertions.
+## Testing
 
 ```bash
-uv run pytest        # unit tests run without Docker; contract/integration
-                     # tests auto-skip if PostGIS isn't up (docker compose up -d db)
+docker compose up -d db      # PostGIS on localhost:55432
+uv run pytest                # unit tests run without Docker; DB-backed
+                             # contract/integration tests use the database above
 ```
+
+The suite is written as an executable **contract**: it drives the components at
+their real surfaces (the `ogc.feature_*` database functions and the HTTP OGC API),
+so a reimplementation in another language would pass the same tests.
 
 ## Deployment
 
-The engine is shipped as a **engine container image** and deployed to Kubernetes + CloudSQL by a separate
+geocomponents ships as a container image (engine only — descriptions are supplied
+at runtime, not baked in) and is deployed to Kubernetes + CloudSQL by a separate
 apps repo. See **[DEPLOY.md](DEPLOY.md)** for the operational contract: the `DB_*`
-connection vars and `GEOCOMPONENTS_*` settings, the *apply-schema-then-serve*
+connection variables and `GEOCOMPONENTS_*` settings, the *apply-schema then serve*
 lifecycle, and the `/healthz` (liveness) + `/datasets` (readiness) probes.
 
-## Future components (designed-for, not built)
-- **GML/UML → description factory** (targets the same loader/meta-schema; commons is the integration point).
-- **Events** (emit on CRUD/process writes — natural home is the gateway).
-- **DB-side validation** (generate CHECK/SRID/code-list constraints — the deferred "validation in the DB").
-- **Migrations/evolution** (a `SchemaPlan` diff → migration emitter), versioning/history, more real processes, more DB backends.
+## How it's built
+
+Each dataset becomes one PostgreSQL schema; each collection becomes one table.
+Two ideas keep the pieces independent:
+
+- **The API never uses table names.** It reads and writes only through a small,
+  fixed set of database functions — `ogc.feature_items`, `ogc.feature_create`,
+  and so on — passing the dataset and collection names as arguments. So the
+  storage can change without touching the API. You can call them directly:
+
+  ```sql
+  -- the last argument toggles the (potentially expensive) total-count
+  select ogc.feature_items('cadastre', 'parcels', null, 10, 0, true);
+  ```
+
+- **The database shapes the data; the API adds the web layer.** Generated
+  database functions produce and consume GeoJSON and do the create/read/update/
+  delete; the API layer (pygeoapi) adds the OGC links and paging.
+
+The four parts are independently swappable: **`descriptions/`** (the format +
+loader), **`schema/`** (description → PostGIS tables + functions), **`api/`** (one
+dataset → one OGC API app), and **`gateway/`** (many apps → one service).
+
+### Not built yet (designed for)
+- Importing descriptions from GML/UML models.
+- Emitting events when data changes.
+- Enforcing validation (types, code lists, SRID) in the database.
+- Migrations when a description changes an existing table.
