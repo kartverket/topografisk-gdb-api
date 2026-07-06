@@ -38,6 +38,11 @@ collections:             # the feature types in this dataset
 `name` becomes the PostgreSQL schema and the API mount path, e.g.
 `/datasets/cadastre/ogc_api`.
 
+> **Naming:** dataset and collection `name`s become raw SQL
+> identifiers, so use **lowercase** letters, digits and underscores only — no
+> hyphens (`fkb-bane` → `fkb_bane`) and no uppercase (`arealressursFlate` →
+> `arealressurs_flate`). This restriction will be lifted later.
+
 ### A collection
 
 A **collection** is one feature type (for example, parcels). Each becomes a table
