@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 # --------------------------------------------------------------------------
 # Builtin scalar types -> PostgreSQL column types. FieldType.sql_type overrides.
@@ -99,6 +99,16 @@ class FieldDef(BaseModel):
     codelist: str | None = None
     required: bool = False
     description: str | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_type_source(self):
+        n_set = sum(x is not None for x in (self.type, self.type_ref, self.codelist))
+        if n_set != 1:
+            raise ValueError(
+                "field must set exactly one of type / type_ref / codelist "
+                f"(got {n_set})"
+            )
+        return self
 
 
 class GeometryDef(BaseModel):

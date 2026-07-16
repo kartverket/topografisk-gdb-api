@@ -91,8 +91,10 @@ def _resolve_field(
             )
         return ResolvedField(fld.name, BUILTIN_SQL_TYPES[fld.type], fld.required)
 
-    raise DescriptionError(
-        f"{where}: field '{fld.name}' must set one of type / type_ref / codelist"
+    # FieldDef enforces "exactly one of type / type_ref / codelist" at parse time,
+    # so this branch is unreachable.
+    raise AssertionError(
+        f"{where}: field '{fld.name}' has no type source (should be unreachable)"
     )
 
 

@@ -9,7 +9,12 @@ from geocomponents.descriptions.loader import (
     load_resolved_datasets,
     resolve_dataset,
 )
-from geocomponents.descriptions.models import Commons, DatasetDef, RelationshipDef
+from geocomponents.descriptions.models import (
+    Commons,
+    DatasetDef,
+    FieldDef,
+    RelationshipDef,
+)
 
 DESCRIPTIONS = Path(__file__).resolve().parents[1] / "descriptions"
 
@@ -153,3 +158,28 @@ def test_safe_identifier_surfaces_via_file_loader(tmp_path):
     p.write_text("name: fkb-bane\ncollections: []\n", encoding="utf-8")
     with pytest.raises(DescriptionError):
         load_dataset(p)
+
+
+# --------------------------------------------------------------------------
+# FieldDef: exactly one of type / type_ref / codelist
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "fld",
+    [
+        {"name": "f", "type": "string", "type_ref": "x"},
+        {"name": "f", "type": "string", "codelist": "c"},
+        {"name": "f", "type_ref": "x", "codelist": "c"},
+        {"name": "f", "type": "string", "type_ref": "x", "codelist": "c"},
+    ],
+)
+def test_field_rejects_multiple_type_sources(fld):
+    """Setting more than one silently prioritized codelist > type_ref > type
+    in the resolver, hiding authoring mistakes. Reject at parse time."""
+    with pytest.raises(ValidationError):
+        FieldDef.model_validate(fld)
+
+
+def test_field_rejects_no_type_source():
+    """A field must select its column type somehow."""
+    with pytest.raises(ValidationError):
+        FieldDef.model_validate({"name": "f"})
