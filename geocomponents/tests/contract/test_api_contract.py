@@ -129,6 +129,43 @@ def test_capability_matches_feature_model(client, datasets):
                 assert client.get(f"{items}?f=json").status_code == HTTPStatus.OK
 
 
+def test_405_on_non_editable_collection_advertises_all_allowed_methods(
+    client, datasets
+):
+    """RFC 9110 §15.5.6: a 405 must list every method the resource
+    supports in Allow. Both /items and /items/{id} support GET, HEAD, OPTIONS
+    regardless of editability."""
+    empty = orjson.dumps(
+        {"type": "Feature", "geometry": _GEOM_MULTIPOLYGON, "properties": {}}
+    ).decode()
+    for d in datasets:
+        for coll in d.collections:
+            if coll.supports_crud:
+                continue  # editable collections don't produce the 405 we care about
+            items = f"{_api(d.name)}/collections/{coll.name}/items"
+            expected = {"GET", "HEAD", "OPTIONS"}
+            # /items rejects POST for non-editable
+            r = client.post(
+                items,
+                content=empty,
+                headers={"content-type": "application/geo+json"},
+            )
+            assert r.status_code == HTTPStatus.METHOD_NOT_ALLOWED
+            assert {
+                v.strip() for v in r.headers.get("Allow", "").split(",")
+            } == expected
+            # /items/{id} rejects PUT for non-editable
+            r = client.put(
+                f"{items}/x",
+                content=empty,
+                headers={"content-type": "application/geo+json"},
+            )
+            assert r.status_code == HTTPStatus.METHOD_NOT_ALLOWED
+            assert {
+                v.strip() for v in r.headers.get("Allow", "").split(",")
+            } == expected
+
+
 def test_declared_processes_are_exactly_what_the_dataset_lists(client, datasets):
     for d in datasets:
         listed = client.get(f"{_api(d.name)}/processes?f=json").json()["processes"]

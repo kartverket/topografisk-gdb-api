@@ -205,7 +205,8 @@ def _not_editable() -> Response:
             "description": "Collection is not editable (topology / shared geometry)",
         },
         status_code=405,
-        headers={"Allow": "GET"},
+        # RFC 9110 §15.5.6: Allow must list every method the resource supports.
+        headers={"Allow": "GET, HEAD, OPTIONS"},
     )
 
 
