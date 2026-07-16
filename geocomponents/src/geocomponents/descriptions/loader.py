@@ -34,7 +34,8 @@ class DescriptionError(ValueError):
 
 
 def _read_yaml(path: Path) -> dict:
-    with path.open() as fh:
+    # Pin UTF-8; host locale defaults would mojibake Norwegian å/ø/æ.
+    with path.open(encoding="utf-8") as fh:
         data = yaml.safe_load(fh) or {}
     if not isinstance(data, dict):
         raise DescriptionError(f"{path}: expected a mapping at the top level")
@@ -78,8 +79,7 @@ def _resolve_field(
     if fld.type_ref is not None:
         if fld.type_ref not in types:
             raise DescriptionError(
-                f"{where}: field '{fld.name}' references unknown type "
-                f"'{fld.type_ref}'"
+                f"{where}: field '{fld.name}' references unknown type '{fld.type_ref}'"
             )
         return ResolvedField(fld.name, types[fld.type_ref].sql_type, fld.required)
 
@@ -120,9 +120,7 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
         resolved_fields: list[ResolvedField] = []
         for fld in merged_fields:
             if fld.name in seen:
-                raise DescriptionError(
-                    f"{where}: duplicate field name '{fld.name}'"
-                )
+                raise DescriptionError(f"{where}: duplicate field name '{fld.name}'")
             seen.add(fld.name)
             resolved_fields.append(_resolve_field(fld, types, codelists, where=where))
 

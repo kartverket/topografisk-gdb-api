@@ -200,8 +200,10 @@ def _not_editable() -> Response:
     on shared geometry will later arrive via processes + Part 11 (Transactions).
     """
     return JSONResponse(
-        {"code": "MethodNotAllowed",
-         "description": "Collection is not editable (topology / shared geometry)"},
+        {
+            "code": "MethodNotAllowed",
+            "description": "Collection is not editable (topology / shared geometry)",
+        },
         status_code=405,
         headers={"Allow": "GET"},
     )
@@ -219,9 +221,31 @@ def _filtering_unsupported() -> Response:
     dispatch grows a filter argument (then ``/queryables`` returns too).
     """
     return JSONResponse(
-        {"code": "InvalidParameter",
-         "description": "CQL filtering (filter/filter-lang) is not supported yet"},
+        {
+            "code": "InvalidParameter",
+            "description": "CQL filtering (filter/filter-lang) is not supported yet",
+        },
         status_code=400,
+    )
+
+
+def _unsupported_media_type() -> Response:
+    """415 for POST /items with a content-type other than application/geo+json.
+
+    Part 4 create takes geo+json; Part 3/5 (draft) overloads the same endpoint
+    for query-by-POST with a CQL2 ``application/json`` body. Since query-by-
+    POST isn't implemented, reject anything else rather than misroute the body
+    into create.
+    """
+    return JSONResponse(
+        {
+            "code": "UnsupportedMediaType",
+            "description": "POST /items requires application/geo+json (create). "
+            "Query-by-POST (application/json + CQL2 body) is not "
+            "supported yet.",
+        },
+        status_code=415,
+        headers={"Accept-Post": "application/geo+json"},
     )
 
 
@@ -276,7 +300,8 @@ def _collection_schema(api_: API, cid) -> Response:
     if res is None:
         return JSONResponse(
             {"code": "NotFound", "description": f"collection {cid} not found"},
-            status_code=404)
+            status_code=404,
+        )
     provider = load_plugin("provider", res["providers"][0])
     _mimetype, doc = provider.get_schema()
     return JSONResponse(doc, media_type="application/schema+json")
@@ -294,7 +319,8 @@ def _strip_queryables_links(obj):
         links = obj.get("links")
         if isinstance(links, list):
             obj["links"] = [
-                ln for ln in links
+                ln
+                for ln in links
                 if not str(ln.get("rel", "")).rstrip("/").endswith("queryables")
             ]
         for value in obj.values():
@@ -327,7 +353,8 @@ def _build_starlette_app(api_: API) -> Starlette:
 
     async def collections(request: Request):
         return await _describe_collections(
-            api_, request, request.path_params.get("collection_id"))
+            api_, request, request.path_params.get("collection_id")
+        )
 
     async def schema(request: Request):
         return _collection_schema(api_, request.path_params["collection_id"])
@@ -335,12 +362,18 @@ def _build_starlette_app(api_: API) -> Starlette:
     # -- /items : one handler per verb, dispatched by a map (see routes) ----
     async def _list_items(request: Request, cid):
         # CQL filtering isn't in the DB dispatch yet; refuse rather than ignore.
-        if (request.query_params.get("filter") is not None
-                or request.query_params.get("filter-lang") is not None):
+        if (
+            request.query_params.get("filter") is not None
+            or request.query_params.get("filter-lang") is not None
+        ):
             return _filtering_unsupported()
         return await _execute(
-            api_, itemtypes_api.get_collection_items, request, cid,
-            skip_valid_check=True)
+            api_,
+            itemtypes_api.get_collection_items,
+            request,
+            cid,
+            skip_valid_check=True,
+        )
 
     async def _options_items(_request: Request, cid):
         # POST advertised only when editable.
@@ -348,20 +381,30 @@ def _build_starlette_app(api_: API) -> Starlette:
         return _options("GET, HEAD, OPTIONS" + write_verbs)
 
     async def _post_items(request: Request, cid):
-        # OGC overloads POST: a JSON/GeoJSON body is a Part-4 *create*; any other
-        # content-type is a Part-3 *query* (e.g. CQL in the body).
+        # OGC Features Part 4 defines POST /items as *create* with a GeoJSON
+        # Feature body (application/geo+json). Part 3/5 (draft) overloads the
+        # same endpoint for query-by-POST with a CQL2 body (application/json).
+        # We only implement create, so reject anything but geo+json rather than
+        # misrouting a query body into create (or falling through to a
+        # GET-like list handler that would then choke parsing the body as CQL).
         ct = request.headers.get("content-type", "")
-        if not (ct.startswith("application/geo+json")
-                or ct.startswith("application/json")):
-            return await _list_items(request, cid)
+        if not ct.startswith("application/geo+json"):
+            return _unsupported_media_type()
         if not _editable(cid):
             return _not_editable()
         return await _execute(
-            api_, itemtypes_api.manage_collection_item, request,
-            "create", cid, skip_valid_check=True)
+            api_,
+            itemtypes_api.manage_collection_item,
+            request,
+            "create",
+            cid,
+            skip_valid_check=True,
+        )
 
     items_handlers = {
-        "OPTIONS": _options_items, "GET": _list_items, "HEAD": _list_items,
+        "OPTIONS": _options_items,
+        "GET": _list_items,
+        "HEAD": _list_items,
         "POST": _post_items,
     }
 
@@ -372,7 +415,8 @@ def _build_starlette_app(api_: API) -> Starlette:
     # -- /items/{item_id} : one handler per verb, dispatched by a map -------
     async def _get_item(request: Request, cid, iid):
         return await _execute(
-            api_, itemtypes_api.get_collection_item, request, cid, iid)
+            api_, itemtypes_api.get_collection_item, request, cid, iid
+        )
 
     async def _options_item(_request: Request, cid, _iid):
         # Writable verbs (PUT/PATCH/DELETE) advertised only when editable.
@@ -383,15 +427,27 @@ def _build_starlette_app(api_: API) -> Starlette:
         if not _editable(cid):
             return _not_editable()
         return await _execute(
-            api_, itemtypes_api.manage_collection_item, request,
-            "update", cid, iid, skip_valid_check=True)
+            api_,
+            itemtypes_api.manage_collection_item,
+            request,
+            "update",
+            cid,
+            iid,
+            skip_valid_check=True,
+        )
 
     async def _delete_item(request: Request, cid, iid):
         if not _editable(cid):
             return _not_editable()
         return await _execute(
-            api_, itemtypes_api.manage_collection_item, request,
-            "delete", cid, iid, skip_valid_check=True)
+            api_,
+            itemtypes_api.manage_collection_item,
+            request,
+            "delete",
+            cid,
+            iid,
+            skip_valid_check=True,
+        )
 
     async def _patch_item(request: Request, cid, iid):
         if not _editable(cid):
@@ -404,12 +460,17 @@ def _build_starlette_app(api_: API) -> Starlette:
         except ProviderItemNotFoundError:
             return JSONResponse(
                 {"code": "NotFound", "description": f"item {iid} not found"},
-                status_code=404)
+                status_code=404,
+            )
         return Response(status_code=204)
 
     item_handlers = {
-        "OPTIONS": _options_item, "GET": _get_item, "HEAD": _get_item,
-        "PUT": _put_item, "PATCH": _patch_item, "DELETE": _delete_item,
+        "OPTIONS": _options_item,
+        "GET": _get_item,
+        "HEAD": _get_item,
+        "PUT": _put_item,
+        "PATCH": _patch_item,
+        "DELETE": _delete_item,
     }
 
     async def collection_item(request: Request):
@@ -424,8 +485,8 @@ def _build_starlette_app(api_: API) -> Starlette:
     async def execute_process(request: Request):
         pid = request.path_params["process_id"]
         return await _execute(
-            api_, processes_api.execute_process, request, pid,
-            skip_valid_check=True)
+            api_, processes_api.execute_process, request, pid, skip_valid_check=True
+        )
 
     routes = [
         Route("/", landing),
@@ -434,14 +495,19 @@ def _build_starlette_app(api_: API) -> Starlette:
         Route("/collections", collections),
         Route("/collections/{collection_id}", collections),
         Route("/collections/{collection_id}/schema", schema),
-        Route("/collections/{collection_id}/items", collection_items,
-              methods=["GET", "POST", "OPTIONS"]),
-        Route("/collections/{collection_id}/items/{item_id}", collection_item,
-              methods=["GET", "PUT", "PATCH", "DELETE", "OPTIONS"]),
+        Route(
+            "/collections/{collection_id}/items",
+            collection_items,
+            methods=["GET", "POST", "OPTIONS"],
+        ),
+        Route(
+            "/collections/{collection_id}/items/{item_id}",
+            collection_item,
+            methods=["GET", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        ),
         Route("/processes", processes),
         Route("/processes/{process_id}", processes),
-        Route("/processes/{process_id}/execution", execute_process,
-              methods=["POST"]),
+        Route("/processes/{process_id}/execution", execute_process, methods=["POST"]),
     ]
     return Starlette(routes=routes)
 

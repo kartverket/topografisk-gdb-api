@@ -34,6 +34,15 @@ from .plan import (
 _AUDIT = ("created_at", "updated_at")
 
 
+def _quote_key(name: str) -> str:
+    """Escape single quotes so ``name`` can be embedded in a SQL literal.
+
+    Defense-in-depth: names are already restricted by the loader's
+    ``SafeIdentifier``, but hand-built plans (e.g. tests) can bypass that.
+    """
+    return name.replace("'", "''")
+
+
 # ==========================================================================
 # Dispatch layer (fixed; generated once, independent of any dataset)
 # ==========================================================================
@@ -127,7 +136,10 @@ def _writable_columns(table: TablePlan) -> list[ColumnPlan]:
 
 
 def _properties_object(table: TablePlan, alias: str) -> str:
-    pairs = [f"'{col.name}', {alias}.\"{col.name}\"" for col in table.property_columns]
+    pairs = [
+        f"'{_quote_key(col.name)}', {alias}.\"{col.name}\""
+        for col in table.property_columns
+    ]
     return "jsonb_build_object(\n      " + ",\n      ".join(pairs) + "\n    )"
 
 
@@ -148,15 +160,15 @@ def _geom_from_feature(table: TablePlan) -> str:
 
 
 def _prop_read(col: ColumnPlan) -> str:
-    return f"(feature->'properties'->>'{col.name}')::{col.sql_type}"
+    return f"(feature->'properties'->>'{_quote_key(col.name)}')::{col.sql_type}"
 
 
 def _fn_item(plan: CollectionPlan) -> str:
     t = plan.table
     return f"""\
-create or replace function {plan.functions['item']}(fid uuid)
+create or replace function {plan.functions["item"]}(fid uuid)
 returns jsonb language sql stable as $func$
-  select {_feature_object(t, 't')}
+  select {_feature_object(t, "t")}
   from {t.qualified} t
   where t."{t.id_column}" = fid;
 $func$"""
@@ -168,7 +180,7 @@ def _fn_items(plan: CollectionPlan) -> str:
     # numberMatched is optional in OGC Features and costs an extra count over the
     # filtered set, so it is only computed (and only included) when with_matched.
     return f"""\
-create or replace function {plan.functions['items']}(
+create or replace function {plan.functions["items"]}(
     bbox float8[] default null, lim int default 10, off int default 0,
     with_matched boolean default true)
 returns jsonb language sql stable as $func$
@@ -182,7 +194,7 @@ returns jsonb language sql stable as $func$
     'type', 'FeatureCollection',
     'features', coalesce(
       (select jsonb_agg(f) from (
-         select {_feature_object(t, 'p')} as f from page p
+         select {_feature_object(t, "p")} as f from page p
        ) sub), '[]'::jsonb),
     'numberReturned', (select count(*) from page)
   ) || case when with_matched
@@ -197,7 +209,7 @@ def _fn_create(plan: CollectionPlan) -> str:
     cols = ", ".join([f'"{t.geometry.name}"'] + [f'"{c.name}"' for c in writable])
     vals = ", ".join([_geom_from_feature(t)] + [_prop_read(c) for c in writable])
     return f"""\
-create or replace function {plan.functions['create']}(feature jsonb)
+create or replace function {plan.functions["create"]}(feature jsonb)
 returns uuid language plpgsql as $func$
 declare new_id uuid;
 begin
@@ -217,7 +229,7 @@ def _fn_replace(plan: CollectionPlan) -> str:
     sets.append('"updated_at" = now()')
     set_clause = ",\n      ".join(sets)
     return f"""\
-create or replace function {plan.functions['replace']}(fid uuid, feature jsonb)
+create or replace function {plan.functions["replace"]}(fid uuid, feature jsonb)
 returns boolean language plpgsql as $func$
 begin
   update {t.qualified} set
@@ -233,18 +245,18 @@ def _fn_update(plan: CollectionPlan) -> str:
     t = plan.table
     writable = _writable_columns(t)
     sets = [
-        f'"{t.geometry.name}" = case when feature ? \'geometry\' '
+        f"\"{t.geometry.name}\" = case when feature ? 'geometry' "
         f'then {_geom_from_feature(t)} else "{t.geometry.name}" end'
     ]
     for c in writable:
         sets.append(
-            f'"{c.name}" = case when feature->\'properties\' ? \'{c.name}\' '
+            f"\"{c.name}\" = case when feature->'properties' ? '{_quote_key(c.name)}' "
             f'then {_prop_read(c)} else "{c.name}" end'
         )
     sets.append('"updated_at" = now()')
     set_clause = ",\n      ".join(sets)
     return f"""\
-create or replace function {plan.functions['update']}(fid uuid, feature jsonb)
+create or replace function {plan.functions["update"]}(fid uuid, feature jsonb)
 returns boolean language plpgsql as $func$
 begin
   update {t.qualified} set
@@ -258,7 +270,7 @@ $func$"""
 def _fn_delete(plan: CollectionPlan) -> str:
     t = plan.table
     return f"""\
-create or replace function {plan.functions['delete']}(fid uuid)
+create or replace function {plan.functions["delete"]}(fid uuid)
 returns boolean language plpgsql as $func$
 begin
   delete from {t.qualified} where "{t.id_column}" = fid;

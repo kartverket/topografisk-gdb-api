@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from geocomponents.descriptions.loader import load_resolved_datasets
+from geocomponents.schema import postgis
 from geocomponents.schema.build import build_schema_plan
 from geocomponents.schema.plan import OPERATIONS, READ_OPS
 
@@ -17,7 +18,9 @@ def test_dataset_maps_to_schema_and_collections_to_tables():
     plan = _cadastre_plan()
     assert plan.schema_name == "cadastre"
     assert {c.collection_name for c in plan.collections} == {
-        "parcels", "buildings", "blocks"
+        "parcels",
+        "buildings",
+        "blocks",
     }
     for coll in plan.collections:
         assert coll.table.qualified == f"cadastre.{coll.collection_name}"
@@ -55,3 +58,10 @@ def test_internal_function_names_are_private_and_per_operation():
     assert set(parcels.functions) == set(OPERATIONS)
     # Internal (private) names live in the dataset schema, prefixed with '_'.
     assert parcels.functions["items"] == "cadastre._parcels_items"
+
+
+def test_pgcrypto_extension_declared_for_gen_random_uuid():
+    """PG <= 12 lacks ``gen_random_uuid()`` in core; declaring pgcrypto keeps
+    the id column default portable across PG versions."""
+    stmts = postgis.table_statements(_cadastre_plan())
+    assert any("create extension if not exists pgcrypto" in s for s in stmts)

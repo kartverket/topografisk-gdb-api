@@ -17,9 +17,9 @@ PostgreSQL type here, but the concept (a column with a type) is generic.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 # --------------------------------------------------------------------------
 # Builtin scalar types -> PostgreSQL column types. FieldType.sql_type overrides.
@@ -52,13 +52,24 @@ GeometryType = Literal[
 FeatureModel = Literal["simple", "topology"]
 
 
+# Names flowing into generated SQL are validated at parse time so authoring
+# errors surface as pydantic ValidationErrors, not cryptic PG syntax failures
+# during DDL apply. Domain-facing names like ``FKB-AR5`` will be translated to
+# conforming identifiers upstream by the planned descriptor generator; do NOT
+# relax this pattern here.
+SafeIdentifier = Annotated[
+    str,
+    StringConstraints(pattern=r"^[a-z_][a-z0-9_]*$", min_length=1, max_length=40),
+]
+
+
 # --------------------------------------------------------------------------
 # Raw description documents (validated structure, not data)
 # --------------------------------------------------------------------------
 class FieldType(BaseModel):
     """A named, reusable attribute type referenced across collections."""
 
-    name: str
+    name: SafeIdentifier
     sql_type: str
     description: str | None = None
 
@@ -71,7 +82,7 @@ class CodeListValue(BaseModel):
 class CodeList(BaseModel):
     """A shared controlled vocabulary referenced by fields."""
 
-    name: str
+    name: SafeIdentifier
     values: list[CodeListValue] = Field(default_factory=list)
 
 
@@ -82,7 +93,7 @@ class FieldDef(BaseModel):
     name) or ``codelist`` (a ``CodeList`` name) selects the column type.
     """
 
-    name: str
+    name: SafeIdentifier
     type: str | None = None
     type_ref: str | None = None
     codelist: str | None = None
@@ -101,13 +112,13 @@ class RelationshipDef(BaseModel):
     Generates a ``<name>_id`` column referencing the target's ``id``.
     """
 
-    name: str
-    target: str
+    name: SafeIdentifier
+    target: SafeIdentifier
     description: str | None = None
 
 
 class CollectionDef(BaseModel):
-    name: str
+    name: SafeIdentifier
     title: str | None = None
     description: str | None = None
     feature_model: FeatureModel = "simple"
@@ -130,7 +141,7 @@ class Commons(BaseModel):
 
 
 class DatasetDef(BaseModel):
-    name: str
+    name: SafeIdentifier
     title: str | None = None
     description: str | None = None
     processes: list[str] = Field(default_factory=list)
@@ -150,8 +161,8 @@ class ResolvedField:
 
 @dataclass(frozen=True)
 class ResolvedRelationship:
-    name: str           # column base name; column is <name>_id
-    target: str         # target collection (table) name
+    name: str  # column base name; column is <name>_id
+    target: str  # target collection (table) name
 
 
 @dataclass(frozen=True)

@@ -59,6 +59,9 @@ def table_statements(plan: SchemaPlan) -> list[str]:
 
     stmts: list[str] = [
         "create extension if not exists postgis",
+        # gen_random_uuid() (id column default) is core in PG >= 13 but requires
+        # pgcrypto on PG <= 12. Cheap portability; no-op on modern servers.
+        "create extension if not exists pgcrypto",
         f"create schema if not exists {plan.schema_name}",
     ]
     for coll in plan.collections:
@@ -74,10 +77,17 @@ def render_tables(plan: SchemaPlan) -> str:
 
 
 def apply_tables(conn: psycopg.Connection, plan: SchemaPlan) -> None:
-    for stmt in table_statements(plan):
-        try:
-            conn.execute(stmt)
-        except psycopg.errors.DuplicateObject:
-            # e.g. an FK constraint that already exists; safe to ignore on re-run.
-            conn.rollback()
-    conn.commit()
+    """Apply the plan atomically.
+
+    Per-statement savepoints let re-runs tolerate ``DuplicateObject`` (e.g. an
+    FK that already exists) without discarding earlier statements in the same
+    transaction.
+    """
+    with conn.transaction():
+        for stmt in table_statements(plan):
+            try:
+                with conn.transaction():
+                    conn.execute(stmt)
+            except psycopg.errors.DuplicateObject:
+                # e.g. an FK constraint that already exists on re-application.
+                continue
