@@ -15,6 +15,10 @@ import psycopg
 
 from .plan import ColumnPlan, SchemaPlan, TablePlan
 
+# PostgreSQL's NAMEDATALEN default. Identifiers longer than this are silently
+# truncated by the server, so two distinct long names can collide.
+_PG_MAX_IDENT_LEN = 63
+
 
 def _column_ddl(col: ColumnPlan) -> str:
     parts = [f'"{col.name}"', col.sql_type]
@@ -35,10 +39,25 @@ def _table_ddl(table: TablePlan) -> str:
     return f"create table if not exists {table.qualified} (\n  {cols}\n)"
 
 
+def _fk_constraint_name(table_name: str, column: str) -> str:
+    """Return the ``<t>_<c>_fkey`` name if it fits PG's 63-char identifier
+    limit; otherwise raise ``ValueError``.
+    """
+    name = f"{table_name}_{column}_fkey"
+    if len(name) > _PG_MAX_IDENT_LEN:
+        raise ValueError(
+            f"FK constraint name {name!r} is {len(name)} chars, exceeds PG's "
+            f"{_PG_MAX_IDENT_LEN}-char identifier limit. Shorten the "
+            f"collection ({table_name!r}) or relationship (that yielded column "
+            f"{column!r}) name."
+        )
+    return name
+
+
 def _fk_ddl(table: TablePlan) -> list[str]:
     stmts: list[str] = []
     for fk in table.foreign_keys:
-        cname = f"{table.name}_{fk.column}_fkey"
+        cname = _fk_constraint_name(table.name, fk.column)
         stmts.append(
             f"alter table {table.qualified} "
             f'add constraint "{cname}" '

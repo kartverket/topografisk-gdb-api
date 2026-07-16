@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from geocomponents.descriptions.loader import load_resolved_datasets
 from geocomponents.schema import postgis
 from geocomponents.schema.build import build_schema_plan
@@ -65,3 +67,26 @@ def test_pgcrypto_extension_declared_for_gen_random_uuid():
     the id column default portable across PG versions."""
     stmts = postgis.table_statements(_cadastre_plan())
     assert any("create extension if not exists pgcrypto" in s for s in stmts)
+
+
+# --------------------------------------------------------------------------
+# FK constraint names must fit PG's 63-char NAMEDATALEN
+# --------------------------------------------------------------------------
+def test_fk_constraint_name_natural_when_short():
+    """Common case: the human-readable ``<t>_<c>_fkey`` form is used verbatim
+    so existing databases keep recognizing pre-applied constraints."""
+    assert (
+        postgis._fk_constraint_name("buildings", "parcel_id")
+        == "buildings_parcel_id_fkey"
+    )
+
+
+def test_fk_constraint_name_raises_when_over_63():
+    """Worst-case SafeIdentifier lengths (40 + 43) produce an 89-char natural
+    name that PG would silently truncate to 63, risking collisions across
+    distinct FKs. Fail loudly with an actionable message so the author shortens
+    the source names rather than getting an opaque server-side collision."""
+    long_table = "t" * 40
+    long_column = "c" * 40 + "_id"  # 43 chars
+    with pytest.raises(ValueError, match=r"63"):
+        postgis._fk_constraint_name(long_table, long_column)
