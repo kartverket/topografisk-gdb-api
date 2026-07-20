@@ -176,13 +176,68 @@ Part 4 makes no assumption about schema constraints. Two server postures:
 
 #### Requirement IDs introduced in §6.1
 
-| ID | Type | Spec § | One-line summary |
-|----|------|--------|------------------|
+| ID | Type | Spec § | Content |
+|----|------|--------|---------|
 | [`/req/core/methods`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_core_methods) | Requirement 1 | §6.1 | Server SHALL implement one or more of POST/PUT/DELETE per mutable resource. |
 | [`/per/core/additional-status-codes`](https://docs.ogc.org/DRAFTS/20-002r1.html#per_core_additional-status-codes) | Permission 1 | §6.1.1 | Server may return HTTP status codes beyond Table 3. |
 
+### §6.2: Create (POST /items)
+
+The `POST` operation adds a new resource to a collection. Server assigns the
+identifier and returns it via `Location`.
+
+#### Rules
+
+| ID | Type | Spec § | Content |
+|----|------|--------|---------|
+| [`/req/create-replace-delete/post-op`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_create-replace-delete_post-op) | Req 2 (with Condition) | §6.2.2 | If server advertises POST via OPTIONS `Allow`, it SHALL support POST at the resources endpoint. |
+| [`/req/create-replace-delete/post-body`](https://docs.ogc.org/DRAFTS/20-002r1.html#rec_create-replace-delete_post-body)† | Req 3 | §6.2.3 | POST body SHALL contain a resource representation. |
+| [`/per/create-replace-delete/insert-body`](https://docs.ogc.org/DRAFTS/20-002r1.html#per_create-replace-delete_insert-body) | Perm 2 | §6.2.3 | Server MAY support any resource encoding. |
+| [`/req/create-replace-delete/post-content-type`](https://docs.ogc.org/DRAFTS/20-002r1.html#rec_create-replace-delete_post-content-type)† | Req 4 | §6.2.3 | `Content-Type` header SHALL declare the request body's media type. |
+| [`/req/create-replace-delete/post-response-rid`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_create-replace-delete_post-response-rid) | Req 5 | §6.2.4 | On success, server SHALL assign a new, unique identifier. |
+| [`/per/create-replace-delete/rid`](https://docs.ogc.org/DRAFTS/20-002r1.html#per_create-replace-delete_rid) | Perm 3 | §6.2.4 | If POST body contains an ID, server MAY use it or ignore it. |
+| [`/req/create-replace-delete/post-response`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_create-replace-delete_post-response) | Req 6 (A/B/C) | §6.2.4 | (A) Success SHALL return `201`. (B) `201` SHALL include `Location` with the new resource URI. (C) Queued execution SHALL return `202`. |
+
+† Spec HTML anchor uses `rec_` prefix even though the rule is a Requirement, not a
+Recommendation. Reproduced as-is for click-through fidelity.
+
+#### Perm 3 — client-suggested IDs
+
+Two mechanisms let clients influence identifiers:
+
+- **POST with ID in body** (Perm 3 above) — server MAY honor the client's
+  suggestion or MAY ignore it. Server's decision wins.
+- **PUT-to-create** (spec §6.3; see Scope) — client picks the URI directly;
+  the collection's configuration decides whether the request succeeds.
+
+#### Async CREATE (Req 6C) — fire-and-forget trap
+
+> **⚠ `202` from POST is fire-and-forget.**
+>
+> When the server queues rather than executes, the client receives `202
+> Accepted` and nothing else — no `Location`, no status URL, no callback.
+> The spec explicitly says: *"the resource creation can succeed or fail,
+> without further notification to the client about the result or the
+> resource identifier."*
+>
+> Concrete traps:
+>
+> - **Clients that need to reference or retrieve the resource later cannot.**
+>   They have no ID and no way to obtain one.
+> - **Server-side validation failures are silent.** DB constraint violations,
+>   schema rejections applied late, permission checks deferred to the queue
+>   worker — none reach the client. Accepted-and-succeeded is
+>   indistinguishable from accepted-and-rejected.
+>
+> Do not use Req 6C for interactive clients or when creation success matters.
+> If queue-then-notify is required, use Part 11's asynchronous transactions
+> (which define a status resource clients can poll).
+
+#### Exceptions (spec §6.2.5)
+
+Deferred to §6.1.1 HTTP status codes. See Overview.
+
 <!-- Remaining subsections of this class to add in later chunks:
-  - Create (POST /items) — spec §6.2
   - Replace (PUT /items/{id}) — spec §6.3
   - Delete (DELETE /items/{id}) — spec §6.4
   - OPTIONS — spec §6.5
