@@ -194,6 +194,11 @@ Do not use async execution for interactive clients or when operation success
 matters. For queue-then-notify, use Part 11's asynchronous transactions, which
 define a status resource clients can poll.
 
+POST-specific trap: `202` carries no `Location`
+header and no identifier — the client has no way to retrieve the created
+resource, and server-side validation failures (DB constraints, schema
+rejections) are silent.
+
 ### §6.2: Create (POST /items)
 
 The `POST` operation adds a new resource to a collection. Server assigns the
@@ -321,10 +326,39 @@ that needs to distinguish "deleted successfully" from "was already gone".
 
 Deferred to §6.1.1 HTTP status codes. See Overview.
 
-<!-- Remaining subsections of this class to add in later chunks:
-  - OPTIONS — spec §6.5
+### §6.5: Options (OPTIONS)
 
-  Remaining classes:
+The `OPTIONS` operation declares which HTTP methods are available for a
+resource endpoint. It is the mechanism behind the Condition clauses in
+Reqs 2, 7, and 13 — those operations are only required when `OPTIONS`
+has advertised the corresponding method in `Allow`.
+
+#### Rules
+
+| ID | Type | Spec § | Content |
+|----|------|--------|---------|
+| [`/req/create-replace-delete/options-op`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_create-replace-delete_options-op) | Req 15 | §6.5.3 | Server SHALL support OPTIONS at each resource endpoint. |
+| [`/per/create-replace-delete/options/req-body`](https://docs.ogc.org/DRAFTS/20-002r1.html#per_create-replace-delete_options-req-body) | Perm 6 (A/B) | §6.5.4 | A) Request body MAY be included (format undefined by this Standard). B) Server MAY discard it. |
+| [`/req/create-replace-delete/options-response`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_create-replace-delete_options-response) | Req 16 (A/B/C) | §6.5.5 | A) Success SHALL be `200`. B) `200` SHALL include `Allow`. C) `Allow` SHALL list methods permitted at the time and within the context of the request. |
+| [`/per/options/other-methods`](https://docs.ogc.org/DRAFTS/20-002r1.html#per_options_other-methods)‡ | Perm 7 | §6.5.5 | `Allow` MAY include any other relevant HTTP method (e.g. `GET`, `HEAD`). |
+| [`/per/create-replace-delete/options/res-body`](https://docs.ogc.org/DRAFTS/20-002r1.html#per_create-replace-delete_options-res-body) | Perm 8 | §6.5.5 | Response body MAY include content (format undefined by this Standard). |
+
+‡ Perm 7's identifier uses the shorter namespace `/per/options/…` while
+Perm 6 and 8 use `/per/create-replace-delete/options/…`. Reproduced as-is.
+
+#### Req 16C — context-sensitive `Allow`
+
+The `Allow` value is not a static server-level declaration. It reflects
+which methods are permitted *at the time and within the context of the
+request* — meaning it is user- and access-control-aware. The same endpoint
+may return `Allow: GET, HEAD` for a read-only user and
+`Allow: GET, HEAD, PUT, DELETE` for an editor.
+
+#### Exceptions (spec §6.5.6)
+
+Deferred to §6.1.1 HTTP status codes. See Overview.
+
+<!-- Remaining classes to add in later chunks:
   - Update — spec §7
   - Optimistic Locking — spec §8
   - Features — spec §9
