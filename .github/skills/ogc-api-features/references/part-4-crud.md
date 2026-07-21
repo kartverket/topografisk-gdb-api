@@ -181,6 +181,19 @@ Part 4 makes no assumption about schema constraints. Two server postures:
 | [`/req/core/methods`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_core_methods) | Requirement 1 | §6.1 | Server SHALL implement one or more of POST/PUT/DELETE per mutable resource. |
 | [`/per/core/additional-status-codes`](https://docs.ogc.org/DRAFTS/20-002r1.html#per_core_additional-status-codes) | Permission 1 | §6.1.1 | Server may return HTTP status codes beyond Table 3. |
 
+#### Async execution (202) — fire-and-forget
+
+When a server queues rather than immediately executes a write operation, it
+SHALL return `202 Accepted`. This applies to POST (Req 6C), PUT (Req 10B),
+and DELETE (Req 14B). In all cases:
+
+- No further notification is sent to the client.
+- The operation may succeed or fail silently.
+
+Do not use async execution for interactive clients or when operation success
+matters. For queue-then-notify, use Part 11's asynchronous transactions, which
+define a status resource clients can poll.
+
 ### §6.2: Create (POST /items)
 
 The `POST` operation adds a new resource to a collection. Server assigns the
@@ -196,7 +209,7 @@ identifier and returns it via `Location`.
 | [`/req/create-replace-delete/post-content-type`](https://docs.ogc.org/DRAFTS/20-002r1.html#rec_create-replace-delete_post-content-type)† | Req 4 | §6.2.3 | `Content-Type` header SHALL declare the request body's media type. |
 | [`/req/create-replace-delete/post-response-rid`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_create-replace-delete_post-response-rid) | Req 5 | §6.2.4 | On success, server SHALL assign a new, unique identifier. |
 | [`/per/create-replace-delete/rid`](https://docs.ogc.org/DRAFTS/20-002r1.html#per_create-replace-delete_rid) | Perm 3 | §6.2.4 | If POST body contains an ID, server MAY use it or ignore it. |
-| [`/req/create-replace-delete/post-response`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_create-replace-delete_post-response) | Req 6 (A/B/C) | §6.2.4 | (A) Success SHALL return `201`. (B) `201` SHALL include `Location` with the new resource URI. (C) Queued execution SHALL return `202`. |
+| [`/req/create-replace-delete/post-response`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_create-replace-delete_post-response) | Req 6 (A/B/C) | §6.2.4 | (A) Success SHALL return `201`. (B) `201` SHALL include `Location` with the new resource URI. (C) Queued execution SHALL return `202` — see §6.1 async execution; no `Location` or identifier is issued. |
 
 † Spec HTML anchor uses `rec_` prefix even though the rule is a Requirement, not a
 Recommendation. Reproduced as-is for click-through fidelity.
@@ -210,29 +223,6 @@ Two mechanisms let clients influence identifiers:
 - **PUT-to-create** (Perm 4, §6.3) — client picks the URI directly; any
   body-embedded identifier is ignored (Req 11). Whether PUT-to-create is
   supported is the server's choice (Perm 4).
-
-#### Async CREATE (Req 6C) — fire-and-forget trap
-
-> **⚠ `202` from POST is fire-and-forget.**
->
-> When the server queues rather than executes, the client receives `202
-> Accepted` and nothing else — no `Location`, no status URL, no callback.
-> The spec explicitly says: *"the resource creation can succeed or fail,
-> without further notification to the client about the result or the
-> resource identifier."*
->
-> Concrete traps:
->
-> - **Clients that need to reference or retrieve the resource later cannot.**
->   They have no ID and no way to obtain one.
-> - **Server-side validation failures are silent.** DB constraint violations,
->   schema rejections applied late, permission checks deferred to the queue
->   worker — none reach the client. Accepted-and-succeeded is
->   indistinguishable from accepted-and-rejected.
->
-> Do not use Req 6C for interactive clients or when creation success matters.
-> If queue-then-notify is required, use Part 11's asynchronous transactions
-> (which define a status resource clients can poll).
 
 #### Exceptions (spec §6.2.5)
 
@@ -252,7 +242,7 @@ The identifier is determined by the request URI — not the body.
 | [`/req/create-replace-delete/put-body`](https://docs.ogc.org/DRAFTS/20-002r1.html#rec_create-replace-delete_put-body)† | Req 8 | §6.3.4 | PUT body SHALL contain a representation of the new resource content. |
 | [`/per/create-replace-delete/update-put-body`](https://docs.ogc.org/DRAFTS/20-002r1.html#per_create-replace-delete_update_put_body) | Perm 5 | §6.3.4 | Server MAY support any resource encoding. |
 | [`/req/create-replace-delete/put-content-type`](https://docs.ogc.org/DRAFTS/20-002r1.html#rec_create-replace-delete_put-content-type)† | Req 9 | §6.3.4 | `Content-Type` header SHALL indicate the media type of the request body. |
-| [`/req/create-replace-delete/put-response`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_create-replace-delete_put-response) | Req 10 (A/B) | §6.3.5 | A) Success SHALL be `200` or `204`. B) Queued execution SHALL return `202`. |
+| [`/req/create-replace-delete/put-response`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_create-replace-delete_put-response) | Req 10 (A/B) | §6.3.5 | A) Success SHALL be `200` or `204`. B) Queued execution SHALL return `202` — see §6.1 async execution. |
 | [`/req/create-replace-delete/put-rid`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_create-replace-delete_put-rid) | Req 11 | §6.3.5 | If body contains a resource identifier, server SHALL ignore it. |
 | [`/req/create-replace-delete/put-rid-exception`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_create-replace-delete_put-rid-exception) | Req 12 (A/B) | §6.3.6 | A) Target not found + server does not support PUT-create → SHALL return `404`. B) `If-Match` present + target not found → SHALL return `412`. |
 
@@ -308,8 +298,30 @@ Safe patterns:
 
 Deferred to §6.1.1 HTTP status codes. See Overview.
 
+### §6.4: Delete (DELETE /items/{id})
+
+The `DELETE` operation removes a resource from a collection. No request body.
+
+#### Rules
+
+| ID | Type | Spec § | Content |
+|----|------|--------|---------|
+| [`/req/create-replace-delete/delete-op`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_create-replace-delete_delete-op) | Req 13 (Condition + A) | §6.4.2 | Condition: OPTIONS `Allow` declares DELETE. A) Server SHALL support DELETE for every resource in the collection. |
+| [`/req/create-replace-delete/delete-response`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_create-replace-delete_delete-response) | Req 14 (A/B) | §6.4.3 | A) Success SHALL be `200` or `204`. B) Queued execution SHALL return `202` — see §6.1 async execution. |
+| [`/rec/delete/no-feature`](https://docs.ogc.org/DRAFTS/20-002r1.html#rec_delete_no-feature) | Rec 1 | §6.4.4 | If no resource with the identifier exists, response SHOULD be `404`. |
+
+#### Rec 1 — 404 on missing resource
+
+HTTP DELETE is idempotent (RFC 9110): repeating the call has the same effect
+on server state. Idempotency is about *state*, not *status codes*. The spec
+recommends `404` when the resource no longer exists — consistent with a client
+that needs to distinguish "deleted successfully" from "was already gone".
+
+#### Exceptions (spec §6.4.4)
+
+Deferred to §6.1.1 HTTP status codes. See Overview.
+
 <!-- Remaining subsections of this class to add in later chunks:
-  - Delete (DELETE /items/{id}) — spec §6.4
   - OPTIONS — spec §6.5
 
   Remaining classes:
