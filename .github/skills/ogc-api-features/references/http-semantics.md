@@ -103,6 +103,13 @@ Common media types for feature writes:
 | `application/merge-patch+json` | JSON Merge Patch body for `PATCH` (RFC 7396). |
 | `application/json-patch+json` | JSON Patch body for `PATCH` (RFC 6902). |
 
+<!-- TODO: expand with PATCH encoding trade-offs, specifically:
+     - JSON Merge Patch null-as-remove sentinel: cannot distinguish
+       "set property to null" from "remove property" — trap for features
+       with legitimately nullable optional attributes (FKB, AR5).
+     - JSON Patch explicit `remove` vs `replace` with null avoids this.
+     - Recommend JSON Patch for schemas with nullable optional fields. -->
+
 ### 2.2 Response body — `Accept` and `Content-Type`
 
 Client's `Accept` header lists acceptable response types with quality values (`q=`).

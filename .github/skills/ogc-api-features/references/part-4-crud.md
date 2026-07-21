@@ -358,8 +358,58 @@ may return `Allow: GET, HEAD` for a read-only user and
 
 Deferred to §6.1.1 HTTP status codes. See Overview.
 
+## Requirements Class: Update
+
+Class URI: `req/update` (spec §7.1).
+
+**Direct dependency:**
+
+- RFC 5789 (PATCH Method for HTTP)
+
+A server implementing this class provides PATCH to modify parts of an existing
+resource without transmitting a complete replacement. The spec does not mandate
+a specific PATCH encoding.
+
+### §7.1: Overview
+
+| ID | Type | Spec § | Content |
+|----|------|--------|---------|
+| [`/req/update/methods`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_update_methods) | Req 17 | §7.1 | Server SHALL declare support for PATCH via OPTIONS. |
+
+### §7.2: Update (PATCH /items/{id})
+
+The `PATCH` operation modifies specific parts of an existing resource at
+`<resource endpoint>`. The body is a change document, not a full replacement.
+
+#### Rules
+
+| ID | Type | Spec § | Content |
+|----|------|--------|---------|
+| [`/req/update/update-patch-op`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_patch-update_update-patch-op)† | Req 18 | §7.2.2 | Server SHALL support PATCH for every resource in a collection. |
+| [`/req/update/update-patch-body`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_patch-update_update-patch-body)† | Req 19 | §7.2.3 | Body SHALL contain a document describing the specific parts of the target resource to be modified. |
+| [`/req/update/update-patch-response`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_patch-update_update-patch-response)† | Req 20 (A/B) | §7.2.4 | A) Success SHALL be `200` or `204`. B) Queued execution SHALL return `202` — see §6.1 async execution. |
+| [`/req/update/rid`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_update_rid) | Req 21 | §7.2.4 | If body contains a resource identifier, server SHALL ignore it. |
+| [`/rec/create-replace-delete/update/schema`](https://docs.ogc.org/DRAFTS/20-002r1.html#rec_update_patch_body-schema)‡ | Rec 2 | §7.3 | If server imposes schema constraints, SHOULD publish a schema (OAFeat-5). |
+
+† HTML anchor uses `req_patch-update_` prefix; identifier uses `/req/update/`.
+Reproduced as-is for click-through fidelity.
+
+‡ Identifier namespace is `/rec/create-replace-delete/update/…` rather than
+the class's own `/rec/update/…`. Reproduced as-is.
+
+#### PATCH encoding is not mandated
+
+Req 19 deliberately leaves the change-document format open — the spec only
+requires that the body describes "the specific parts to be modified". The
+server advertises which encodings it accepts via its API description. For
+common PATCH encodings (JSON Merge Patch, JSON Patch) and their trade-offs,
+see [`http-semantics.md`](./http-semantics.md).
+
+#### Exceptions (spec §7.2.5)
+
+Deferred to §6.1.1 HTTP status codes. See Overview.
+
 <!-- Remaining classes to add in later chunks:
-  - Update — spec §7
   - Optimistic Locking — spec §8
   - Features — spec §9
 
