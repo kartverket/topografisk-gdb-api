@@ -409,8 +409,134 @@ see [`http-semantics.md`](./http-semantics.md).
 
 Deferred to §6.1.1 HTTP status codes. See Overview.
 
+## §8: Optimistic Locking
+
+§8 specifies two separate Requirements Classes for guarding against the
+concurrent lost-update race condition (spec §8.1 Table 4). Two clients fetch
+the same resource, both modify it, and the second write silently discards the
+first. Optimistic locking prevents this by exchanging state tokens via HTTP
+headers. For the header mechanics see
+[`http-semantics.md` §5](./http-semantics.md#5-conditional-requests-lost-update-protection).
+
+Two mechanisms, each its own Requirements Class:
+
+### §8.1: Choosing between timestamps and ETags
+
+From spec §8.1:
+
+- **ETags** — derived from resource state; no separate metadata storage needed.
+  Opaque and unforgeable: a client can only submit an ETag it actually received
+  from a prior GET.
+- **Last-Modified** — requires the server to store and maintain a change
+  timestamp per resource. The spec recommends the client use the `Last-Modified`
+  value from their most recent GET, but this is client-side guidance — the server
+  cannot verify provenance. A client may submit any timestamp that passes the `≥`
+  evaluation without having fetched the resource.
+
+  *Note (not spec-derived):* In cooperative systems where clients genuinely do
+  not want to overwrite concurrent changes, this bypass risk is theoretical —
+  clients have no reason to forge a timestamp. In adversarial scenarios, write
+  access is typically guarded by authentication and permissions regardless of
+  optimistic locking, which remains the first line of defense.
+
+- A server MAY implement both.
+
+### Requirements Class: Optimistic Locking — Timestamps
+
+Class URI: `req/optimistic-locking-timestamps` (spec §8.2).
+
+No additional direct dependency listed; implicitly requires RFC 9110.
+
+#### Rules
+
+| ID | Type | Spec § | Content |
+|----|------|--------|---------|
+| [`/req/optimistic-locking-timestamps/get-last-modified-response`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_optimistic-locking-timestamps_last-modified-get-response) | Req 22 | §8.2.2 | GET response SHALL include `Last-Modified` representing when the resource was last modified. |
+| [`/req/optimistic-locking-timestamps/put-last-modified-response`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_optimistic-locking-timestamps_last-modified-put-response) | Req 23 | §8.2.2 | Successful PUT response SHALL include `Last-Modified`. |
+| [`/req/optimistic-locking-timestamps/patch-last-modified-response`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_optimistic-locking-timestamps_last-modified-patch-response) | Req 24 (Cond: Update) | §8.2.2 | Successful PATCH response SHALL include `Last-Modified`. |
+| [`/req/optimistic-locking-timestamps/ifunmodifiedsince-put-op`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_optimistic-locking-timestamps_ifunmodifiedsince-put-op) | Req 25 | §8.2.3 | PUT SHALL include `If-Unmodified-Since`. |
+| [`/req/optimistic-locking-timestamps/ifunmodifiedsince-put-eval`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_optimistic-locking-timestamps_ifunmodifiedsince-put-eval)† | Req 26 | §8.2.3 | `If-Unmodified-Since` SHALL be evaluated before PUT (RFC 9110 §13.1.4). |
+| [`/req/optimistic-locking-timestamps/ifunmodifiedsince-patch-op`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_optimistic-locking-timestamps_ifunmodifiedsince-patch-op) | Req 27 (Cond: Update) | §8.2.3 | PATCH SHALL include `If-Unmodified-Since`. |
+| [`/req/optimistic-locking-timestamps/ifunmodifiedsince-patch-eval`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_optimistic-locking-timestamps_ifunmodifiedsince-patch-eval) | Req 28 (Cond: Update) | §8.2.3 | `If-Unmodified-Since` SHALL be evaluated before PATCH (RFC 9110 §13.1.4). |
+| [`/per/optimistic-locking-timestamps/ifunmodifiedsince-missing`](https://docs.ogc.org/DRAFTS/20-002r1.html#per_optimistic-locking-timestamps_ifunmodifiedsince-missing) | Perm 9 (Cond: header absent) | §8.2.3 | A) MAY respond `428` or `409`. B) MAY execute and return `2xx`. |
+
+† Req 26 identifier reads `ifmatch-put-eval` — likely a copy-paste error; anchor
+and content both refer to `If-Unmodified-Since`. Corrected in ID cell above;
+anchor URL reproduces the spec as-is. Candidate for OGC errata.
+
+#### Missing header behavior (Perm 9)
+
+When `If-Unmodified-Since` is absent the spec leaves behavior open:
+
+- **Strict** (Perm 9A): reject with `428 Precondition Required` or `409 Conflict`.
+- **Lenient** (Perm 9B): execute the operation and return `2xx`.
+
+The choice is a deployment decision. Strict is appropriate for collaborative
+editing; lenient for single-writer or trusted-client scenarios.
+
+### Requirements Class: Optimistic Locking — ETags
+
+Class URI: `req/optimistic-locking-etags` (spec §8.3).
+
+No additional direct dependency listed; implicitly requires RFC 9110.
+
+#### Rules
+
+| ID | Type | Spec § | Content |
+|----|------|--------|---------|
+| [`/req/optimistic-locking-etags/get-etag-response`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_optimistic-locking-etags_get-etag-response) | Req 29 | §8.3.2 | GET response SHALL include `ETag` representing the resource state. |
+| [`/req/optimistic-locking-etags/put-etag-response`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_optimistic-locking-etags_put-etag-response) | Req 30 | §8.3.2 | Successful PUT response SHALL include `ETag`. |
+| [`/req/optimistic-locking-etags/patch-etag-response`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_optimistic-locking-etags_patch-etag-response) | Req 31 (Cond: Update) | §8.3.2 | Successful PATCH response SHALL include `ETag`. |
+| [`/req/optimistic-locking-etags/ifmatch-put-op`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_optimistic-locking-etags_ifmatch-put-op) | Req 32 | §8.3.3 | PUT SHALL include `If-Match`. |
+| [`/req/optimistic-locking-etags/ifmatch-put-eval`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_optimistic-locking-etags_ifmatch-put-eval) | Req 33 | §8.3.3 | `If-Match` SHALL be evaluated before PUT (RFC 9110 §13.1.1). |
+| [`/req/optimistic-locking-etags/ifmatch-patch-op`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_optimistic-locking-etags_ifmatch-patch-op)‡ | Req 34 (Cond: Update) | §8.3.3 | PATCH SHALL include `If-Match`. |
+| [`/req/optimistic-locking-etags/ifmatch-patch-eval`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_optimistic-locking-etags_ifmatch-patch-eval) | Req 35 (Cond: Update) | §8.3.3 | `If-Match` SHALL be evaluated before PATCH (RFC 9110 §13.1.1). |
+| [`/per/optimistic-locking-etags/ifmatch-missing`](https://docs.ogc.org/DRAFTS/20-002r1.html#per_optimistic-locking-etags_ifmatch-missing)§ | Perm 10 (Cond: header absent) | §8.3.3 | A) MAY respond `428` or `409`. B) MAY execute and return `2xx`. |
+| [`/per/optimistic-locking-etags/ifmatch-star`](https://docs.ogc.org/DRAFTS/20-002r1.html#per_optimistic-locking-etags_ifmatch-star) | Perm 11 | §8.3.3 | Server MAY support `If-Match: *` to match any `ETag` value. |
+
+‡ Req 34 spec text reads "A HTTP PUT operation that updates a resource" —
+almost certainly a copy-paste error (Condition requires Update class; Req 32
+already covers PUT-replace). Corrected to PATCH above. Candidate for OGC errata.
+
+§ Perm 10 identifier reads `ifmatch-patch-op`; anchor reads `ifmatch-missing`.
+Corrected to `ifmatch-missing` above. Candidate for OGC errata.
+
+#### Strong ETags (spec §8.3.2)
+
+Strong ETags require byte-for-byte identical response bytes for the same ETag
+value (RFC 9110). For conformance with this Requirements Class the server MUST
+produce deterministic feature representations:
+
+- Property serialisation order must be stable.
+- Link `href`, `rel`, and title values must be derived deterministically from
+  resource/collection metadata.
+- No dynamic per-request fields in the feature response body.
+
+OGC API feature responses typically satisfy these constraints. A software
+update that changes link titles or adds a new alternate encoding will invalidate
+all existing ETags — clients receive `412` and must re-fetch. This is correct
+and expected behaviour. Weak ETags (`W/"…"`) always fail `If-Match` evaluation
+and cannot be used for optimistic locking. If deterministic serialisation cannot
+be guaranteed, use the Timestamps class and do not claim conformance to this class.
+
+*Note (not spec-derived):* In servers implementing CRS negotiation (Part 2),
+coordinate values are CRS-specific, so the ETag is representation-specific.
+JSON-FG (OGC Features and Geometries JSON) extends GeoJSON by including
+`coordRefSys` in the response body; as long as that field and the coordinates
+are serialised deterministically, two requests for the same resource in the
+same CRS produce the same bytes and therefore the same ETag. In our view
+there is no reason for a client to PUT in a different CRS than the one they
+received — clients work in their chosen CRS, GET in that CRS, and PUT back
+in the same CRS. This representation specificity may help prevent silent
+coordinate-system errors. Whether to support PUT in a different CRS than the
+GET is a server design decision not addressed by this spec.
+
+#### Missing header behavior (Perm 10)
+
+Same posture as Perm 9 in the Timestamps class: strict (`428`/`409`) or lenient
+(`2xx`). Same deployment decision applies.
+
 <!-- Remaining classes to add in later chunks:
-  - Optimistic Locking — spec §8
   - Features — spec §9
 
   Remaining top-level spec sections:
