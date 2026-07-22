@@ -1,0 +1,49 @@
+#   docker compose up --build   -> db + migrate (apply-schema) + api (serve)
+#   docker compose up db        -> just the database
+#
+# Point at a different descriptions folder without editing this file:
+#   DESCRIPTIONS_DIR=/path/to/my-descriptions docker compose up --build
+services:
+  migrate:                       # local analog of the K8s apply-schema Job
+    build: .
+    command: ["apply-schema"]
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: geocomponents
+      DB_USER: geocomponents
+      DB_PASSWORD: geocomponents
+      GEOCOMPONENTS_DESCRIPTIONS: /app/descriptions
+    volumes:
+      - ./src:/app/src:ro
+      - type: bind
+        source: ${DESCRIPTIONS_DIR:-./descriptions}
+        target: /app/descriptions
+        read_only: true
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:                           # local analog of the serve Deployment
+    build: .
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: geocomponents
+      DB_USER: geocomponents
+      DB_PASSWORD: geocomponents
+      GEOCOMPONENTS_DESCRIPTIONS: /app/descriptions
+      GEOCOMPONENTS_BASE_URL: http://localhost:8000
+    volumes:
+      - ./src:/app/src:ro
+      - type: bind
+        source: ${DESCRIPTIONS_DIR:-./descriptions}
+        target: /app/descriptions
+        read_only: true
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully

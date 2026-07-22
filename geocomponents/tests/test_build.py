@@ -1,0 +1,92 @@
+from pathlib import Path
+
+import pytest
+
+from geocomponents.descriptions.loader import load_resolved_datasets
+from geocomponents.schema import postgis
+from geocomponents.schema.build import build_schema_plan
+from geocomponents.schema.plan import OPERATIONS, READ_OPS
+
+DESCRIPTIONS = Path(__file__).resolve().parents[1] / "descriptions"
+WGS84_SRID = 4326
+
+
+def _cadastre_plan():
+    cad = next(d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "cadastre")
+    return build_schema_plan(cad)
+
+
+def test_dataset_maps_to_schema_and_collections_to_tables():
+    plan = _cadastre_plan()
+    assert plan.schema_name == "cadastre"
+    assert {c.collection_name for c in plan.collections} == {
+        "parcels",
+        "buildings",
+        "blocks",
+    }
+    for coll in plan.collections:
+        assert coll.table.qualified == f"cadastre.{coll.collection_name}"
+
+
+def test_topology_collection_gets_a_table_but_only_read_ops():
+    plan = _cadastre_plan()
+    blocks = next(c for c in plan.collections if c.collection_name == "blocks")
+    # It still has a table (reads need one), but no write functions.
+    assert blocks.table.qualified == "cadastre.blocks"
+    assert set(blocks.functions) == set(READ_OPS)
+
+
+def test_standard_columns_and_geometry_present():
+    plan = _cadastre_plan()
+    parcels = next(c for c in plan.collections if c.collection_name == "parcels")
+    names = {col.name for col in parcels.table.columns}
+    assert {"id", "created_at", "updated_at"} <= names
+    assert parcels.table.id_column == "id"
+    assert parcels.table.geometry.geometry_type == "MultiPolygon"
+    assert parcels.table.geometry.srid == WGS84_SRID
+
+
+def test_relationship_becomes_fk_column():
+    plan = _cadastre_plan()
+    buildings = next(c for c in plan.collections if c.collection_name == "buildings")
+    assert "parcel_id" in {col.name for col in buildings.table.columns}
+    fks = {(fk.column, fk.ref_table) for fk in buildings.table.foreign_keys}
+    assert ("parcel_id", "cadastre.parcels") in fks
+
+
+def test_internal_function_names_are_private_and_per_operation():
+    plan = _cadastre_plan()
+    parcels = next(c for c in plan.collections if c.collection_name == "parcels")
+    assert set(parcels.functions) == set(OPERATIONS)
+    # Internal (private) names live in the dataset schema, prefixed with '_'.
+    assert parcels.functions["items"] == "cadastre._parcels_items"
+
+
+def test_pgcrypto_extension_declared_for_gen_random_uuid():
+    """PG <= 12 lacks ``gen_random_uuid()`` in core; declaring pgcrypto keeps
+    the id column default portable across PG versions."""
+    stmts = postgis.table_statements(_cadastre_plan())
+    assert any("create extension if not exists pgcrypto" in s for s in stmts)
+
+
+# --------------------------------------------------------------------------
+# FK constraint names must fit PG's 63-char NAMEDATALEN
+# --------------------------------------------------------------------------
+def test_fk_constraint_name_natural_when_short():
+    """Common case: the human-readable ``<t>_<c>_fkey`` form is used verbatim
+    so existing databases keep recognizing pre-applied constraints."""
+    assert (
+        postgis._fk_constraint_name("buildings", "parcel_id")
+        == "buildings_parcel_id_fkey"
+    )
+
+
+def test_fk_constraint_name_raises_when_over_63():
+    """Worst-case SafeIdentifier lengths (40 + 43) produce an 89-char natural
+    name that PG would silently truncate to 63, risking collisions across
+    distinct FKs. Fail loudly with an actionable message so the author shortens
+    the source names rather than getting an opaque server-side collision."""
+    long_table = "t" * 40
+    long_column = "c" * 40 + "_id"  # 43 chars
+    with pytest.raises(ValueError, match=r"63"):
+        postgis._fk_constraint_name(long_table, long_column)

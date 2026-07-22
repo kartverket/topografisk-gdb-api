@@ -1,0 +1,16 @@
+# Keep the build context minimal and the image pure-engine.
+.git
+.gitignore
+.venv
+.pytest_cache
+__pycache__
+**/__pycache__
+tests
+ogc_standards
+descriptions
+.claude
+docker-compose.yml
+docker-compose.override.yaml
+Dockerfile
+.dockerignore
+DEPLOY.md
