@@ -89,12 +89,12 @@ of status codes (`201`, `204`, `303`, `412`, `415`, `422`, …) and required hea
 
 Confirm the request/response body matches the spec's expectations for the chosen
 media type: CRS handling, feature `id` semantics, property nullability, patch
-semantics. See [references/media-types.md](./references/media-types.md).
+semantics. See `references/media-types.md` (TODO: not yet written).
 
 ### 5. (Batch only) Apply Part 11 semantics
 
 If the change involves multi-feature writes, decide **atomic vs batch** and follow
-[references/part-11-transactions.md](./references/part-11-transactions.md).
+`references/part-11-transactions.md` (TODO: not yet written).
 
 ### 6. Verify against the spec
 
@@ -114,9 +114,9 @@ Missing files mean "not yet written" — ask before assuming a topic is covered.
 
 - [Conformance classes and URIs](./references/conformance-classes.md)
 - [Part 4 — CRUD on features](./references/part-4-crud.md)
-- [Part 11 — Atomic and Batch Transactions](./references/part-11-transactions.md)
+- Part 11 — Atomic and Batch Transactions (TODO: `references/part-11-transactions.md` not yet written)
 - [HTTP semantics (status codes, headers)](./references/http-semantics.md)
-- [Media types and GeoJSON payload rules](./references/media-types.md)
+- Media types and GeoJSON payload rules (TODO: `references/media-types.md` not yet written)
 
 ## Anti-patterns
 

@@ -141,7 +141,7 @@ Only codes actually reachable from Part 4 / Part 11 workflows. RFC 9110 §15.
 | Code | Meaning | When to use |
 |------|---------|-------------|
 | `200 OK` | Generic success with body | `PUT`/`PATCH` returning the updated feature; batch response with per-item status |
-| `201 Created` | New resource created | `POST` that created one or more features. **Must** include `Location` header pointing at the new resource. |
+| `201 Created` | New resource created | `POST` that created a new resource. |
 | `204 No Content` | Success, no body | `PUT`/`PATCH` with `Prefer: return=minimal`; `DELETE` |
 
 **`201` vs `200`:** Use `201` only when a new URI came into existence. A `PUT` that
@@ -212,7 +212,7 @@ Use `400` when parsing fails; `422` when parsing succeeds but validation fails.
 
 | Header | Purpose |
 |--------|---------|
-| `Location` | URI of the newly created resource. **Required** with `201 Created`. On multi-feature create, may be omitted or point at the transaction. |
+| `Location` | URI of the newly created resource. Typically included with `201 Created`. |
 | `Content-Type` | Media type of the response body. Required whenever a body is present. |
 | `Content-Language` | Language of the response body, if applicable. |
 | `ETag` | Opaque validator for the resource's current state. Enables conditional updates. See §5. |

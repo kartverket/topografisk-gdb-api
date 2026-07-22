@@ -9,8 +9,8 @@ and [http-semantics.md](./http-semantics.md).
 `http://www.opengis.net/spec/ogcapi-features-4/1.0`. Every requirement ID below is
 relative to this base.
 
-**Section references** point at the local HTML copy in
-`ogc-standards/Features_Part_4.html` with anchors for direct navigation.
+**Section references** point at the canonical spec at
+<https://docs.ogc.org/DRAFTS/20-002r1.html> (DRAFT, referenced as of 2026-07-22).
 
 > **Two kinds of class dependency (spec §5.4).**
 >
