@@ -389,7 +389,7 @@ def _build_starlette_app(api_: API) -> Starlette:
         # misrouting a query body into create (or falling through to a
         # GET-like list handler that would then choke parsing the body as CQL).
         ct = request.headers.get("content-type", "")
-        if not ct.startswith("application/geo+json"):
+        if not ct.lower().startswith("application/geo+json"):
             return _unsupported_media_type()
         if not _editable(cid):
             return _not_editable()
