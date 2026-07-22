@@ -643,3 +643,35 @@ This does not prohibit servers from supporting other encodings (e.g. `applicatio
   - Security Considerations — spec §11
   - Abstract Test Suite — Annex A
 -->
+
+---
+
+## §11: Security Considerations
+
+§11 contains **no requirements**. It defers to Part 1, Clause 11 and provides guidance and
+examples only.
+
+**Core premise:** write operations (POST, PUT, PATCH, DELETE) will in almost all cases be
+access-controlled. Users making modifications need:
+
+1. Authentication
+2. Modification privileges on the collection / endpoint
+3. Access to the relevant HTTP method on that resource
+
+The OpenAPI definition should declare security schemes (global `security` member, or per-operation
+overrides).
+
+**Error responses — guidance only:**
+
+| Situation | Typical response | Notes |
+|-----------|-----------------|-------|
+| No credentials supplied | `401 Unauthorized` | Response SHALL include `WWW-Authenticate` header with auth hints |
+| Valid credentials, insufficient privileges | `403 Forbidden` | Body: `application/problem+json` |
+| Server chooses to obscure | `401` or `404` | Server MAY return 401 for a valid-but-unprivileged user, or 404 to hide resource existence from unauthorised callers |
+
+The 404 "stealth" option is explicitly acknowledged by the spec: if the user would not have
+read access to the resource via GET either, returning 404 leaks no extra information.
+
+<!-- Annex A (Abstract Test Suite) is a placeholder in the DRAFT spec —
+     "will be added once the requirements classes and requirements are final."
+     Revisit when the spec is published. -->
