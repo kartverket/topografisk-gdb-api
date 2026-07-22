@@ -625,8 +625,21 @@ validation (Req 43B):
 | [`/req/features/gml-create-replace`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_features_gml-create-replace) | Req 46 (Cond: Part 1 GML + advertises `application/gml`) | §9.9 | REPLACE SHALL ignore `@gml:id`, or reject if it differs from the URI featureId. |
 | [`/req/features/gml-srsname`](https://docs.ogc.org/DRAFTS/20-002r1.html#req_features_gml-srsname) | Req 47 (Cond: Part 2 + GML content type; A/B) | §9.9 | A) SHALL inspect `srsName` attribute on each geometry element. B) `srsName` SHALL override `Content-Crs`. |
 
+---
+
+## §10: Media Types
+
+§10 contains **no requirements**. It provides a **descriptive summary** of the media types that appear in Part 4's conformance classes. The table is thus illustrative rather than normative, listing the types defined by Part 4's conformance classes:
+
+| Representation | CREATE / REPLACE | UPDATE (PATCH) | Schema documents |
+|----------------|-----------------|----------------|-----------------|
+| GeoJSON | `application/geo+json` | `application/merge-patch+json` | `application/schema+json` |
+| GML | `application/gml+xml` | `application/xml` | `application/xml` |
+
+This does not prohibit servers from supporting other encodings (e.g. `application/json-patch+json`)
+— those simply fall outside Part 4's defined conformance classes.
+
 <!-- Remaining top-level spec sections to add in later chunks:
-  - Media Types — spec §10
   - Security Considerations — spec §11
   - Abstract Test Suite — Annex A
 -->
