@@ -12,21 +12,30 @@ conformance to Part 4 or Part 11.
 
 ## Scope
 
-This skill covers:
+**Part 4 — Create, Replace, Update and Delete.** Canonical URL: <https://docs.ogc.org/DRAFTS/20-002r1.html>
 
-- **Part 4 — Create, Replace, Update and Delete** (`POST` / `PUT` / `PATCH` / `DELETE`
-  on items). Canonical URL: <https://docs.ogc.org/DRAFTS/20-002r1.html>
-- **Part 11 — Atomic and Batch Transactions** (multi-feature transactional writes).
-  Canonical URL: <https://docs.ogc.org/DRAFTS/23-057r1.html>
+Defines server behaviour for `POST`, `PUT`, `PATCH`, and `DELETE` on **individual
+feature resources**. Operations apply to a single resource at a time — no side
+effects on other resources. Multi-resource ordering and atomicity are Part 11
+territory.
+
+**Part 11 — Atomic and Batch Transactions.** Canonical URL: <https://docs.ogc.org/DRAFTS/23-057r1.html>
+
+*(Draft — not yet independently verified in this skill.)*
+
+Defines a `/transactions` endpoint that accepts a transaction document grouping
+multiple operations into a single request. Key use case: topologically related
+changes that must succeed or fail together (e.g. splitting a polygon updates both
+resulting features). Supports atomic (all-or-nothing) and batch (partial-success)
+semantics.
 
 Depends on (assumed already conformant, out of scope for this skill):
 
 - Part 1 — Core: <http://docs.ogc.org/is/17-069r4/17-069r4.html>
 - Part 2 — CRS by Reference: <http://docs.ogc.org/is/18-058r1/18-058.html>
 
-If offline HTML copies of the specs are present under an `ogc-standards/` folder in
-the consuming workspace, prefer them for exact requirement wording; otherwise use the
-canonical URLs above.
+**Conformance URIs are opaque identifiers** — not resolvable URLs. Exact character
+spelling is what matters for conformance; do not "fix" them.
 
 ## When to Use
 
@@ -54,28 +63,86 @@ Follow these steps for any change touching write endpoints on features.
 
 ### 1. Identify the requirements class
 
-Determine which conformance class(es) the change belongs to. See
-[references/conformance-classes.md](./references/conformance-classes.md).
-
-Common classes:
-
-- Part 4: *Create/Replace/Delete Features*, *Update Features*, *Features*, *Features
-  (GeoJSON)*.
-- Part 11: *Atomic Transactions*, *Batch Transactions*.
-
 Each declared conformance URI **must** be listed in the `/conformance` response.
 
-### 2. Match HTTP method to operation
+**Part 4** — namespace prefix `http://www.opengis.net/spec/ogcapi-features-4/1.0/`
 
-| Operation | Method | Path | Body |
-|-----------|--------|------|------|
-| Create one feature | `POST` | `/collections/{cid}/items` | GeoJSON Feature |
-| Create many features | `POST` | `/collections/{cid}/items` | GeoJSON FeatureCollection |
-| Full replace | `PUT` | `/collections/{cid}/items/{fid}` | GeoJSON Feature |
-| Partial update | `PATCH` | `/collections/{cid}/items/{fid}` | JSON Merge Patch or similar |
-| Delete | `DELETE` | `/collections/{cid}/items/{fid}` | none |
+| Class | URI suffix | Scope | Spec § |
+|-------|-----------|-------|--------|
+| Create/Replace/Delete | `conf/create-replace-delete` | `POST` new features; `PUT` replaces; `DELETE` removes. Single-resource only. | [§6](https://docs.ogc.org/DRAFTS/20-002r1.html#create-replace-delete_clause) |
+| Update | `conf/update` | `PATCH` an existing feature (partial update). | [§7](https://docs.ogc.org/DRAFTS/20-002r1.html#update_clause) |
+| Optimistic Locking (Timestamps) | `req/optimistic-locking-timestamps` | `Last-Modified` on `GET`; `If-Unmodified-Since` on write. | [§8](https://docs.ogc.org/DRAFTS/20-002r1.html#rc_optimistic-locking-timestamps) |
+| Optimistic Locking (ETags) | `req/optimistic-locking-etags` | `ETag` on `GET`; `If-Match` on write. | [§8](https://docs.ogc.org/DRAFTS/20-002r1.html#rc_optimistic-locking-etags) |
+| Features | `conf/features` | GeoJSON (`application/geo+json`) for feature write payloads. | [§9](https://docs.ogc.org/DRAFTS/20-002r1.html#features_clause) |
 
-Details, expected status codes and edge cases: see
+> **Spec note:** The two Optimistic Locking classes use `/req/` prefix, not `/conf/`.
+> This is deliberate throughout Part 4 (Table 2 and all requirement IDs in §8).
+
+For full requirements, see [references/part-4-crud.md](./references/part-4-crud.md).
+
+**Part 11** *(draft — unverified in this skill)* — namespace prefix `http://www.opengis.net/spec/ogcapi-features-11/1.0/`
+
+| Class | URI suffix | Scope | Spec § |
+|-------|-----------|-------|--------|
+| Transactions | `conf/transactions` | `/transactions` endpoint accepting a transaction document. | [§6](https://docs.ogc.org/DRAFTS/23-057r1.html#sc_transactions) |
+| Atomic Semantics | `conf/atomic-semantics` | All operations succeed or all roll back. | [§7](https://docs.ogc.org/DRAFTS/23-057r1.html#sc_atomic) |
+| Batch Semantics | `conf/batch-semantics` | Each operation succeeds or fails independently. | [§8](https://docs.ogc.org/DRAFTS/23-057r1.html#sc_batch) |
+| Asynchronous Transactions | `conf/async-transactions` | `Prefer: respond-async`; server returns `202` + polling URL. | [§9](https://docs.ogc.org/DRAFTS/23-057r1.html#sc_async-transactions) |
+| JSON Encoding | `conf/json-transactions` | JSON representation of the transaction document. | [§10](https://docs.ogc.org/DRAFTS/23-057r1.html#sc_json) |
+| Features | `conf/features` | GeoJSON payloads inside transaction operations. | [§11](https://docs.ogc.org/DRAFTS/23-057r1.html#features_clause) |
+
+> **Part 11 spec inconsistencies:**
+> - Table 1 uses `conf/atomic-semantics` / `conf/batch-semantics`; the SHALL clauses
+>   in the body text use `conf/atomic-transactions` / `conf/batch-transactions`.
+>   **Use the Table 1 URIs.**
+> - The JSON class has three names in the same document: "JSON Encoding" (Table 1),
+>   "Requirements Class JSON" (§10 heading), and `json-transactions` (URI slug).
+>   Reproduce whichever appears in context.
+
+```mermaid
+flowchart LR
+    P1[Part 1 Core]
+
+    subgraph Part4[Part 4]
+        CRD[create-replace-delete]
+        UPD[update]
+        OLT["req/optimistic-locking-timestamps"]
+        OLE["req/optimistic-locking-etags"]
+        F4[features]
+    end
+
+    subgraph Part11[Part 11]
+        TX[transactions]
+        ATOM[atomic-semantics]
+        BATCH[batch-semantics]
+        ASYNC[async-transactions]
+        JSON[json-transactions]
+        F11[features]
+    end
+
+    P1 --> CRD & UPD & OLT & OLE & F4
+    P1 --> TX & F11
+    TX --> ATOM & BATCH & ASYNC & JSON
+
+    CRD -. commonly combined with .- UPD
+    CRD -. commonly combined with .- OLE
+```
+
+### 2. Match method and URI against the spec
+
+For **Part 4** (single-resource operations):
+
+| Operation | Method | Path |
+|-----------|--------|------|
+| Create | `POST` | `/collections/{cid}/items` |
+| Replace | `PUT` | `/collections/{cid}/items/{fid}` |
+| Update | `PATCH` | `/collections/{cid}/items/{fid}` |
+| Delete | `DELETE` | `/collections/{cid}/items/{fid}` |
+
+For **Part 11**, the mechanism is different — a transaction document is submitted
+to a `/transactions` endpoint. See the [Part 11 draft](https://docs.ogc.org/DRAFTS/23-057r1.html).
+
+For edge cases, body requirements, and status codes: see
 [references/part-4-crud.md](./references/part-4-crud.md).
 
 ### 3. Validate headers and status codes
@@ -87,22 +154,19 @@ of status codes (`201`, `204`, `303`, `412`, `415`, `422`, …) and required hea
 
 ### 4. Validate payload semantics
 
-Confirm the request/response body matches the spec's expectations for the chosen
-media type: CRS handling, feature `id` semantics, property nullability, patch
-semantics. See `references/media-types.md` (TODO: not yet written).
+Check the spec for the chosen media type’s payload rules. See
+`references/media-types.md` (TODO: not yet written).
 
-### 5. (Batch only) Apply Part 11 semantics
+### 5. Verify against the spec
 
-If the change involves multi-feature writes, decide **atomic vs batch** and follow
-`references/part-11-transactions.md` (TODO: not yet written).
+For **Part 4**: the reference files in this skill have detailed, requirement-level
+coverage — use them. Cross-check a specific requirement ID if something is unclear.
 
-### 6. Verify against the spec
+For **Part 11**: the skill has not independently verified Part 11. Always cross-reference
+directly against the [Part 11 draft](https://docs.ogc.org/DRAFTS/23-057r1.html).
+Cite the requirement ID in the PR description or code comment.
 
-Cross-reference the concrete Requirement / Recommendation IDs from the spec (e.g.
-`/req/create-replace-delete/post-op`) — do **not** paraphrase from memory. Cite the
-requirement ID in the PR description or code comment.
-
-### 7. Update contract tests
+### 6. Update contract tests
 
 Add or update tests derived from the Abstract Test Suite (Annex A of each part) so
 the change is covered.
@@ -112,7 +176,6 @@ the change is covered.
 Reference files are built out incrementally as we work through the specs together.
 Missing files mean "not yet written" — ask before assuming a topic is covered.
 
-- [Conformance classes and URIs](./references/conformance-classes.md)
 - [Part 4 — CRUD on features](./references/part-4-crud.md)
 - Part 11 — Atomic and Batch Transactions (TODO: `references/part-11-transactions.md` not yet written)
 - [HTTP semantics (status codes, headers)](./references/http-semantics.md)
