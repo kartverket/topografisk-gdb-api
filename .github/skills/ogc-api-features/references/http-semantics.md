@@ -141,7 +141,7 @@ Use `400` when parsing fails; `422` when parsing succeeds but validation fails.
 
 | Header | Purpose |
 |--------|---------|
-| `Content-Type` | Media type of the request body (see §2.1). Required on any request with a body. |
+| `Content-Type` | Media type of the request body (see §2). Required on any request with a body. |
 | `Content-Length` | Byte length of the body. Usually set automatically. |
 | `Accept` | Preferred response media type(s). |
 | `If-Match` | Conditional write: proceed only if current `ETag` matches. Prevents lost updates. See §5. |
