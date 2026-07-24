@@ -3,7 +3,7 @@ name = "geocomponents"
 version = "0.1.0"
 description = "Description-driven, swappable components for storing, distributing and updating geographic data"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
