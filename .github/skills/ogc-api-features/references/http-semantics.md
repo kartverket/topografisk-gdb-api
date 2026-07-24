@@ -209,7 +209,7 @@ to process an unconditional request and demands the client re-submit with a vali
 header (`If-Match` or `If-Unmodified-Since`).
 
 For OGC-specific application, see
-[part-4-crud.md §8](./part-4-crud.md#8-requirements-class-optimistic-locking).
+[part-4-crud.md §8](./part-4-crud.md#8-optimistic-locking).
 
 ---
 
