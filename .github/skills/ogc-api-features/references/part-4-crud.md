@@ -2,8 +2,7 @@
 
 Reference for OGC API - Features Part 4 ("Create, Replace, Update and Delete").
 Backend- and framework-agnostic. Cross-referenced by
-[SKILL.md](../SKILL.md), [conformance-classes.md](./conformance-classes.md),
-and [http-semantics.md](./http-semantics.md).
+[SKILL.md](../SKILL.md) and [http-semantics.md](./http-semantics.md).
 
 **Base namespace** for all `/req/…`, `/rec/…`, `/per/…` identifiers in Part 4:
 `http://www.opengis.net/spec/ogcapi-features-4/1.0`. Every requirement ID below is
@@ -93,7 +92,8 @@ is a common source of `405 Method Not Allowed` bugs.
 
 ## Requirements Class: Create/Replace/Delete
 
-Class URI: `req/create-replace-delete` (spec §6.1).
+Requirements Class URI: `req/create-replace-delete` (spec §6.1 requirements-class table).
+Conformance Class URI (advertise in `/conformance`): `conf/create-replace-delete` (spec §7 Table 2).
 
 **Direct dependencies:**
 
@@ -360,7 +360,8 @@ Deferred to §6.1.1 HTTP status codes. See Overview.
 
 ## Requirements Class: Update
 
-Class URI: `req/update` (spec §7.1).
+Requirements Class URI: `req/update` (spec §7.1 requirements-class table).
+Conformance Class URI (advertise in `/conformance`): `conf/update` (spec §7 Table 2).
 
 **Direct dependency:**
 
@@ -540,7 +541,8 @@ Same posture as Perm 9 in the Timestamps class: strict (`428`/`409`) or lenient
 
 ## Requirements Class: Features
 
-Class URI: `req/features` (spec §9.1).
+Requirements Class URI: `req/features` (spec §9.1 requirements-class table).
+Conformance Class URI (advertise in `/conformance`): `conf/features` (spec §7 Table 2).
 
 **Direct dependencies:**
 

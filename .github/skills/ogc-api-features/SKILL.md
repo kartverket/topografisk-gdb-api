@@ -130,20 +130,11 @@ flowchart LR
 
 ### 2. Match method and URI against the spec
 
-For **Part 4** (single-resource operations):
-
-| Operation | Method | Path |
-|-----------|--------|------|
-| Create | `POST` | `/collections/{cid}/items` |
-| Replace | `PUT` | `/collections/{cid}/items/{fid}` |
-| Update | `PATCH` | `/collections/{cid}/items/{fid}` |
-| Delete | `DELETE` | `/collections/{cid}/items/{fid}` |
-
-For **Part 11**, the mechanism is different — a transaction document is submitted
-to a `/transactions` endpoint. See the [Part 11 draft](https://docs.ogc.org/DRAFTS/23-057r1.html).
-
-For edge cases, body requirements, and status codes: see
-[references/part-4-crud.md](./references/part-4-crud.md).
+| Method(s) | Path | Reference |
+|-----------|------|-----------|
+| `POST` | `/collections/{cid}/items` | [part-4-crud.md](./references/part-4-crud.md) |
+| `PUT` / `PATCH` / `DELETE` | `/collections/{cid}/items/{fid}` | [part-4-crud.md](./references/part-4-crud.md) |
+| (transactions) | `/transactions` | [Part 11 draft](https://docs.ogc.org/DRAFTS/23-057r1.html) (TODO: `references/part-11-transactions.md`) |
 
 ### 3. Validate headers and status codes
 
