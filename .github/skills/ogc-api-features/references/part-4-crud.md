@@ -404,7 +404,7 @@ Req 19 deliberately leaves the change-document format open — the spec only
 requires that the body describes "the specific parts to be modified". The
 server advertises which encodings it accepts via its API description. For
 common PATCH encodings (JSON Merge Patch, JSON Patch) and their trade-offs,
-see [`http-semantics.md`](./http-semantics.md). For encoding-specific
+see RFC 7396 (JSON Merge Patch) and RFC 6902 (JSON Patch) directly. For encoding-specific
 processing rules — including how JSON Merge Patch interacts with schema
 validation and null values — see §9.7.
 
@@ -611,8 +611,7 @@ validation (Req 43B):
 - **Optional properties**: `null` removes any existing value. If the client's
   intent is to *preserve* a `null` value in a nullable optional property, RFC
   7396 cannot express that — `null` always means remove. JSON Patch (RFC 6902,
-  `replace` operation with `null` value) can express the distinction. See also
-  the TODO in [`http-semantics.md`](./http-semantics.md).
+  `replace` operation with `null` value) can express the distinction.
 
 ### §9.8: GeoJSON
 

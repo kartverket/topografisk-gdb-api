@@ -37,68 +37,6 @@ Depends on (assumed already conformant, out of scope for this skill):
 **Conformance URIs are opaque identifiers** — not resolvable URLs. Exact character
 spelling is what matters for conformance; do not "fix" them.
 
-## When to Use
-
-Load this skill when the user is:
-
-1. Adding or changing any endpoint that creates, replaces, updates, or deletes
-   features (typically `POST` / `PUT` / `PATCH` / `DELETE` on
-   `/collections/{collectionId}/items` or `/{featureId}`).
-2. Reviewing whether an existing write endpoint is spec-compliant.
-3. Declaring or updating conformance URIs advertised by a `/conformance` endpoint.
-4. Deciding response status codes, required headers (`Location`, `ETag`,
-   `Last-Modified`, `Prefer` / `Preference-Applied`), or media types.
-5. Designing a batch or atomic transaction endpoint (Part 11).
-6. Writing contract tests against the Abstract Test Suites in the specs.
-
-Do **not** load this skill for:
-
-- Read-only feature queries (Part 1 — out of scope).
-- Pure database/DDL work with no HTTP surface.
-- Domain-model questions unrelated to the HTTP API.
-
-## Procedure
-
-Follow these steps for any change touching write endpoints on features.
-
-### 1. Identify the requirements class
-
-Each declared conformance URI **must** be listed in the `/conformance` response.
-
-**Part 4** — namespace prefix `http://www.opengis.net/spec/ogcapi-features-4/1.0/`
-
-| Class | URI suffix | Scope | Spec § |
-|-------|-----------|-------|--------|
-| Create/Replace/Delete | `conf/create-replace-delete` | `POST` new features; `PUT` replaces; `DELETE` removes. Single-resource only. | [§6](https://docs.ogc.org/DRAFTS/20-002r1.html#create-replace-delete_clause) |
-| Update | `conf/update` | `PATCH` an existing feature (partial update). | [§7](https://docs.ogc.org/DRAFTS/20-002r1.html#update_clause) |
-| Optimistic Locking (Timestamps) | `req/optimistic-locking-timestamps` | `Last-Modified` on `GET`; `If-Unmodified-Since` on write. | [§8](https://docs.ogc.org/DRAFTS/20-002r1.html#rc_optimistic-locking-timestamps) |
-| Optimistic Locking (ETags) | `req/optimistic-locking-etags` | `ETag` on `GET`; `If-Match` on write. | [§8](https://docs.ogc.org/DRAFTS/20-002r1.html#rc_optimistic-locking-etags) |
-| Features | `conf/features` | GeoJSON (`application/geo+json`) for feature write payloads. | [§9](https://docs.ogc.org/DRAFTS/20-002r1.html#features_clause) |
-
-> **Spec note:** The two Optimistic Locking classes use `/req/` prefix, not `/conf/`.
-> This is deliberate throughout Part 4 (Table 2 and all requirement IDs in §8).
-
-For full requirements, see [references/part-4-crud.md](./references/part-4-crud.md).
-
-**Part 11** *(draft — unverified in this skill)* — namespace prefix `http://www.opengis.net/spec/ogcapi-features-11/1.0/`
-
-| Class | URI suffix | Scope | Spec § |
-|-------|-----------|-------|--------|
-| Transactions | `conf/transactions` | `/transactions` endpoint accepting a transaction document. | [§6](https://docs.ogc.org/DRAFTS/23-057r1.html#sc_transactions) |
-| Atomic Semantics | `conf/atomic-semantics` | All operations succeed or all roll back. | [§7](https://docs.ogc.org/DRAFTS/23-057r1.html#sc_atomic) |
-| Batch Semantics | `conf/batch-semantics` | Each operation succeeds or fails independently. | [§8](https://docs.ogc.org/DRAFTS/23-057r1.html#sc_batch) |
-| Asynchronous Transactions | `conf/async-transactions` | `Prefer: respond-async`; server returns `202` + polling URL. | [§9](https://docs.ogc.org/DRAFTS/23-057r1.html#sc_async-transactions) |
-| JSON Encoding | `conf/json-transactions` | JSON representation of the transaction document. | [§10](https://docs.ogc.org/DRAFTS/23-057r1.html#sc_json) |
-| Features | `conf/features` | GeoJSON payloads inside transaction operations. | [§11](https://docs.ogc.org/DRAFTS/23-057r1.html#features_clause) |
-
-> **Part 11 spec inconsistencies:**
-> - Table 1 uses `conf/atomic-semantics` / `conf/batch-semantics`; the SHALL clauses
->   in the body text use `conf/atomic-transactions` / `conf/batch-transactions`.
->   **Use the Table 1 URIs.**
-> - The JSON class has three names in the same document: "JSON Encoding" (Table 1),
->   "Requirements Class JSON" (§10 heading), and `json-transactions` (URI slug).
->   Reproduce whichever appears in context.
-
 ```mermaid
 flowchart LR
     P1[Part 1 Core]
@@ -128,39 +66,60 @@ flowchart LR
     CRD -. commonly combined with .- OLE
 ```
 
-### 2. Match method and URI against the spec
+## When to Use
 
-| Method(s) | Path | Reference |
-|-----------|------|-----------|
-| `POST` | `/collections/{cid}/items` | [part-4-crud.md](./references/part-4-crud.md) |
-| `PUT` / `PATCH` / `DELETE` | `/collections/{cid}/items/{fid}` | [part-4-crud.md](./references/part-4-crud.md) |
-| (transactions) | `/transactions` | [Part 11 draft](https://docs.ogc.org/DRAFTS/23-057r1.html) (TODO: `references/part-11-transactions.md`) |
+Load this skill when the user is:
 
-### 3. Validate headers and status codes
+1. Adding or changing any endpoint that creates, replaces, updates, or deletes
+   features (typically `POST` / `PUT` / `PATCH` / `DELETE` on
+   `/collections/{collectionId}/items` or `/{featureId}`).
+2. Reviewing whether an existing write endpoint is spec-compliant.
+3. Declaring or updating conformance URIs advertised by a `/conformance` endpoint.
+4. Deciding response status codes, required headers (`Location`, `ETag`,
+   `Last-Modified`, `Prefer` / `Preference-Applied`), or media types.
+5. Designing a batch or atomic transaction endpoint (Part 11).
+6. Writing contract tests against the Abstract Test Suites in the specs.
 
-Check the request/response header requirements for the chosen operation. See
-[references/http-semantics.md](./references/http-semantics.md) for the mapping
-of status codes (`201`, `204`, `303`, `412`, `415`, `422`, …) and required headers
-(`Location`, `ETag`, `Content-Type`, `Prefer`/`Preference-Applied`).
+Do **not** load this skill for:
 
-### 4. Validate payload semantics
+- Read-only feature queries (Part 1 — out of scope).
+- Pure database/DDL work with no HTTP surface.
+- Domain-model questions unrelated to the HTTP API.
 
-Check the spec for the chosen media type’s payload rules. See
-`references/media-types.md` (TODO: not yet written).
+## Procedure
 
-### 5. Verify against the spec
+Always read the governing spec section before implementing or reviewing.
+Reference files distil the spec — the spec has final authority.
 
-For **Part 4**: the reference files in this skill have detailed, requirement-level
-coverage — use them. Cross-check a specific requirement ID if something is unclear.
+### 1. Find the governing spec section
 
-For **Part 11**: the skill has not independently verified Part 11. Always cross-reference
-directly against the [Part 11 draft](https://docs.ogc.org/DRAFTS/23-057r1.html).
-Cite the requirement ID in the PR description or code comment.
+| What you're building | Where to look |
+|----------------------|---------------|
+| Single-feature CRUD (`POST`/`PUT`/`PATCH`/`DELETE` on `/collections/{cid}/items[/{fid}]`) | [references/part-4-crud.md](./references/part-4-crud.md) |
+| Multi-feature transactions | [Part 11 draft](https://docs.ogc.org/DRAFTS/23-057r1.html) directly (TODO: `references/part-11-transactions.md`) |
 
-### 6. Update contract tests
+### 2. Declare the conformance class
 
-Add or update tests derived from the Abstract Test Suite (Annex A of each part) so
-the change is covered.
+Every capability you implement must be declared in `/conformance`. Conformance class
+URIs (`conf/…`) are listed at the top of each Requirements Class section in
+[part-4-crud.md](./references/part-4-crud.md). Undeclared capabilities break discovery.
+
+### 3. Check HTTP semantics
+
+For HTTP concept definitions (status codes, headers, conditional requests, `Prefer`),
+see [references/http-semantics.md](./references/http-semantics.md). The concrete
+requirement IDs that bind specific codes and headers to specific operations are in
+the governing spec section from step 1.
+
+### 4. Cite requirement IDs
+
+Cite the requirement ID in the PR description or code comment (e.g.
+`/req/create-replace-delete/post-response`). For Part 11: always verify directly
+against the draft spec — this skill has not independently verified Part 11.
+
+### 5. Update contract tests
+
+Add or update tests covering the new behaviour.
 
 ## References
 

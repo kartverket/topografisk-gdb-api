@@ -53,82 +53,22 @@ form above so the claim is unambiguous.
 
 ## 1. HTTP method properties
 
-Three orthogonal properties from RFC 9110 §9.2. Every write endpoint decision hinges
-on these.
+**Idempotency** (RFC 9110 §9.2.2): a method is idempotent if repeating it N times
+has the same server-side effect as doing it once. `PUT` and `DELETE` are idempotent;
+`POST` and `PATCH` are not required to be. Intermediaries may safely retry idempotent
+methods on network failure.
 
-| Property | Meaning | Client / server impact |
-|----------|---------|------------------------|
-| **Safe** | Method does not modify server state. `GET`, `HEAD`, `OPTIONS` are safe. | Caches, prefetchers, and crawlers may replay safe methods freely. |
-| **Idempotent** | Repeating the request N times has the same effect on server state as doing it once. `GET`, `HEAD`, `PUT`, `DELETE`, `OPTIONS` are idempotent. `POST`, `PATCH` are **not** required to be. | Clients (and intermediaries) may safely retry idempotent methods on network failure. |
-| **Cacheable** | Response may be stored and reused. `GET`, `HEAD` cacheable by default; `POST` cacheable only with explicit `Cache-Control`. | Governs whether `Cache-Control` / `ETag` on the response affect future requests. |
-
-### 1.1 Methods used by Parts 4 & 11
-
-| Method | Purpose in Features writes | Idempotent? | Body allowed? |
-|--------|----------------------------|-------------|---------------|
-| `POST` | Create one or many features; submit a transaction | No | Yes |
-| `PUT` | Replace an existing feature in full | Yes | Yes |
-| `PATCH` | Partial update of an existing feature | No (in general — depends on patch format) | Yes |
-| `DELETE` | Remove a feature | Yes | Optional (rarely used) |
-
-**Notes:**
-
-- `PUT` semantics: the request body **replaces** the target resource. Any property
-  omitted from the body is either cleared or set to server default — never carried
-  over from the previous state. This is the key distinction from `PATCH`.
-- `PATCH` idempotence depends on the patch format:
-  - JSON Merge Patch (RFC 7396) is idempotent for a fixed target state.
-  - JSON Patch (RFC 6902) with `test` / relative operations may not be.
-  - Treat `PATCH` as **not** idempotent unless proven otherwise for your format.
-- `DELETE` should be idempotent: deleting an already-deleted resource returns `404`
-  or `410`, not an error state change. Repeated `DELETE`s must not do harm.
+`PUT` replaces the full resource — properties omitted from the body are not carried
+over from the previous state. This is the key distinction from `PATCH` (partial update).
 
 ---
 
 ## 2. Content negotiation
 
-RFC 9110 §12. Two directions matter for write operations.
-
-### 2.1 Request body — `Content-Type`
-
-Client declares the format of the request body. Server rejects unknown types with
-`415 Unsupported Media Type` (§15.5.16).
-
-Common media types for feature writes:
-
-| Media type | Use |
-|------------|-----|
-| `application/geo+json` | GeoJSON Feature or FeatureCollection (RFC 7946). Preferred for create/replace. |
-| `application/json` | Generic JSON; some servers accept it as a synonym for GeoJSON. |
-| `application/merge-patch+json` | JSON Merge Patch body for `PATCH` (RFC 7396). |
-| `application/json-patch+json` | JSON Patch body for `PATCH` (RFC 6902). |
-
-<!-- TODO: expand with PATCH encoding trade-offs, specifically:
-     - JSON Merge Patch null-as-remove sentinel: cannot distinguish
-       "set property to null" from "remove property" — trap for features
-       with legitimately nullable optional attributes (FKB, AR5).
-     - JSON Patch explicit `remove` vs `replace` with null avoids this.
-     - Recommend JSON Patch for schemas with nullable optional fields. -->
-
-### 2.2 Response body — `Accept` and `Content-Type`
-
-Client's `Accept` header lists acceptable response types with quality values (`q=`).
-Server responds with:
-
-- `Content-Type` header matching what it produced.
-- `406 Not Acceptable` (§15.5.7) if no representation matches. OGC APIs typically
-  prefer to serve a default representation rather than 406.
-
-Write responses may return the mutated resource (see `Prefer: return=representation`
-below) or an empty body — the content negotiation still applies to whatever is
-returned.
-
-### 2.3 `Vary` header
-
-If the response depends on request headers (`Accept`, `Accept-Language`,
-`Prefer`, …), the server **should** emit `Vary: <header-list>` so caches key on
-those inputs. Relevant for `/conformance` and `/collections` responses; less so for
-individual write responses.
+Client declares the request body format via `Content-Type`; server declares the
+response format via `Content-Type` in the response. Client signals preferred response
+formats via `Accept`. Server returns `415` if it cannot process the request body
+format, `406` if it cannot produce an acceptable response format. See RFC 9110 §12.
 
 ---
 
@@ -140,8 +80,9 @@ Only codes actually reachable from Part 4 / Part 11 workflows. RFC 9110 §15.
 
 | Code | Meaning | When to use |
 |------|---------|-------------|
-| `200 OK` | Generic success with body | `PUT`/`PATCH` returning the updated feature; batch response with per-item status |
-| `201 Created` | New resource created | `POST` that created a new resource. |
+| `200 OK` | Success with body | `PUT`/`PATCH` returning the updated resource |
+| `201 Created` | New resource created | `POST` that created a new resource |
+| `202 Accepted` | Request accepted for async processing | Server will process later; returns `Location` pointing at a status resource |
 | `204 No Content` | Success, no body | `PUT`/`PATCH` with `Prefer: return=minimal`; `DELETE` |
 
 **`201` vs `200`:** Use `201` only when a new URI came into existence. A `PUT` that
@@ -250,14 +191,11 @@ preconditions, the second write silently overwrites the first — a *lost update
 - **Weak** (`W/"abc123"`): semantically equivalent representations may share a weak
   ETag. **Not** valid for `If-Match` — use only for `If-None-Match` on `GET`.
 
-### 5.4 `If-None-Match: *` for create-only PUT
+### 5.4 `If-None-Match: *`
 
-`PUT /collections/{cid}/items/{fid}` with `If-None-Match: *`:
-
-- If `{fid}` does not exist → create it, return `201`.
-- If `{fid}` exists → `412 Precondition Failed`, do not overwrite.
-
-Useful when the client generates the id and wants create-not-replace semantics.
+`If-None-Match: *` evaluates to true only when the target resource does not currently
+exist. On `PUT`, this implements create-only semantics: succeed if absent, `412` if
+present. See RFC 9110 §13.1.2.
 
 ### 5.5 `Last-Modified` / `If-Unmodified-Since`
 
@@ -266,23 +204,12 @@ Vulnerable to rapid successive updates within the same second. Prefer `ETag` whe
 possible.
 
 ### 5.6 `428 Precondition Required`
+Server-side enforcement of conditional writes (RFC 6585 §3): the server refuses
+to process an unconditional request and demands the client re-submit with a validator
+header (`If-Match` or `If-Unmodified-Since`).
 
-Server-side enforcement of conditional writes. Introduced by
-**RFC 6585** (subsequently folded into RFC 9110): the server refuses to process an
-unconditional request and demands the client re-submit with a validator header.
-
-**Spec status in OGC API - Features:** `428` is listed in the core status-code
-tables of both Part 4 and Part 11. Part 4 also grants an explicit Permission
-(`/per/optimistic-locking-timestamps/ifunmodifiedsince-missing`) covering the case
-when `If-Unmodified-Since` is omitted from a write operation — in that case
-the server **MAY**:
-
-- **A.** respond with `428 (Precondition required)` (RFC 6585) or `409 (Conflict)`; or
-- **B.** execute the operation and return a `2xx` status.
-
-Either choice is conformant. Choose `428` when lost-update prevention is a hard
-requirement (e.g., authoritative geodata); choose the permissive path only if the
-underlying data model tolerates blind overwrites.
+For OGC-specific application, see
+[part-4-crud.md §8](./part-4-crud.md#8-requirements-class-optimistic-locking).
 
 ---
 
@@ -298,24 +225,14 @@ honored, it echoes via `Preference-Applied`.
 | `return=representation` | Return the full resource in the response body after a write. Response includes the mutated feature, saving a round-trip. |
 | `return=minimal` | Return an empty body (`204`) or a status stub. Reduces bandwidth. |
 
-### 6.2 `handling`
-
-| Token | Meaning |
-|-------|---------|
-| `handling=strict` | Reject the request on any warning-level issue (unknown properties, tolerated but non-preferred structure). |
-| `handling=lenient` | Best-effort: apply what is understood, ignore or coerce the rest. |
-
-Used in OGC batch/atomic transaction endpoints to decide whether an unknown
-property in a Feature is an error (`422`) or silently dropped.
-
-### 6.3 `respond-async`
+### 6.2 `respond-async`
 
 Server processes the request asynchronously and returns `202 Accepted` with a
 `Location` header pointing at a status resource. Relevant for large batch jobs.
 
-### 6.4 Echoing preferences
+### 6.3 Echoing preferences
 
-RFC 7240 §3 states the server **SHOULD** include `Preference-Applied` in the
+RFC 7240 §3 states the server **MAY** include `Preference-Applied` in the
 response when it honored one or more tokens:
 
 ```
@@ -355,24 +272,6 @@ RFC 9457 (supersedes RFC 7807). The recommended standard shape for 4xx/5xx bodie
 
 Extension members are allowed and encouraged for machine-consumable detail (e.g.
 `errors: [ { pointer, code, message } ]` for per-item batch failures).
-
----
-
-## 8. Quick decision cheatsheet
-
-| Situation | Response |
-|-----------|----------|
-| Client sends body in a media type the endpoint doesn't understand | `415 Unsupported Media Type` |
-| Body parses but the Feature is invalid GeoJSON | `422 Unprocessable Content` |
-| `PUT`/`PATCH`/`DELETE` on unknown feature | `404 Not Found` |
-| `PUT` with `If-Match` when ETag has changed | `412 Precondition Failed` |
-| `PUT` with `If-None-Match: *` on an existing id | `412 Precondition Failed` |
-| Successful `POST` creating one feature | `201 Created` + `Location` header |
-| Successful `PUT` replacing an existing feature, client wants body | `200 OK` + `ETag` |
-| Successful `PUT` replacing an existing feature, `Prefer: return=minimal` | `204 No Content` + `ETag` + `Preference-Applied` |
-| Successful `DELETE` | `204 No Content` |
-| Endpoint doesn't accept this method | `405 Method Not Allowed` + `Allow` header |
-| Async batch accepted, still processing | `202 Accepted` + `Location` (status URI) + `Preference-Applied: respond-async` |
 
 ---
 
