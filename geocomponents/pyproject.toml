@@ -122,6 +122,10 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
     "T201",     # print() is fine when debugging a failing test
 ]
 
+[tool.ruff.lint.flake8-tidy-imports]
+# Extend TID252 to sibling imports too, for consistency, easier restructuing and grep
+ban-relative-imports = "all"
+
 [tool.ruff.format]
 # Like Black, use double quotes for strings.
 quote-style = "double"

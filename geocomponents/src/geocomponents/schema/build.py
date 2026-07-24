@@ -12,8 +12,8 @@ Mapping rules (the heart of "description owns the names"):
 
 from __future__ import annotations
 
-from ..descriptions.models import ResolvedCollection, ResolvedDataset
-from .plan import (
+from geocomponents.descriptions.models import ResolvedCollection, ResolvedDataset
+from geocomponents.schema.plan import (
     READ_OPS,
     WRITE_OPS,
     CollectionPlan,
@@ -28,8 +28,9 @@ from .plan import (
 
 def _standard_columns() -> list[ColumnPlan]:
     return [
-        ColumnPlan("id", "uuid", nullable=False, primary_key=True,
-                   default="gen_random_uuid()"),
+        ColumnPlan(
+            "id", "uuid", nullable=False, primary_key=True, default="gen_random_uuid()"
+        ),
         ColumnPlan("created_at", "timestamptz", nullable=False, default="now()"),
         ColumnPlan("updated_at", "timestamptz", nullable=False, default="now()"),
     ]
@@ -49,9 +50,7 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:
             ForeignKeyPlan(col_name, ref_table=f"{schema}.{rel.target}")
         )
 
-    geometry = GeometryColumnPlan(
-        coll.geometry_field, coll.geometry_type, coll.srid
-    )
+    geometry = GeometryColumnPlan(coll.geometry_field, coll.geometry_type, coll.srid)
     return TablePlan(
         schema=schema,
         name=coll.name,
@@ -68,9 +67,7 @@ def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
         table = _build_table(schema, coll)
         # Reads for every collection; writes only for simple-feature collections.
         ops = READ_OPS + WRITE_OPS if coll.supports_crud else READ_OPS
-        functions = {
-            op: internal_function(schema, coll.name, op) for op in ops
-        }
+        functions = {op: internal_function(schema, coll.name, op) for op in ops}
         collections.append(
             CollectionPlan(
                 collection_name=coll.name,

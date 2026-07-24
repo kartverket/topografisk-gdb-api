@@ -64,7 +64,7 @@ class GeometryColumnPlan:
 @dataclass(frozen=True)
 class ForeignKeyPlan:
     column: str
-    ref_table: str   # schema-qualified
+    ref_table: str  # schema-qualified
     ref_column: str = "id"
 
 
@@ -97,7 +97,7 @@ class TablePlan:
 class CollectionPlan:
     collection_name: str
     table: TablePlan
-    functions: dict[str, str]   # operation -> internal function name (private)
+    functions: dict[str, str]  # operation -> internal function name (private)
 
     @property
     def id_field(self) -> str:

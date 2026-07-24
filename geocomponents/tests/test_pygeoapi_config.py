@@ -20,9 +20,7 @@ def test_resources_are_collections_plus_declared_processes():
 
 
 def test_processes_are_only_the_declared_ones():
-    hydro = next(
-        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "hydro"
-    )
+    hydro = next(d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "hydro")
     cfg = build_config(hydro, PUBLIC_URL, dsn="postgresql://x")
     # hydro declares no processes.
     assert all(r["type"] != "process" for r in cfg["resources"].values())
@@ -43,8 +41,8 @@ def test_provider_carries_ogc_identifiers_not_physical_names():
 
 def test_editable_reflects_feature_model():
     cfg = _config()
-    assert cfg["resources"]["parcels"]["providers"][0]["editable"] is True   # simple
-    assert cfg["resources"]["blocks"]["providers"][0]["editable"] is False   # topology
+    assert cfg["resources"]["parcels"]["providers"][0]["editable"] is True  # simple
+    assert cfg["resources"]["blocks"]["providers"][0]["editable"] is False  # topology
 
 
 def test_server_url_is_the_mount_url_for_correct_links():

@@ -46,9 +46,7 @@ def database_dsn() -> str:
     from psycopg.conninfo import make_conninfo
 
     params = {
-        keyword: os.environ[var]
-        for var, keyword in _DB_PARTS
-        if os.environ.get(var)
+        keyword: os.environ[var] for var, keyword in _DB_PARTS if os.environ.get(var)
     }
     return make_conninfo(**params)
 
@@ -59,6 +57,4 @@ def descriptions_dir() -> Path:
 
 def public_base_url() -> str:
     """External base URL the API is reached at (for OGC hypermedia links)."""
-    return os.environ.get(
-        "GEOCOMPONENTS_BASE_URL", "http://localhost:8000"
-    ).rstrip("/")
+    return os.environ.get("GEOCOMPONENTS_BASE_URL", "http://localhost:8000").rstrip("/")

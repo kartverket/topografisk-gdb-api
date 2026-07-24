@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import typer
 
-from . import config
-from .descriptions.loader import DescriptionError, load_resolved_datasets
+from geocomponents import config
+from geocomponents.descriptions.loader import DescriptionError, load_resolved_datasets
 
 app = typer.Typer(add_completion=False, help="Description-driven geo components.")
 
@@ -27,7 +27,7 @@ def _load_datasets():
         datasets = load_resolved_datasets(directory)
     except DescriptionError as err:
         typer.secho(f"INVALID: {err}", fg="red")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from err
     if not datasets:
         typer.secho(
             f"No dataset descriptions found in '{directory}'. Point "
@@ -53,8 +53,8 @@ def apply_schema():
     """Create the dispatch layer, then each dataset's tables + functions."""
     import psycopg
 
-    from .schema import functions, postgis
-    from .schema.build import build_schema_plan
+    from geocomponents.schema import functions, postgis
+    from geocomponents.schema.build import build_schema_plan
 
     datasets = _load_datasets()
     with psycopg.connect(config.database_dsn()) as conn:
@@ -65,19 +65,18 @@ def apply_schema():
             postgis.apply_tables(conn, plan)
             functions.apply_functions(conn, plan)
             typer.secho(
-                f"applied schema '{d.name}' "
-                f"({len(d.collections)} collection(s))",
+                f"applied schema '{d.name}' ({len(d.collections)} collection(s))",
                 fg="green",
             )
 
 
 @app.command()
-def serve(host: str = "0.0.0.0", port: int = 8000):
+def serve(host: str = "0.0.0.0", port: int = 8000):  # noqa: S104 - intentional: bind all interfaces for containerised serving
     """Build the gateway (one OGC API per dataset) and serve it."""
     import uvicorn
 
-    from .api.pygeoapi_provider import PygeoapiProvider
-    from .gateway.mounter import build_gateway
+    from geocomponents.api.pygeoapi_provider import PygeoapiProvider
+    from geocomponents.gateway.mounter import build_gateway
 
     datasets = _load_datasets()
     provider = PygeoapiProvider(dsn=config.database_dsn())

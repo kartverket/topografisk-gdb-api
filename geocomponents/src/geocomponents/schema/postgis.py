@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import psycopg
 
-from .plan import ColumnPlan, SchemaPlan, TablePlan
+from geocomponents.schema.plan import ColumnPlan, SchemaPlan, TablePlan
 
 # PostgreSQL's NAMEDATALEN default. Identifiers longer than this are silently
 # truncated by the server, so two distinct long names can collide.

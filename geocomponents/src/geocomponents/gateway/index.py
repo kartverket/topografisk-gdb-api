@@ -9,14 +9,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..descriptions.models import ResolvedDataset
+from geocomponents.descriptions.models import ResolvedDataset
 
 
 @dataclass(frozen=True)
 class DatasetMount:
     dataset: ResolvedDataset
-    mount_path: str   # e.g. /datasets/cadastre/ogc_api
-    public_url: str   # absolute URL to that dataset's OGC API landing page
+    mount_path: str  # e.g. /datasets/cadastre/ogc_api
+    public_url: str  # absolute URL to that dataset's OGC API landing page
 
 
 def dataset_index(mounts: list[DatasetMount]) -> dict:

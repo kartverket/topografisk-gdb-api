@@ -15,9 +15,9 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 
-from ..api.base import DatasetApiProvider
-from ..descriptions.models import ResolvedDataset
-from .index import DatasetMount, dataset_index
+from geocomponents.api.base import DatasetApiProvider
+from geocomponents.descriptions.models import ResolvedDataset
+from geocomponents.gateway.index import DatasetMount, dataset_index
 
 
 def mount_path(dataset_name: str) -> str:
