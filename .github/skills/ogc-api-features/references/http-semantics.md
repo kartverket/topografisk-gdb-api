@@ -82,7 +82,7 @@ Only codes actually reachable from Part 4 / Part 11 workflows. RFC 9110 §15.
 |------|---------|-------------|
 | `200 OK` | Success with body | `PUT`/`PATCH` returning the updated resource |
 | `201 Created` | New resource created | `POST` that created a new resource |
-| `202 Accepted` | Request accepted for async processing | Server will process later; returns `Location` pointing at a status resource |
+| `202 Accepted` | Request accepted for async processing | Server will process later |
 | `204 No Content` | Success, no body | `PUT`/`PATCH` with `Prefer: return=minimal`; `DELETE` |
 
 **`201` vs `200`:** Use `201` only when a new URI came into existence. A `PUT` that
@@ -104,7 +104,7 @@ feature at a client-specified URI may return `201`.
 | `403 Forbidden` | Authenticated but not permitted | Read-only user hits `POST`; collection write-protected |
 | `404 Not Found` | Target resource does not exist | `PUT`/`PATCH`/`DELETE` on unknown `featureId`; unknown `collectionId` |
 | `405 Method Not Allowed` | HTTP method not supported on this URI | Read-only collection receives `POST`. **Must** include `Allow` header listing supported methods. |
-| `406 Not Acceptable` | No representation matches `Accept` | See §2.2 |
+| `406 Not Acceptable` | No representation matches `Accept` | See §2 |
 | `409 Conflict` | Request conflicts with current state | Attempted create with duplicate id; concurrent modification detected without ETag |
 | `410 Gone` | Resource existed but has been deleted permanently | Optional stronger form of `404` for known-deleted features |
 | `412 Precondition Failed` | Conditional request precondition (`If-Match`, `If-Unmodified-Since`) failed | Lost-update protection triggered — see §5 |
@@ -239,7 +239,7 @@ response when it honored one or more tokens:
 Preference-Applied: return=representation, handling=strict
 ```
 
-Absence means the server ignored them (or none applied). Because it is SHOULD-level,
+Absence means the server ignored them (or none applied). Because it is MAY-level,
 clients cannot rely on its presence to detect honoring — they must still inspect
 the response body or status to confirm.
 
