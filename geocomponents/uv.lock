@@ -299,7 +299,7 @@ dev = [
     { name = "httpx2", specifier = ">=2.5" },
     { name = "pre-commit", specifier = ">=4.6" },
     { name = "pytest", specifier = ">=8.0" },
-    { name = "ruff", specifier = ">=0.15" },
+    { name = "ruff", specifier = "==0.16.0" },
 ]
 
 [[package]]

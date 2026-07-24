@@ -1,0 +1,8 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "database-connection-string-password"
+description = "Password embedded in a database connection string"
+regex = '''(?i)\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://[^:/?#\s]+:([^@\s]{4,})@'''
+secretGroup = 1
