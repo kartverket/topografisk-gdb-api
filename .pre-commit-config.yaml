@@ -4,7 +4,6 @@ default_install_hook_types: [pre-commit]
 # own or need to lint / format.
 exclude: |
   (?x)^(
-    example-structure/.*|
     UML-schemas/.*|
     ogc-standards/.*|
     nibio/.*\.sql|
