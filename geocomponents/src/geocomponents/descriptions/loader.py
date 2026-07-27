@@ -14,8 +14,7 @@ from pathlib import Path
 
 import yaml
 
-from ..processes.registry import known_process_ids
-from .models import (
+from geocomponents.descriptions.models import (
     BUILTIN_SQL_TYPES,
     CodeList,
     Commons,
@@ -27,6 +26,7 @@ from .models import (
     ResolvedField,
     ResolvedRelationship,
 )
+from geocomponents.processes.registry import known_process_ids
 
 
 class DescriptionError(ValueError):
@@ -45,14 +45,14 @@ def _read_yaml(path: Path) -> dict:
 def load_commons(path: Path) -> Commons:
     try:
         return Commons.model_validate(_read_yaml(path))
-    except Exception as exc:  # noqa: BLE001 - surface a clear message
+    except Exception as exc:
         raise DescriptionError(f"invalid commons file {path}: {exc}") from exc
 
 
 def load_dataset(path: Path) -> DatasetDef:
     try:
         return DatasetDef.model_validate(_read_yaml(path))
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise DescriptionError(f"invalid dataset file {path}: {exc}") from exc
 
 

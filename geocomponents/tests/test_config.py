@@ -13,8 +13,15 @@ from psycopg.conninfo import conninfo_to_dict
 from geocomponents import config
 
 _ALL_DB_VARS = (
-    "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD",
-    "DB_SSLMODE", "DB_SSLROOTCERT", "DB_SSLCERT", "DB_SSLKEY",
+    "DB_HOST",
+    "DB_PORT",
+    "DB_NAME",
+    "DB_USER",
+    "DB_PASSWORD",
+    "DB_SSLMODE",
+    "DB_SSLROOTCERT",
+    "DB_SSLCERT",
+    "DB_SSLKEY",
 )
 
 

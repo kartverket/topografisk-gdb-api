@@ -19,13 +19,18 @@ _GEOM = {
     "Point": {"type": "Point", "coordinates": [10, 55]},
     "MultiPoint": {"type": "MultiPoint", "coordinates": [[10, 55]]},
     "LineString": {"type": "LineString", "coordinates": [[10, 55], [11, 56]]},
-    "MultiLineString": {"type": "MultiLineString",
-                        "coordinates": [[[10, 55], [11, 56]]]},
-    "Polygon": {"type": "Polygon",
-                "coordinates": [[[10, 55], [10, 56], [11, 56], [11, 55], [10, 55]]]},
-    "MultiPolygon": {"type": "MultiPolygon",
-                     "coordinates": [[[[10, 55], [10, 56], [11, 56], [11, 55],
-                                       [10, 55]]]]},
+    "MultiLineString": {
+        "type": "MultiLineString",
+        "coordinates": [[[10, 55], [11, 56]]],
+    },
+    "Polygon": {
+        "type": "Polygon",
+        "coordinates": [[[10, 55], [10, 56], [11, 56], [11, 55], [10, 55]]],
+    },
+    "MultiPolygon": {
+        "type": "MultiPolygon",
+        "coordinates": [[[[10, 55], [10, 56], [11, 56], [11, 55], [10, 55]]]],
+    },
 }
 
 
@@ -44,14 +49,19 @@ def _sample_feature(coll):
     props = {f.name: _value(f.sql_type) for f in coll.fields if f.required}
     if any(f.name == "source" for f in coll.fields):
         props["source"] = "orig"
-    return {"type": "Feature", "geometry": _GEOM[coll.geometry_type],
-            "properties": props}
+    return {
+        "type": "Feature",
+        "geometry": _GEOM[coll.geometry_type],
+        "properties": props,
+    }
 
 
 # -- thin wrappers over the contract surface --------------------------------
-def _items(cur, ds, coll, bbox=None, lim=10, off=0, with_matched=True):  # noqa: PLR0913 - mirrors the ogc.feature_items dispatch signature
-    cur.execute("select ogc.feature_items(%s,%s,%s,%s,%s,%s)",
-                (ds, coll, bbox, lim, off, with_matched))
+def _items(cur, ds, coll, bbox=None, lim=10, off=0, with_matched=True):  # noqa: PLR0913, PLR0917 - mirrors the ogc.feature_items dispatch signature
+    cur.execute(
+        "select ogc.feature_items(%s,%s,%s,%s,%s,%s)",
+        (ds, coll, bbox, lim, off, with_matched),
+    )
     return cur.fetchone()[0]
 
 
@@ -61,8 +71,10 @@ def _item(cur, ds, coll, fid):
 
 
 def _create(cur, ds, coll, feature):
-    cur.execute("select ogc.feature_create(%s,%s,%s)",
-                (ds, coll, orjson.dumps(feature).decode()))
+    cur.execute(
+        "select ogc.feature_create(%s,%s,%s)",
+        (ds, coll, orjson.dumps(feature).decode()),
+    )
     return cur.fetchone()[0]
 
 
@@ -85,7 +97,8 @@ def test_with_matched_toggles_numbermatched(datasets, conn):
         for d in datasets:
             for coll in d.collections:
                 assert "numberMatched" not in _items(
-                    cur, d.name, coll.name, with_matched=False)
+                    cur, d.name, coll.name, with_matched=False
+                )
 
 
 def test_simple_collections_support_full_crud_roundtrip(datasets, conn):
@@ -108,15 +121,26 @@ def test_simple_collections_support_full_crud_roundtrip(datasets, conn):
                 if changed and witness:
                     cur.execute(
                         "select ogc.feature_update(%s,%s,%s,%s)",
-                        (d.name, coll.name, fid, orjson.dumps(
-                            {"properties": {changed.name: _value(changed.sql_type, 1)}}
-                        ).decode()))
+                        (
+                            d.name,
+                            coll.name,
+                            fid,
+                            orjson.dumps(
+                                {
+                                    "properties": {
+                                        changed.name: _value(changed.sql_type, 1)
+                                    }
+                                }
+                            ).decode(),
+                        ),
+                    )
                     props = _item(cur, d.name, coll.name, fid)["properties"]
                     assert props[changed.name] == _value(changed.sql_type, 1)
                     assert props["source"] == "orig"  # untouched
 
-                cur.execute("select ogc.feature_delete(%s,%s,%s)",
-                            (d.name, coll.name, fid))
+                cur.execute(
+                    "select ogc.feature_delete(%s,%s,%s)", (d.name, coll.name, fid)
+                )
                 assert cur.fetchone()[0] is True
                 assert _item(cur, d.name, coll.name, fid) is None
 
@@ -140,15 +164,31 @@ def test_topology_collections_reject_writes_at_the_db(datasets, conn):
 # ===========================================================================
 def test_golden_parcels_feature_shape(conn):
     with conn.cursor() as cur:
-        fid = _create(cur, "cadastre", "parcels", {
-            "type": "Feature",
-            "geometry": _GEOM["MultiPolygon"],
-            "properties": {"label": "G1", "municipality": "0101",
-                           "status": "active", "area_m2": 5.0, "source": "golden"},
-        })
+        fid = _create(
+            cur,
+            "cadastre",
+            "parcels",
+            {
+                "type": "Feature",
+                "geometry": _GEOM["MultiPolygon"],
+                "properties": {
+                    "label": "G1",
+                    "municipality": "0101",
+                    "status": "active",
+                    "area_m2": 5.0,
+                    "source": "golden",
+                },
+            },
+        )
         feat = _item(cur, "cadastre", "parcels", fid)
         assert feat["geometry"]["type"] == "MultiPolygon"
-        assert {"label", "municipality", "status", "area_m2", "source",
-                "created_at", "updated_at"} <= set(feat["properties"])
-        cur.execute("select ogc.feature_delete(%s,%s,%s)",
-                    ("cadastre", "parcels", fid))
+        assert {
+            "label",
+            "municipality",
+            "status",
+            "area_m2",
+            "source",
+            "created_at",
+            "updated_at",
+        } <= set(feat["properties"])
+        cur.execute("select ogc.feature_delete(%s,%s,%s)", ("cadastre", "parcels", fid))

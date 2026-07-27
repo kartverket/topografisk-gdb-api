@@ -1,0 +1,171 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  pre-commit-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+      - name: Install dev dependencies (pre-commit lives in geocomponents dev group)
+        run: uv sync --project geocomponents --frozen
+      - name: Cache pre-commit hook environments
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |
+            pre-commit-${{ runner.os }}-
+      - name: Run pre-commit
+        run: uv run --project geocomponents pre-commit run --all-files --show-diff-on-failure
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: geocomponents
+          POSTGRES_PASSWORD: geocomponents
+          POSTGRES_DB: geocomponents
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U geocomponents"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_NAME: geocomponents
+      DB_USER: geocomponents
+      DB_PASSWORD: geocomponents
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+      - name: Sync dependencies
+        run: uv sync --project geocomponents --frozen
+      - name: Run tests
+        run: uv run --project geocomponents pytest
+
+  audit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: geocomponents
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+      - name: Export runtime dependencies to requirements.txt
+        run: uv export --frozen --no-dev --no-emit-project --format requirements-txt -o requirements.txt
+      - name: Audit dependencies with pip-audit
+        run: uvx pip-audit -r requirements.txt --disable-pip
+
+  # Builds the image on every PR and every push, loads it into the local Docker
+  # daemon (no registry credentials), and fails the run on HIGH/CRITICAL OS or
+  # library CVEs. Populates the GHA build cache so `publish` can reuse layers.
+  build-and-scan:
+    needs: [pre-commit-lint, test, audit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+
+      - name: Build image (load into local daemon for scanning)
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4  # v6.16.0
+        with:
+          context: ./geocomponents
+          load: true
+          tags: geocomponents:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          image-ref: geocomponents:scan
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+  # Publishes to GHCR only on merges to main. Depends on build-and-scan so a
+  # failing Trivy scan (or lint/test) blocks publish. Rebuilds via buildx but
+  # `cache-from: type=gha` makes it a near-no-op that just re-tags and pushes.
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [build-and-scan]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1  # v3.4.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7  # v5.7.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # Always tag with short git SHA (e.g. a1b2c3d)
+            type=sha,prefix=,format=short
+            # On v*.*.* tags, also tag with the semver (e.g. 1.2.3)
+            type=semver,pattern={{version}}
+            # Tag latest on every push to the default branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        id: push
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4  # v6.16.0
+        with:
+          context: ./geocomponents
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373  # v4.1.1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true

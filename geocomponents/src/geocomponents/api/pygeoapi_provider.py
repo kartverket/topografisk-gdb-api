@@ -36,9 +36,9 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 from starlette.types import ASGIApp
 
-from ..config import database_dsn
-from ..descriptions.models import ResolvedCollection, ResolvedDataset
-from ..processes.registry import PROCESS_REGISTRY
+from geocomponents.config import database_dsn
+from geocomponents.descriptions.models import ResolvedCollection, ResolvedDataset
+from geocomponents.processes.registry import PROCESS_REGISTRY
 
 PROVIDER_PATH = "geocomponents.api.db_function_provider.DbFunctionProvider"
 CRS84 = "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
@@ -52,7 +52,7 @@ CRS84 = "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
 # no-op mapping so each render translates its own per-instance config. JSON never
 # uses this path; the cost is only re-translating a small config on HTML renders.
 class _NoConfigCache(dict):
-    def get(self, key, default=None):  # noqa: D401 - always miss
+    def get(self, key, default=None):
         return None
 
     def __setitem__(self, key, value):  # never retain
@@ -127,7 +127,9 @@ def build_config(dataset: ResolvedDataset, public_url: str, dsn: str) -> dict:
 
     return {
         "server": {
-            "bind": {"host": "0.0.0.0", "port": 8000},
+            # S104: intentional — pygeoapi listens inside the container; the
+            # host firewall/reverse proxy controls external exposure.
+            "bind": {"host": "0.0.0.0", "port": 8000},  # noqa: S104
             "url": public_url,
             "mimetype": "application/json",
             "encoding": "utf-8",

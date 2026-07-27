@@ -45,8 +45,10 @@ def _example_geometry(geometry_type: str) -> dict:
     }
     if geometry_type == "GeometryCollection":
         return {"type": "GeometryCollection", "geometries": []}
-    return {"type": geometry_type,
-            "coordinates": coordinates.get(geometry_type, [10.0, 60.0])}
+    return {
+        "type": geometry_type,
+        "coordinates": coordinates.get(geometry_type, [10.0, 60.0]),
+    }
 
 
 def _example_property(spec: dict):
@@ -107,10 +109,16 @@ class DbFunctionProvider(BaseProvider):
         Server-managed columns (``created_at``/``updated_at``) are read-only.
         """
         properties = {name: dict(spec) for name, spec in self._field_defs.items()}
-        properties["created_at"] = {"type": "string", "format": "date-time",
-                                    "readOnly": True}
-        properties["updated_at"] = {"type": "string", "format": "date-time",
-                                    "readOnly": True}
+        properties["created_at"] = {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": True,
+        }
+        properties["updated_at"] = {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": True,
+        }
         schema = {
             "type": "object",
             "required": ["type", "geometry", "properties"],
@@ -124,14 +132,16 @@ class DbFunctionProvider(BaseProvider):
             "example": {
                 "type": "Feature",
                 "geometry": _example_geometry(self.geometry_type),
-                "properties": {name: _example_property(spec)
-                               for name, spec in self._field_defs.items()},
+                "properties": {
+                    name: _example_property(spec)
+                    for name, spec in self._field_defs.items()
+                },
             },
         }
         return ("application/geo+json", schema)
 
     # -- read -------------------------------------------------------------
-    def query(  # noqa: PLR0913 - signature dictated by pygeoapi's BaseProvider.query
+    def query(  # noqa: PLR0913, PLR0917 - signature dictated by pygeoapi's BaseProvider.query
         self,
         offset=0,
         limit=10,
@@ -154,8 +164,14 @@ class DbFunctionProvider(BaseProvider):
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
                 "select ogc.feature_items(%s, %s, %s, %s, %s, %s)",
-                (self.dataset, self.collection, bbox_arg, eff_limit, offset,
-                 self.with_matched),
+                (
+                    self.dataset,
+                    self.collection,
+                    bbox_arg,
+                    eff_limit,
+                    offset,
+                    self.with_matched,
+                ),
             )
             return cur.fetchone()[0]
 
@@ -186,7 +202,12 @@ class DbFunctionProvider(BaseProvider):
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
                 "select ogc.feature_replace(%s, %s, %s, %s)",
-                (self.dataset, self.collection, identifier, orjson.dumps(feature).decode()),
+                (
+                    self.dataset,
+                    self.collection,
+                    identifier,
+                    orjson.dumps(feature).decode(),
+                ),
             )
             ok = cur.fetchone()[0]
         if not ok:
@@ -199,7 +220,12 @@ class DbFunctionProvider(BaseProvider):
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
                 "select ogc.feature_update(%s, %s, %s, %s)",
-                (self.dataset, self.collection, identifier, orjson.dumps(feature).decode()),
+                (
+                    self.dataset,
+                    self.collection,
+                    identifier,
+                    orjson.dumps(feature).decode(),
+                ),
             )
             ok = cur.fetchone()[0]
         if not ok:

@@ -17,7 +17,7 @@ from typing import Protocol
 
 from starlette.types import ASGIApp
 
-from ..descriptions.models import ResolvedDataset
+from geocomponents.descriptions.models import ResolvedDataset
 
 
 class DatasetApiProvider(Protocol):

@@ -3,7 +3,7 @@ name = "geocomponents"
 version = "0.1.0"
 description = "Description-driven, swappable components for storing, distributing and updating geographic data"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
@@ -22,6 +22,8 @@ geocomponents = "geocomponents.cli:app"
 dev = [
     "pytest>=8.0",
     "httpx2>=2.5",
+    "ruff==0.16.0",  # kept in sync by pre-commit hook
+    "pre-commit>=4.6",
 ]
 
 [build-system]
@@ -69,32 +71,38 @@ exclude = [
 # Same as Black.
 line-length = 88
 indent-width = 4
-
-# target-version is inferred from requires-python above.
+target-version = "py312"
 
 [tool.ruff.lint]
-# Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`) codes by default.
-# Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
-# McCabe complexity (`C901`) by default.
 select = [
-    "E4",
-    "E7",
-    "E9",
-    "F",
-    "S506",
-    "S608",
-    "B006",
-    "B007",
-    "B015",
-    "B020",
-    "A",
-    "DTZ",
-    "PTH",
-    "Q",
-    "NPY",
-    "PD",
-    "N",
-    "PLR",
+    # --- Correctness / bug-likelihood ---
+    "F",       # Pyflakes: undefined names, unused imports, etc.
+    "E4",      # pycodestyle: import formatting errors
+    "E7",      # pycodestyle: statement errors (multiple statements, ==None, ...)
+    "E9",      # pycodestyle: syntax / IO errors
+    "B",       # flake8-bugbear: likely bugs and design smells
+    "RUF",     # Ruff-specific: mutable class attrs, useless comprehensions, ...
+    "SIM",     # flake8-simplify: collapse redundant constructs
+    "RET",     # flake8-return: cleanup return/raise flow
+    "C4",      # flake8-comprehensions: drop needless list()/dict()/set() wraps
+    "PIE",     # flake8-pie: misc small correctness lints
+    # --- Security ---
+    "S",       # flake8-bandit: subprocess, hardcoded creds, SQLi, yaml.load, ...
+    # --- Style / consistency ---
+    "I",       # isort: import ordering (auto-fixable)
+    "UP",      # pyupgrade: modernize syntax for target Python (auto-fixable)
+    "N",       # pep8-naming
+    "A",       # flake8-builtins: shadowing builtins
+    "Q",       # flake8-quotes: consistent quoting
+    "TID",     # flake8-tidy-imports: ban relative parent imports
+    "T20",     # flake8-print: no stray print()/pprint()
+    # --- Ecosystem-specific ---
+    "DTZ",     # flake8-datetimez: enforce timezone-aware datetimes
+    "PTH",     # flake8-use-pathlib: prefer pathlib over os.path
+    "NPY",     # numpy-specific
+    "PD",      # pandas-vet
+    # --- Refactor hints ---
+    "PLR",     # pylint refactor (magic values, complexity, ...)
 ]
 ignore = []
 
@@ -104,6 +112,19 @@ unfixable = []
 
 # Allow unused variables when underscore-prefixed.
 dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "S101",     # assert in pytest
+    "S105",     # hardcoded password-like strings (fixture creds)
+    "S106",     # hardcoded password kwarg (fixture creds)
+    "PLR2004",  # magic numbers are readable in test data
+    "T201",     # print() is fine when debugging a failing test
+]
+
+[tool.ruff.lint.flake8-tidy-imports]
+# Extend TID252 to sibling imports too, for consistency, easier restructuring and grep
+ban-relative-imports = "all"
 
 [tool.ruff.format]
 # Like Black, use double quotes for strings.

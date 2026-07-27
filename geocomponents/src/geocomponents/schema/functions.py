@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import psycopg
 
-from .plan import (
+from geocomponents.schema.plan import (
     DISPATCH_SCHEMA,
     CollectionPlan,
     ColumnPlan,

@@ -111,7 +111,7 @@ def test_all_three_literal_sites_escape_field_names_in_generated_sql():
     assert "'it''s'" in by_op["item"]  # _properties_object
     assert "'it''s'" in by_op["create"]  # _prop_read
     # _fn_update contributes one via _prop_read and one via its explicit literal.
-    assert by_op["update"].count("'it''s'") >= 2  # noqa: PLR2004
+    assert by_op["update"].count("'it''s'") >= 2
     # And the unescaped 6-char literal never appears bare in any body.
     for body in stmts:
         assert "'it's'" not in body
