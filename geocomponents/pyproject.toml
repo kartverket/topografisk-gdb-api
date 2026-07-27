@@ -21,7 +21,7 @@ geocomponents = "geocomponents.cli:app"
 [dependency-groups]
 dev = [
     "pytest>=8.0",
-    "httpx2>=2.5",
+    "httpx2>=2.9.1",
     "ruff==0.16.0",  # kept in sync by pre-commit hook
     "pre-commit>=4.6",
 ]
