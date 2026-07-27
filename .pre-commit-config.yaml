@@ -38,12 +38,14 @@ repos:
     hooks:
       - id: actionlint
 
-  # Drift guard: ensure geocomponents ruff == pre-commit ruff
+  # Drift guard: ensure geocomponents ruff == pre-commit ruff.
+  # `language: system` + explicit `python3` avoids depending on the script's
+  # exec bit / shebang and works with any python3 on PATH (stdlib-only script).
   - repo: local
     hooks:
       - id: ruff-versions-in-sync
         name: ruff versions in sync
-        language: script
-        entry: scripts/check_ruff_versions.py
+        language: system
+        entry: python3 scripts/check_ruff_versions.py
         files: '^(\.pre-commit-config\.yaml|geocomponents/pyproject\.toml)$'
         pass_filenames: false
