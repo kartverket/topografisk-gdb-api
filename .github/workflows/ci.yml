@@ -67,13 +67,18 @@ jobs:
 
   audit:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: geocomponents
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
           enable-cache: true
-      - run: uv export --frozen --no-dev --no-emit-project --format requirements-txt -o requirements.txt
-      - run: uvx pip-audit -r requirements.txt --disable-pip
+      - name: Export runtime dependencies to requirements.txt
+        run: uv export --frozen --no-dev --no-emit-project --format requirements-txt -o requirements.txt
+      - name: Audit dependencies with pip-audit
+        run: uvx pip-audit -r requirements.txt --disable-pip
 
   # Builds the image on every PR and every push, loads it into the local Docker
   # daemon (no registry credentials), and fails the run on HIGH/CRITICAL OS or

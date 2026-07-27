@@ -27,10 +27,6 @@ updates:
       dev-dependencies:
         dependency-type: development
 
-  # Base images in geocomponents/Dockerfile (python:3.12-slim) and the postgis
-  # service image in geocomponents/docker-compose.yml. Trivy scans the built
-  # image on every PR; these PRs are the proactive fix path for the CVEs Trivy
-  # would otherwise flag.
   - package-ecosystem: docker
     directory: /geocomponents
     schedule:
