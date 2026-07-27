@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
-    "pygeoapi>=0.18",
+    "pygeoapi>=0.23.5",
     "psycopg[binary]>=3.1",
     "pydantic>=2.6",
     "orjson>=3.9",
