@@ -65,9 +65,53 @@ jobs:
       - name: Run tests
         run: uv run --project geocomponents pytest
 
-  # Build on PR, push on merge
-  build-and-publish:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+      - run: uv export --frozen --no-dev --no-emit-project --format requirements-txt -o requirements.txt
+      - run: uvx pip-audit -r requirements.txt --disable-pip
+
+  # Builds the image on every PR and every push, loads it into the local Docker
+  # daemon (no registry credentials), and fails the run on HIGH/CRITICAL OS or
+  # library CVEs. Populates the GHA build cache so `publish` can reuse layers.
+  build-and-scan:
     needs: [pre-commit-lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+
+      - name: Build image (load into local daemon for scanning)
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4  # v6.16.0
+        with:
+          context: ./geocomponents
+          load: true
+          tags: geocomponents:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          image-ref: geocomponents:scan
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+  # Publishes to GHCR only on merges to main. Depends on build-and-scan so a
+  # failing Trivy scan (or lint/test) blocks publish. Rebuilds via buildx but
+  # `cache-from: type=gha` makes it a near-no-op that just re-tags and pushes.
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [build-and-scan]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -84,7 +128,6 @@ jobs:
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
 
       - name: Log in to the Container registry
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1  # v3.4.0
         with:
           registry: ${{ env.REGISTRY }}
@@ -104,19 +147,18 @@ jobs:
             # Tag latest on every push to the default branch
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build image (push only on main)
+      - name: Build and push Docker image
         id: push
         uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4  # v6.16.0
         with:
           context: ./geocomponents
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Generate artifact attestation
-        if: github.event_name != 'pull_request'
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373  # v4.1.1
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
