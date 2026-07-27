@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.110",
-    "uvicorn>=0.29",
+    "uvicorn>=0.51.0",
     "pygeoapi>=0.18",
     "psycopg[binary]>=3.1",
     "pydantic>=2.6",
