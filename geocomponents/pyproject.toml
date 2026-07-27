@@ -5,10 +5,10 @@ description = "Description-driven, swappable components for storing, distributin
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.110",
-    "uvicorn>=0.29",
-    "pygeoapi>=0.18",
-    "psycopg[binary]>=3.1",
+    "fastapi>=0.140.0",
+    "uvicorn>=0.51.0",
+    "pygeoapi>=0.23.5",
+    "psycopg[binary]>=3.3.4",
     "pydantic>=2.6",
     "orjson>=3.9",
     "pyyaml>=6.0",
@@ -21,7 +21,7 @@ geocomponents = "geocomponents.cli:app"
 [dependency-groups]
 dev = [
     "pytest>=8.0",
-    "httpx2>=2.5",
+    "httpx2>=2.9.1",
     "ruff==0.16.0",  # kept in sync by pre-commit hook
     "pre-commit>=4.6",
 ]
