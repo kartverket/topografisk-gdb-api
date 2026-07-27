@@ -84,7 +84,7 @@ jobs:
   # daemon (no registry credentials), and fails the run on HIGH/CRITICAL OS or
   # library CVEs. Populates the GHA build cache so `publish` can reuse layers.
   build-and-scan:
-    needs: [pre-commit-lint, test]
+    needs: [pre-commit-lint, test, audit]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
