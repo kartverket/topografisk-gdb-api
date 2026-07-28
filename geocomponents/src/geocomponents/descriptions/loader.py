@@ -161,7 +161,10 @@ def load_resolved_datasets(
     descriptions_dir: Path,
     commons_filename: str = "commons.yaml",
 ) -> list[ResolvedDataset]:
-    """Load the commons + every ``*.yaml`` dataset file in a directory."""
+    """Read every ``*.yaml`` in ``descriptions_dir``, validate, and return the
+    resolved datasets with the optional ``commons.yaml`` merged into them,
+    sorted by name.
+    """
 
     descriptions_dir = Path(descriptions_dir)
     commons_path = descriptions_dir / commons_filename

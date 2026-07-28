@@ -13,4 +13,5 @@ PROCESS_REGISTRY: dict[str, str] = {
 
 
 def known_process_ids() -> set[str]:
+    """Ids a dataset may declare in ``processes``."""
     return set(PROCESS_REGISTRY)

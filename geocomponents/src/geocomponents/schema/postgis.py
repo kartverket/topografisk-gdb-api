@@ -96,7 +96,7 @@ def render_tables(plan: SchemaPlan) -> str:
 
 
 def apply_tables(conn: psycopg.Connection, plan: SchemaPlan) -> None:
-    """Apply the plan atomically.
+    """Create the PostgreSQL schema and tables declared by ``plan``, atomically.
 
     Per-statement savepoints let re-runs tolerate ``DuplicateObject`` (e.g. an
     FK that already exists) without discarding earlier statements in the same
