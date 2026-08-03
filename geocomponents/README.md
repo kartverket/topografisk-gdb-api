@@ -242,26 +242,56 @@ lifecycle, and the `/healthz` (liveness) + `/datasets` (readiness) probes.
 
 ## How it's built
 
-Each dataset becomes one PostgreSQL schema; each collection becomes one table.
-Two ideas keep the pieces independent:
-
-- **The API never uses table names.** It reads and writes only through a small,
-  fixed set of database functions — `ogc.feature_items`, `ogc.feature_create`,
-  and so on — passing the dataset and collection names as arguments. So the
-  storage can change without touching the API. You can call them directly:
-
-  ```sql
-  -- the last argument toggles the (potentially expensive) total-count
-  select ogc.feature_items('cadastre', 'parcels', null, 10, 0, true);
-  ```
-
-- **The database shapes the data; the API adds the web layer.** Generated
-  database functions produce and consume GeoJSON and do the create/read/update/
-  delete; the API layer (pygeoapi) adds the OGC links and paging.
+Each dataset becomes one PostgreSQL schema; each collection becomes one
+table. The database shapes the data and handles create/read/update/delete;
+the API adds the OGC links and paging on top. They meet at the `ogc.feature_*`
+functions — see the *DB ↔ API contract* subsection below.
 
 The four parts are independently swappable: **`descriptions/`** (the format +
 loader), **`schema/`** (description → PostGIS tables + functions), **`api/`** (one
 dataset → one OGC API app), and **`gateway/`** (many apps → one service).
+
+### The DB ↔ API contract
+
+The database and the API share a **standard-shaped surface** for how they
+communicate. The database delivers functions in the format `ogc.feature_*`
+which the API calls. The functions follow naming and formatting expected by
+the OGC standards. The API uses these functions to read and write features
+which makes either database or API substitutable as long as they adhere to
+the same contract.
+
+Note that writing is currently only supported for simple features. In the
+future, processes and atomic transactions will be added for topological
+features following the same design: named functions in the database exposed
+for the API.
+
+**The six functions:**
+
+| Endpoint (per collection)            | Function              | Arguments                                                                | Returns                                                                 |
+| ------------------------------------ | --------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| `GET /collections/{c}/items`         | `ogc.feature_items`   | `dataset, collection, bbox float8[], lim int, off int, with_matched bool` | `jsonb` — a GeoJSON `FeatureCollection`                                 |
+| `GET /collections/{c}/items/{id}`    | `ogc.feature_item`    | `dataset, collection, fid uuid`                                          | `jsonb` — a `Feature`, or null if the id is absent                      |
+| `POST /collections/{c}/items`        | `ogc.feature_create`  | `dataset, collection, feature jsonb`                                     | `uuid` of the new feature                                               |
+| `PUT /collections/{c}/items/{id}`    | `ogc.feature_replace` | `dataset, collection, fid uuid, feature jsonb`                           | `boolean` — true when a matching feature was replaced                   |
+| `PATCH /collections/{c}/items/{id}`  | `ogc.feature_update`  | `dataset, collection, fid uuid, feature jsonb`                           | `boolean` — true when updated; only fields present in the input change  |
+| `DELETE /collections/{c}/items/{id}` | `ogc.feature_delete`  | `dataset, collection, fid uuid`                                          | `boolean` — true when a matching feature was deleted                    |
+
+Endpoints are relative to a dataset mount, e.g.
+`/datasets/cadastre/ogc_api/collections/parcels/items`.
+
+The `dataset` and `collection` arguments come from the description
+(`cadastre`, `parcels`) — the same names OGC puts in the URL. The dispatcher
+routes `ogc.feature_items('cadastre', 'parcels', …)` to a per-collection
+function `cadastre._parcels_items(…)` generated from the description. Change
+the storage layout, update the dispatcher; the API keeps calling the same six
+functions.
+
+You can call them directly:
+
+```sql
+select ogc.feature_items('cadastre', 'parcels', null, 10, 0, true);
+select ogc.feature_item('cadastre', 'parcels', '…uuid…');
+```
 
 ### Not built yet (designed for)
 - Importing descriptions from GML/UML models.

@@ -123,6 +123,7 @@ $disp$""",
 
 
 def apply_dispatch(conn: psycopg.Connection) -> None:
+    """Create the ``ogc.feature_*`` dispatch functions the API calls into."""
     for stmt in dispatch_statements():
         conn.execute(stmt)
     conn.commit()
@@ -303,6 +304,9 @@ def render_functions(plan: SchemaPlan) -> str:
 
 
 def apply_functions(conn: psycopg.Connection, plan: SchemaPlan) -> None:
+    """Create the per-collection functions the ``ogc.feature_*`` dispatch layer
+    routes into (one per collection x operation).
+    """
     for stmt in function_statements(plan):
         conn.execute(stmt)
     conn.commit()

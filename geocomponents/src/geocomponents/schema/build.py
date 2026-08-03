@@ -61,6 +61,9 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:
 
 
 def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
+    """Turn a resolved dataset into a ``SchemaPlan`` -- the tables, columns,
+    geometries, foreign keys, and function names it needs.
+    """
     schema = dataset.name
     collections: list[CollectionPlan] = []
     for coll in dataset.collections:

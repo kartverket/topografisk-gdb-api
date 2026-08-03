@@ -30,6 +30,9 @@ def build_gateway(
     provider: DatasetApiProvider,
     base_url: str,
 ) -> FastAPI:
+    """Compose one FastAPI service that mounts every dataset's OGC API app on
+    the endpoint ``/datasets/<dataset_name>/ogc_api``.
+    """
     base_url = base_url.rstrip("/")
     app = FastAPI(title="geocomponents gateway")
 
