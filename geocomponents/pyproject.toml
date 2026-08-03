@@ -5,7 +5,7 @@ description = "Description-driven, swappable components for storing, distributin
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.140.1",
+    "fastapi>=0.141.1",
     "uvicorn>=0.51.0",
     "pygeoapi>=0.23.5",
     "psycopg[binary]>=3.3.4",
