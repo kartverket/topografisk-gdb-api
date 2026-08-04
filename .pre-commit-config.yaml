@@ -1,13 +1,14 @@
 default_install_hook_types: [pre-commit]
 
-# Files under these paths are reference material or generated dumps; not code we
-# own or need to lint / format.
+# Files under these paths are reference material, generated dumps, or a separate
+# frontend project; not code we own / lint with this Python-oriented hook set.
 exclude: |
   (?x)^(
     UML-schemas/.*|
     ogc-standards/.*|
     nibio/.*\.sql|
-    geocomponents/tmp_descriptions/.*
+    geocomponents/tmp_descriptions/.*|
+    gcmapview/.*
   )$
 
 repos:
