@@ -1,7 +1,7 @@
 .PHONY: docker-up frontend-install frontend-build frontend-run
 
 docker-up:
-	docker compose -f geocomponents/docker-compose.yml up
+	cd geocomponents && docker compose up
 
 frontend-install:
 	npm --prefix gcmapview install --ignore-scripts
