@@ -297,4 +297,5 @@ select ogc.feature_item('cadastre', 'parcels', '…uuid…');
 - Importing descriptions from GML/UML models.
 - Emitting events when data changes.
 - Enforcing validation (types, code lists, SRID) in the database.
-- Migrations when a description changes an existing table.
+- Migrations when a description changes an existing table. Until then, operators
+  must migrate manually — see the note in [DEPLOY.md](DEPLOY.md#extra-development-note).
