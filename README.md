@@ -15,6 +15,16 @@ from those descriptions.
 
 ## Development
 
+The root `Makefile` provides shortcuts for starting PostGIS and working with the
+frontend:
+
+```bash
+make docker-up         # Start PostGIS with Docker Compose
+make frontend-install  # Install frontend dependencies without running scripts
+make frontend-build    # Build the frontend
+make frontend-run      # Run the frontend development server
+```
+
 The repo uses [pre-commit](https://pre-commit.com/) at the root to run various file-hygiene checks at commits.
 The same hooks run in CI (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
@@ -36,3 +46,7 @@ uv run --project geocomponents pre-commit run --all-files
 For running the geocomponents test suite (unit tests without Docker,
 contract + integration tests against a local PostGIS), see
 [`geocomponents/README.md`](geocomponents/README.md#testing).
+
+# Technical details
+
+We are currently using imresamu/postgis:17-3.6-alpine instead of the official postgis/postgis:17-3.6-alpine image for running locally as this resolves missing ARM64 compability in official image.
