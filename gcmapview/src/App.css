@@ -1,0 +1,139 @@
+.app-shell {
+  box-sizing: border-box;
+  display: grid;
+  gap: 18px;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100svh;
+  padding: 24px;
+  text-align: left;
+}
+
+.app-header {
+  align-items: end;
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.app-header h1 {
+  margin: 2px 0 0;
+}
+
+.app-header a {
+  background: #eef6ff;
+  border: 1px solid #cfe6ff;
+  border-radius: 999px;
+  color: #0757a8;
+  flex: 0 0 auto;
+  font-size: 14px;
+  padding: 8px 14px;
+  text-decoration: none;
+}
+
+.eyebrow {
+  color: #5f6f89;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.map-card {
+  border: 1px solid #d8dee9;
+  border-radius: 18px;
+  box-shadow: 0 20px 45px rgb(15 23 42 / 12%);
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+
+.map {
+  inset: 0;
+  height: 100%;
+  position: absolute;
+  width: 100%;
+}
+
+.building-debug-marker {
+  background: #006eff;
+  border: 1px solid #ffffff;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgb(0 110 255 / 45%);
+  height: 6px;
+  width: 6px;
+}
+
+.map-actions {
+  display: flex;
+  gap: 10px;
+  left: 16px;
+  position: absolute;
+  top: 16px;
+  z-index: 3;
+}
+
+.map-action-button {
+  background: #0f172a;
+  border: 1px solid #0f172a;
+  border-radius: 999px;
+  box-shadow: 0 10px 25px rgb(15 23 42 / 18%);
+  color: #fff;
+  cursor: pointer;
+  font: 700 14px/1 var(--sans);
+  padding: 11px 16px;
+}
+
+.map-action-button--danger {
+  background: #991b1b;
+  border-color: #991b1b;
+}
+
+.map-action-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.map-status {
+  align-items: center;
+  background: rgb(255 255 255 / 92%);
+  border: 1px solid #d8dee9;
+  border-radius: 999px;
+  bottom: 16px;
+  box-shadow: 0 10px 25px rgb(15 23 42 / 14%);
+  color: #26344d;
+  display: flex;
+  gap: 10px;
+  left: 16px;
+  padding: 8px 12px;
+  position: absolute;
+  z-index: 3;
+}
+
+.map-status--error {
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+@media (max-width: 720px) {
+  .app-shell {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .app-header {
+    align-items: start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .map-card {
+    min-height: 0;
+  }
+
+  .map-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+}
