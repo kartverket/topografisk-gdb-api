@@ -202,6 +202,13 @@ def test_openapi_post_items_documents_only_a_geojson_create(offline_client):
     assert example["geometry"]["coordinates"]  # non-empty
 
 
+def test_openapi_advertises_upsert_only_for_configured_collections(offline_client):
+    bane_oas = offline_client.get(f"{_api('bane')}/openapi?f=json").json()
+    assert "/collections/jernbaneplattformkant/items:upsert" in bane_oas["paths"]
+    cadastre_oas = offline_client.get(f"{_api('cadastre')}/openapi?f=json").json()
+    assert not any(path.endswith("items:upsert") for path in cadastre_oas["paths"])
+
+
 def test_collection_schema_endpoint_describes_the_feature(offline_client, datasets):
     for d in datasets:
         for coll in d.collections:
@@ -305,6 +312,46 @@ def test_golden_bbox_filter(client):
         assert all(f["id"] != fid for f in outside["features"])
     finally:
         client.delete(f"{api}/collections/parcels/items/{fid}")
+
+
+def test_bane_upsert_is_idempotent_by_business_key(client):
+    url = f"{_api('bane')}/collections/jernbaneplattformkant/items:upsert"
+    feature = {
+        "type": "Feature",
+        "geometry": {
+            "type": "LineString",
+            "coordinates": [[100000, 7000000], [100010, 7000010]],
+        },
+        "properties": {
+            "lokalid": "platform-1",
+            "identifikasjon_navnerom": "test",
+            "oppdateringsdato": "2026-08-05T12:00:00Z",
+            "datafangstdato": "2026-08-05T12:00:00Z",
+            "medium": "T",
+            "informasjon": "first",
+        },
+    }
+    first = client.post(
+        url,
+        content=orjson.dumps(feature),
+        headers={"content-type": "application/geo+json"},
+    )
+    assert first.status_code == HTTPStatus.OK
+
+    feature["properties"]["informasjon"] = "replaced"
+    second = client.post(
+        url,
+        content=orjson.dumps(feature),
+        headers={"content-type": "application/geo+json"},
+    )
+    assert second.status_code == HTTPStatus.OK
+    assert second.json()["id"] == first.json()["id"]
+
+    item = client.get(
+        f"{_api('bane')}/collections/jernbaneplattformkant/items/"
+        f"{first.json()['id']}?f=json"
+    ).json()
+    assert item["properties"]["informasjon"] == "replaced"
 
 
 def test_golden_conformance_includes_part4_even_though_dataset_has_topology(client):

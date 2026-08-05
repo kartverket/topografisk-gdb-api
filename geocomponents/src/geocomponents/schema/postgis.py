@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import psycopg
 
-from geocomponents.schema.plan import ColumnPlan, SchemaPlan, TablePlan
+from geocomponents.schema.plan import CollectionPlan, ColumnPlan, SchemaPlan, TablePlan
 
 # PostgreSQL's NAMEDATALEN default. Identifiers longer than this are silently
 # truncated by the server, so two distinct long names can collide.
@@ -70,6 +70,16 @@ def _fk_ddl(table: TablePlan) -> list[str]:
     return stmts
 
 
+def _upsert_index_ddl(plan: CollectionPlan) -> str | None:
+    if not plan.upsert_key:
+        return None
+    columns = ", ".join(f'"{name}"' for name in plan.upsert_key)
+    return (
+        f'create unique index if not exists "{plan.collection_name}_upsert_key_idx" '
+        f"on {plan.table.qualified} ({columns}) nulls not distinct"
+    )
+
+
 def table_statements(plan: SchemaPlan) -> list[str]:
     """One complete SQL command per list element (idempotent where possible).
 
@@ -87,6 +97,9 @@ def table_statements(plan: SchemaPlan) -> list[str]:
     ]
     for coll in plan.collections:
         stmts.append(_table_ddl(coll.table))
+    for coll in plan.collections:
+        if upsert_index := _upsert_index_ddl(coll):
+            stmts.append(upsert_index)
     for coll in plan.collections:
         stmts.extend(_fk_ddl(coll.table))
     return stmts

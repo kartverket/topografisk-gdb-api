@@ -42,8 +42,29 @@ services:
         read_only: true
     ports:
       - "8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"
+      interval: 3s
+      timeout: 3s
+      retries: 20
     depends_on:
       db:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+
+  gcimport:
+    build: ../gcimport
+    environment:
+      GCIMPORT_API_URL: http://api:8000/datasets/bane/ogc_api
+    ports:
+      - "8001:8000"
+    volumes:
+      - ../gcimport/src:/app/src:ro
+    depends_on:
+      api:
+        condition: service_healthy

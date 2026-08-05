@@ -119,6 +119,16 @@ begin
   return result;
 end;
 $disp$""",
+        f"""\
+create or replace function {s}.feature_upsert(dataset text, collection text, feature jsonb)
+returns uuid language plpgsql as $disp$
+declare result uuid;
+begin
+  execute format('select %I.%I($1)', dataset, '_' || collection || '_upsert')
+    into result using feature;
+  return result;
+end;
+$disp$""",
     ]
 
 
@@ -226,6 +236,31 @@ end;
 $func$"""
 
 
+def _fn_upsert(plan: CollectionPlan) -> str:
+    t = plan.table
+    writable = _writable_columns(t)
+    cols = ", ".join([f'"{t.geometry.name}"'] + [f'"{c.name}"' for c in writable])
+    vals = ", ".join([_geom_from_feature(t)] + [_prop_read(c) for c in writable])
+    conflict_columns = ", ".join(f'"{name}"' for name in plan.upsert_key)
+    sets = [f'"{t.geometry.name}" = excluded."{t.geometry.name}"']
+    sets += [f'"{c.name}" = excluded."{c.name}"' for c in writable]
+    sets.append('"updated_at" = now()')
+    set_clause = ",\n      ".join(sets)
+    return f"""\
+create or replace function {plan.functions["upsert"]}(feature jsonb)
+returns uuid language plpgsql as $func$
+declare result_id uuid;
+begin
+  insert into {t.qualified} ({cols})
+  values ({vals})
+  on conflict ({conflict_columns}) do update set
+      {set_clause}
+  returning "{t.id_column}" into result_id;
+  return result_id;
+end;
+$func$"""
+
+
 def _fn_replace(plan: CollectionPlan) -> str:
     t = plan.table
     writable = _writable_columns(t)
@@ -291,6 +326,7 @@ _BUILDER_BY_OP = {
     "replace": _fn_replace,
     "update": _fn_update,
     "delete": _fn_delete,
+    "upsert": _fn_upsert,
 }
 
 

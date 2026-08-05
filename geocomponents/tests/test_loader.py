@@ -80,6 +80,24 @@ def test_feature_model_and_processes_resolve():
     assert by_name["blocks"].supports_crud is False
 
 
+def test_bane_upsert_key_resolves():
+    bane = next(d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bane")
+    for coll in bane.collections:
+        assert coll.upsert_key == ("lokalid", "identifikasjon_navnerom")
+        assert coll.supports_upsert
+
+
+def test_upsert_key_must_reference_writable_fields():
+    dataset = DatasetDef.model_validate(
+        {
+            "name": "x",
+            "collections": [{"name": "c", "upsert_key": ["missing"]}],
+        }
+    )
+    with pytest.raises(DescriptionError, match="unknown field"):
+        resolve_dataset(dataset, Commons())
+
+
 def test_unknown_process_raises_clear_error():
     dataset = DatasetDef.model_validate({"name": "x", "processes": ["nope"]})
     with pytest.raises(DescriptionError, match="unknown process"):

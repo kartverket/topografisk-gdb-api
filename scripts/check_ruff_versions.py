@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Fail if the ruff version pinned in .pre-commit-config.yaml and the one
-pinned in geocomponents/pyproject.toml (dev group) disagree.
+"""Fail if the ruff versions pinned in pre-commit and Python projects disagree.
 
 Both configs are the source of truth for different consumers (pre-commit /
 CI vs. local `uv run ruff` / IDE), and drift between them silently produces
@@ -21,16 +20,16 @@ pc_match = re.search(r"astral-sh/ruff-pre-commit\s*\n\s*rev:\s*v?([\d.]+)", pc)
 if not pc_match:
     sys.exit("could not find astral-sh/ruff-pre-commit rev in .pre-commit-config.yaml")
 
-pp = (ROOT / "geocomponents/pyproject.toml").read_text()
-pp_match = re.search(r'"ruff==([\d.]+)"', pp)
-if not pp_match:
-    sys.exit(
-        "ruff must be exact-pinned in geocomponents/pyproject.toml dev deps "
-        "as `ruff==X.Y.Z` so this check can compare it against .pre-commit-config.yaml"
-    )
-
-if pc_match.group(1) != pp_match.group(1):
-    sys.exit(
-        f"ruff version drift: .pre-commit-config.yaml={pc_match.group(1)}, "
-        f"geocomponents/pyproject.toml={pp_match.group(1)}"
-    )
+for project in ("geocomponents", "gcimport"):
+    pp = (ROOT / project / "pyproject.toml").read_text()
+    pp_match = re.search(r'"ruff==([\d.]+)"', pp)
+    if not pp_match:
+        sys.exit(
+            f"ruff must be exact-pinned in {project}/pyproject.toml dev deps "
+            "as `ruff==X.Y.Z`"
+        )
+    if pc_match.group(1) != pp_match.group(1):
+        sys.exit(
+            f"ruff version drift: .pre-commit-config.yaml={pc_match.group(1)}, "
+            f"{project}/pyproject.toml={pp_match.group(1)}"
+        )

@@ -142,6 +142,22 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
             seen.add(fld.name)
             resolved_fields.append(_resolve_field(fld, types, codelists, where=where))
 
+        unknown_upsert_fields = set(coll.upsert_key) - seen
+        if unknown_upsert_fields:
+            raise DescriptionError(
+                f"{where}: upsert_key references unknown field(s) "
+                f"{sorted(unknown_upsert_fields)}"
+            )
+        auto_increment_fields = {
+            fld.name for fld in merged_fields if fld.auto_increment
+        }
+        invalid_upsert_fields = set(coll.upsert_key) & auto_increment_fields
+        if invalid_upsert_fields:
+            raise DescriptionError(
+                f"{where}: upsert_key cannot use auto-increment field(s) "
+                f"{sorted(invalid_upsert_fields)}"
+            )
+
         resolved_rels: list[ResolvedRelationship] = []
         for rel in coll.relationships:
             if rel.target not in collection_names:
@@ -161,6 +177,7 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
                 srid=coll.geometry.srid,
                 fields=tuple(resolved_fields),
                 relationships=tuple(resolved_rels),
+                upsert_key=tuple(coll.upsert_key),
             )
         )
 

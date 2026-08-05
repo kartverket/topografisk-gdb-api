@@ -138,6 +138,15 @@ class CollectionDef(BaseModel):
     geometry: GeometryDef = Field(default_factory=GeometryDef)
     fields: list[FieldDef] = Field(default_factory=list)
     relationships: list[RelationshipDef] = Field(default_factory=list)
+    upsert_key: list[SafeIdentifier] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _unique_upsert_key(self):
+        if len(self.upsert_key) != len(set(self.upsert_key)):
+            raise ValueError("upsert_key fields must be unique")
+        if self.upsert_key and self.feature_model != "simple":
+            raise ValueError("upsert_key is only supported for simple collections")
+        return self
 
 
 class Commons(BaseModel):
@@ -189,6 +198,7 @@ class ResolvedCollection:
     srid: int
     fields: tuple[ResolvedField, ...]
     relationships: tuple[ResolvedRelationship, ...]
+    upsert_key: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def id_field(self) -> str:
@@ -202,6 +212,10 @@ class ResolvedCollection:
     def supports_crud(self) -> bool:
         """Simple features get per-feature Part 4 CRUD; topology does not (yet)."""
         return self.feature_model == "simple"
+
+    @property
+    def supports_upsert(self) -> bool:
+        return self.supports_crud and bool(self.upsert_key)
 
 
 @dataclass(frozen=True)

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 READ_OPS = ("items", "item")
 WRITE_OPS = ("create", "replace", "update", "delete")
 OPERATIONS = READ_OPS + WRITE_OPS
+UPSERT_OP = "upsert"
 
 # The API only ever calls this fixed dispatch layer, with OGC identifiers
 # (dataset, collection) as *arguments* — never a physical table or per-collection
@@ -99,6 +100,7 @@ class CollectionPlan:
     collection_name: str
     table: TablePlan
     functions: dict[str, str]  # operation -> internal function name (private)
+    upsert_key: tuple[str, ...] = ()
 
     @property
     def id_field(self) -> str:

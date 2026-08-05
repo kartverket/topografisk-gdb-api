@@ -15,6 +15,7 @@ from __future__ import annotations
 from geocomponents.descriptions.models import ResolvedCollection, ResolvedDataset
 from geocomponents.schema.plan import (
     READ_OPS,
+    UPSERT_OP,
     WRITE_OPS,
     CollectionPlan,
     ColumnPlan,
@@ -77,12 +78,15 @@ def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
         table = _build_table(schema, coll)
         # Reads for every collection; writes only for simple-feature collections.
         ops = READ_OPS + WRITE_OPS if coll.supports_crud else READ_OPS
+        if coll.supports_upsert:
+            ops += (UPSERT_OP,)
         functions = {op: internal_function(schema, coll.name, op) for op in ops}
         collections.append(
             CollectionPlan(
                 collection_name=coll.name,
                 table=table,
                 functions=functions,
+                upsert_key=coll.upsert_key,
             )
         )
     return SchemaPlan(schema_name=schema, collections=tuple(collections))

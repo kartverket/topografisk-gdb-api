@@ -48,5 +48,5 @@ repos:
         name: ruff versions in sync
         language: system
         entry: python3 scripts/check_ruff_versions.py
-        files: '^(\.pre-commit-config\.yaml|geocomponents/pyproject\.toml)$'
+        files: '^(\.pre-commit-config\.yaml|(geocomponents|gcimport)/pyproject\.toml)$'
         pass_filenames: false

@@ -108,6 +108,7 @@ def _collection_resource(dataset: str, coll: ResolvedCollection, dsn: str) -> di
                 # Geometry type/srid so the provider can describe its own schema.
                 "geometry_type": coll.geometry_type,
                 "srid": coll.srid,
+                "upsert_key": list(coll.upsert_key),
             }
         ],
     }
@@ -252,7 +253,7 @@ def _unsupported_media_type() -> Response:
     )
 
 
-def _tailor_oas(oas: dict) -> dict:
+def _tailor_oas(oas: dict, dataset: ResolvedDataset) -> dict:
     """Trim the generated OpenAPI to what this service actually serves.
 
     Two mismatches to fix:
@@ -280,6 +281,46 @@ def _tailor_oas(oas: dict) -> dict:
         post.get("requestBody", {}).get("content", {}).pop("application/json", None)
         # 200 is the query result; a create yields 201.
         post.get("responses", {}).pop("200", None)
+    for coll in dataset.collections:
+        if not coll.supports_upsert:
+            continue
+        feature_path = f"/collections/{coll.name}/items"
+        feature_schema = (
+            paths.get(feature_path, {})
+            .get("post", {})
+            .get("requestBody", {})
+            .get("content", {})
+            .get("application/geo+json", {})
+            .get("schema", {"type": "object"})
+        )
+        paths[f"{feature_path}:upsert"] = {
+            "post": {
+                "operationId": f"upsert_{coll.name}",
+                "summary": f"Upsert {coll.title} by business key",
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/geo+json": {"schema": feature_schema},
+                    },
+                },
+                "responses": {
+                    "200": {
+                        "description": "Feature inserted or replaced",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["id"],
+                                    "properties": {
+                                        "id": {"type": "string", "format": "uuid"}
+                                    },
+                                }
+                            }
+                        },
+                    }
+                },
+            }
+        }
     return oas
 
 
@@ -341,6 +382,10 @@ def _build_starlette_app(api_: API) -> Starlette:
     def _editable(cid) -> bool:
         res = _resource(cid)
         return bool(res and res["providers"][0].get("editable"))
+
+    def _upsertable(cid) -> bool:
+        res = _resource(cid)
+        return bool(res and res["providers"][0].get("upsert_key"))
 
     async def landing(request: Request):
         return await _execute(api_, core_api.landing_page, request)
@@ -414,6 +459,17 @@ def _build_starlette_app(api_: API) -> Starlette:
     async def collection_items(request: Request):
         cid = request.path_params["collection_id"]
         return await items_handlers[request.method](request, cid)
+
+    async def upsert_item(request: Request):
+        cid = request.path_params["collection_id"]
+        if not _upsertable(cid):
+            return _not_editable()
+        ct = request.headers.get("content-type", "")
+        if not ct.lower().startswith("application/geo+json"):
+            return _unsupported_media_type()
+        provider = load_plugin("provider", _resource(cid)["providers"][0])
+        identifier = provider.upsert(await request.body())
+        return JSONResponse({"id": identifier})
 
     # -- /items/{item_id} : one handler per verb, dispatched by a map -------
     async def _get_item(request: Request, cid, iid):
@@ -508,6 +564,11 @@ def _build_starlette_app(api_: API) -> Starlette:
             collection_item,
             methods=["GET", "PUT", "PATCH", "DELETE", "OPTIONS"],
         ),
+        Route(
+            "/collections/{collection_id}/items:upsert",
+            upsert_item,
+            methods=["POST"],
+        ),
         Route("/processes", processes),
         Route("/processes/{process_id}", processes),
         Route("/processes/{process_id}/execution", execute_process, methods=["POST"]),
@@ -530,6 +591,6 @@ class PygeoapiProvider:
 
     def build_app(self, dataset: ResolvedDataset, public_url: str) -> ASGIApp:
         config = build_config(dataset, public_url.rstrip("/"), self._dsn)
-        openapi = _tailor_oas(get_oas(config))
+        openapi = _tailor_oas(get_oas(config), dataset)
         api_ = API(config, openapi)
         return _build_starlette_app(api_)

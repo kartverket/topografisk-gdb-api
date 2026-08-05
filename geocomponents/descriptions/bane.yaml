@@ -9,6 +9,9 @@ collections:
     geometry:
       type: LineString
       srid: 5973
+    upsert_key:
+      - lokalid
+      - identifikasjon_navnerom
     fields:
       - name: objid
         type: integer
@@ -59,6 +62,9 @@ collections:
     geometry:
       type: LineString
       srid: 5973
+    upsert_key:
+      - lokalid
+      - identifikasjon_navnerom
     fields:
       - name: objid
         type: integer
