@@ -133,7 +133,11 @@ def apply_dispatch(conn: psycopg.Connection) -> None:
 # Internal per-collection functions (generated from the description)
 # ==========================================================================
 def _writable_columns(table: TablePlan) -> list[ColumnPlan]:
-    return [c for c in table.property_columns if c.name not in _AUDIT]
+    return [
+        c
+        for c in table.property_columns
+        if c.name not in _AUDIT and not c.auto_increment
+    ]
 
 
 def _properties_object(table: TablePlan, alias: str) -> str:

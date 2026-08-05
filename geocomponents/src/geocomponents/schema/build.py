@@ -40,7 +40,14 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:
     columns: list[ColumnPlan] = _standard_columns()
 
     for fld in coll.fields:
-        columns.append(ColumnPlan(fld.name, fld.sql_type, nullable=not fld.required))
+        columns.append(
+            ColumnPlan(
+                fld.name,
+                fld.sql_type,
+                nullable=not fld.required,
+                auto_increment=fld.auto_increment,
+            )
+        )
 
     foreign_keys: list[ForeignKeyPlan] = []
     for rel in coll.relationships:

@@ -52,6 +52,7 @@ class ColumnPlan:
     nullable: bool = True
     primary_key: bool = False
     default: str | None = None
+    auto_increment: bool = False
 
 
 @dataclass(frozen=True)

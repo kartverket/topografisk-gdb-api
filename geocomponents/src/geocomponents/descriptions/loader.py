@@ -74,14 +74,25 @@ def _resolve_field(
             )
         # Code-list columns are plain text for now; DB-side enforcement is a
         # deferred 'validation in the DB' concern.
-        return ResolvedField(fld.name, "text", fld.required, codelist=fld.codelist)
+        return ResolvedField(
+            fld.name,
+            "text",
+            fld.required,
+            codelist=fld.codelist,
+            auto_increment=fld.auto_increment,
+        )
 
     if fld.type_ref is not None:
         if fld.type_ref not in types:
             raise DescriptionError(
                 f"{where}: field '{fld.name}' references unknown type '{fld.type_ref}'"
             )
-        return ResolvedField(fld.name, types[fld.type_ref].sql_type, fld.required)
+        return ResolvedField(
+            fld.name,
+            types[fld.type_ref].sql_type,
+            fld.required,
+            auto_increment=fld.auto_increment,
+        )
 
     if fld.type is not None:
         if fld.type not in BUILTIN_SQL_TYPES:
@@ -89,7 +100,12 @@ def _resolve_field(
                 f"{where}: field '{fld.name}' has unknown builtin type "
                 f"'{fld.type}' (known: {', '.join(sorted(BUILTIN_SQL_TYPES))})"
             )
-        return ResolvedField(fld.name, BUILTIN_SQL_TYPES[fld.type], fld.required)
+        return ResolvedField(
+            fld.name,
+            BUILTIN_SQL_TYPES[fld.type],
+            fld.required,
+            auto_increment=fld.auto_increment,
+        )
 
     # FieldDef enforces "exactly one of type / type_ref / codelist" at parse time,
     # so this branch is unreachable.

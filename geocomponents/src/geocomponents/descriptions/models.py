@@ -98,6 +98,7 @@ class FieldDef(BaseModel):
     type_ref: str | None = None
     codelist: str | None = None
     required: bool = False
+    auto_increment: bool = False
     description: str | None = None
 
     @model_validator(mode="after")
@@ -108,6 +109,8 @@ class FieldDef(BaseModel):
                 "field must set exactly one of type / type_ref / codelist "
                 f"(got {n_set})"
             )
+        if self.auto_increment and self.type != "integer":
+            raise ValueError("auto_increment is only supported for integer fields")
         return self
 
 
@@ -167,6 +170,7 @@ class ResolvedField:
     sql_type: str
     required: bool = False
     codelist: str | None = None  # kept for future DB-side enforcement
+    auto_increment: bool = False
 
 
 @dataclass(frozen=True)

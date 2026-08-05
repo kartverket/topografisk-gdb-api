@@ -57,6 +57,20 @@ def test_topology_collection_has_reads_only():
     assert set(blocks.functions) == set(READ_OPS)
 
 
+def test_create_function_omits_auto_increment_fields():
+    plan = _plan("fkb_bane")
+    platform = next(
+        c for c in plan.collections if c.collection_name == "jernbaneplattformkant"
+    )
+    create_sql = next(
+        stmt
+        for stmt in function_statements(plan)
+        if f"function {platform.functions['create']}(" in stmt
+    )
+    insert_columns = create_sql.split("values", maxsplit=1)[0]
+    assert '"objid"' not in insert_columns
+
+
 # --------------------------------------------------------------------------
 # SQL-literal escaping (defense-in-depth against a name containing a quote)
 # --------------------------------------------------------------------------
