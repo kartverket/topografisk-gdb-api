@@ -3,6 +3,9 @@
 docker-up:
 	cd geocomponents && docker compose up
 
+docker-down:
+	cd geocomponents && docker compose down
+
 frontend-install:
 	npm --prefix gcmapview install --ignore-scripts
 
@@ -11,6 +14,12 @@ frontend-build:
 
 frontend-run:
 	npm --prefix gcmapview run dev
+
+frontend-lint:
+	npm --prefix gcmapview run lint
+
+frontend-format:
+	npm --prefix gcmapview run format
 
 gcimport-install:
 	uv sync --project gcimport
