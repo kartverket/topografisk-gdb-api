@@ -1,6 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { AlertCircle, Eraser, Plus } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
 import {
   buildingItemUrl,
   buildingsCreateUrl,
@@ -12,10 +25,19 @@ import {
   parcelsItemsInBboxUrl,
   parcelsItemsUrl,
   platformEdgesItemsInBboxUrl,
-  trackCentresItemsInBboxUrl
+  trackCentresItemsInBboxUrl,
 } from './geocomponentsApi';
-import { addBaneSourcesAndLayers, normalizeBaneFeatureCollection, wgs84BboxToBaneBbox } from './baneLayers';
-import type { Coordinates, Feature, FeatureCollection, Position } from './geojson';
+import {
+  addBaneSourcesAndLayers,
+  normalizeBaneFeatureCollection,
+  wgs84BboxToBaneBbox,
+} from './baneLayers';
+import type {
+  Coordinates,
+  Feature,
+  FeatureCollection,
+  Position,
+} from './geojson';
 
 const emptyFeatureCollection: FeatureCollection = {
   type: 'FeatureCollection',
@@ -1030,59 +1052,84 @@ export function MapView() {
 
   return (
     <section
-      className="relative min-h-0 w-full overflow-hidden rounded-[18px] border border-panel-border shadow-[0_20px_45px_rgb(15_23_42/0.12)]"
-      aria-label="Cadastre and Bane map">
-      <div
-        ref={mapContainerRef}
-        className="absolute inset-0 h-full w-full"
-      />
-      <div className="absolute top-4 left-4 z-[3] flex gap-2.5 max-[720px]:flex-col max-[720px]:items-start">
-        <button
-          type="button"
-          className="cursor-pointer rounded-full border border-ink-strong bg-ink-strong px-4 py-[11px] font-sans text-sm font-bold text-white shadow-[0_10px_25px_rgb(15_23_42/0.18)] disabled:cursor-wait disabled:opacity-65"
+      className="relative min-h-0 w-full overflow-hidden rounded-[min(var(--radius-4xl),24px)] border border-border bg-card shadow-sm"
+      aria-label="Cadastre and Bane map"
+    >
+      <div ref={mapContainerRef} className="absolute inset-0 h-full w-full" />
+      <div className="absolute top-4 left-4 z-[3] flex flex-col items-start gap-2 sm:flex-row">
+        <Button
+          size="sm"
           disabled={!isMapReady || isCreating || isClearing}
-          onClick={createRandomBuilding}>
+          onClick={createRandomBuilding}
+        >
+          <Plus data-icon="inline-start" />
           {isCreating ? 'Creating parcel...' : 'Create random parcel'}
-        </button>
-        <button
-          type="button"
-          className="cursor-pointer rounded-full border border-red-800 bg-red-800 px-4 py-[11px] font-sans text-sm font-bold text-white shadow-[0_10px_25px_rgb(15_23_42/0.18)] disabled:cursor-wait disabled:opacity-65"
+        </Button>
+        <Button
+          size="sm"
+          variant="destructive"
           disabled={!isMapReady || isCreating || isClearing}
-          onClick={clearData}>
+          onClick={clearData}
+        >
+          <Eraser data-icon="inline-start" />
           {isClearing ? 'Clearing data...' : 'Clear data'}
-        </button>
+        </Button>
       </div>
-      <aside
-        className="absolute right-4 bottom-[72px] z-[3] rounded-[14px] border border-panel-border bg-white/94 px-3.5 py-3 shadow-[0_10px_25px_rgb(15_23_42/0.12)] max-[720px]:top-[72px] max-[720px]:right-auto max-[720px]:bottom-auto max-[720px]:left-4"
-        aria-label="Map layers">
-        <p className="mb-2 text-[13px] font-bold text-ink-strong">Layers</p>
-        <ul className="m-0 list-none p-0">
-          <li className="mb-1.5 flex items-center gap-2 text-[13px] text-slate-700">
-            <span className="inline-block h-2.5 w-[18px] shrink-0 rounded-full bg-[#ffc040] opacity-80" />
-            Cadastre parcels
-          </li>
-          <li className="mb-1.5 flex items-center gap-2 text-[13px] text-slate-700">
-            <span className="inline-block h-2.5 w-[18px] shrink-0 rounded-full bg-[#2563eb] opacity-80" />
-            Cadastre buildings
-          </li>
-          <li className="mb-1.5 flex items-center gap-2 text-[13px] text-slate-700">
-            <span className="inline-block h-1 w-[18px] shrink-0 rounded-full bg-[#e11d48]" />
-            Bane platform edges
-          </li>
-          <li className="mb-1.5 flex items-center gap-2 text-[13px] text-slate-700">
-            <span className="inline-block h-1 w-[18px] shrink-0 rounded-full bg-[#7c3aed]" />
-            Bane track centres
-          </li>
-        </ul>
-        <p className="mt-1 text-xs text-slate-500">Bane layers are read-only</p>
-      </aside>
-      <div
-        className={[
-          'absolute bottom-4 left-4 z-[3] flex max-w-[min(720px,calc(100%-32px))] items-center gap-2.5 rounded-full border bg-white/92 px-3 py-2 shadow-[0_10px_25px_rgb(15_23_42/0.14)]',
-          error ? 'border-red-200 text-red-800' : 'border-panel-border text-ink'
-        ].join(' ')}>
-        <span>{status}</span>
-        {error ? <code>{error}</code> : null}
+      <Card
+        size="sm"
+        className="absolute right-4 bottom-[88px] z-[3] w-[220px] bg-card/95 shadow-md max-sm:top-20 max-sm:right-auto max-sm:bottom-auto max-sm:left-4"
+        aria-label="Map layers"
+      >
+        <CardHeader className="pb-0">
+          <CardTitle>Layers</CardTitle>
+          <CardDescription>Bane layers are read-only</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <Separator />
+          <ul className="m-0 space-y-2 p-0 text-sm text-muted-foreground">
+            <li className="flex items-center gap-2">
+              <span className="inline-block h-2.5 w-4 shrink-0 rounded-full bg-[#ffc040] opacity-80" />
+              Cadastre parcels
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="inline-block h-2.5 w-4 shrink-0 rounded-full bg-[#2563eb] opacity-80" />
+              Cadastre buildings
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="inline-block h-1 w-4 shrink-0 rounded-full bg-[#e11d48]" />
+              Bane platform edges
+              <Badge variant="outline" className="ml-auto">
+                RO
+              </Badge>
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="inline-block h-1 w-4 shrink-0 rounded-full bg-[#7c3aed]" />
+              Bane track centres
+              <Badge variant="outline" className="ml-auto">
+                RO
+              </Badge>
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
+      <div className="absolute bottom-4 left-4 z-[3] max-w-[min(720px,calc(100%-2rem))]">
+        {error ? (
+          <Alert variant="destructive" className="bg-card/95 shadow-md">
+            <AlertCircle />
+            <AlertTitle>{status}</AlertTitle>
+            <AlertDescription>
+              <code className="text-xs">{error}</code>
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <div
+            className={cn(
+              'rounded-2xl border border-border bg-card/95 px-3 py-2 text-sm text-foreground shadow-md',
+            )}
+          >
+            {status}
+          </div>
+        )}
       </div>
     </section>
   );
