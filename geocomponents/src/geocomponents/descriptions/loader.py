@@ -175,6 +175,7 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
                 feature_model=coll.feature_model,
                 geometry_type=coll.geometry.type,
                 srid=coll.geometry.srid,
+                has_z=coll.geometry.has_z,
                 fields=tuple(resolved_fields),
                 relationships=tuple(resolved_rels),
                 upsert_key=tuple(coll.upsert_key),

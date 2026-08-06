@@ -61,6 +61,14 @@ class GeometryColumnPlan:
     name: str
     geometry_type: str
     srid: int
+    has_z: bool = False
+
+    @property
+    def postgis_type(self) -> str:
+        """PostGIS typmod geometry type (``LineStringZ`` when height is enabled)."""
+        if self.has_z and not self.geometry_type.endswith(("Z", "M")):
+            return f"{self.geometry_type}Z"
+        return self.geometry_type
 
 
 @dataclass(frozen=True)

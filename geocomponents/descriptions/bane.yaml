@@ -9,6 +9,7 @@ collections:
     geometry:
       type: LineString
       srid: 5973
+      has_z: true
     upsert_key:
       - lokalid
       - identifikasjon_navnerom
@@ -62,6 +63,7 @@ collections:
     geometry:
       type: LineString
       srid: 5973
+      has_z: true
     upsert_key:
       - lokalid
       - identifikasjon_navnerom

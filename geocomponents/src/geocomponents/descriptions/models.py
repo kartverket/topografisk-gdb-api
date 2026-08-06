@@ -117,6 +117,7 @@ class FieldDef(BaseModel):
 class GeometryDef(BaseModel):
     type: GeometryType = "Point"
     srid: int = 4326
+    has_z: bool = False
 
 
 class RelationshipDef(BaseModel):
@@ -199,6 +200,7 @@ class ResolvedCollection:
     fields: tuple[ResolvedField, ...]
     relationships: tuple[ResolvedRelationship, ...]
     upsert_key: tuple[str, ...] = field(default_factory=tuple)
+    has_z: bool = False
 
     @property
     def id_field(self) -> str:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+DEFAULT_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 
 @dataclass(frozen=True)

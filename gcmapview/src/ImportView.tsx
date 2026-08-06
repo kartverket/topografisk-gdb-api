@@ -55,12 +55,13 @@ export function ImportView() {
     <Card className="mx-auto w-full max-w-xl">
       <CardHeader>
         <p className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
-          JSON-FG upload
+          Feature import
         </p>
         <CardTitle className="text-2xl">Import Bane features</CardTitle>
         <CardDescription className="max-w-[52ch]">
-          Upload one JSON-FG FeatureCollection. Features are validated,
-          transformed to EPSG:5973, and upserted by their Bane identity.
+          Upload JSON-FG, or classic GeoJSON (.geojson with CRS and objtype).
+          Features are validated, transformed to EPSG:5973, and upserted by
+          their Bane identity.
         </CardDescription>
       </CardHeader>
 
@@ -81,18 +82,18 @@ export function ImportView() {
           <input
             ref={inputRef}
             type="file"
-            accept=".json,.jsonfg,application/json,application/geo+json"
+            accept=".json,.jsonfg,.geojson,application/json,application/geo+json"
             onChange={(event) => chooseFile(event.target.files?.[0])}
             hidden
           />
           <span className="inline-flex items-center gap-2 text-base font-medium text-foreground">
             <FileJson className="size-4" />
-            {file ? file.name : 'Choose or drop a JSON-FG file'}
+            {file ? file.name : 'Choose or drop a JSON-FG or .geojson file'}
           </span>
           <span className="text-sm text-muted-foreground">
             {file
               ? `${(file.size / 1024).toFixed(1)} KB`
-              : 'A FeatureCollection containing Bane featureType values'}
+              : '.jsonfg/.json for JSON-FG, .geojson for classic CRS exports'}
           </span>
         </button>
 

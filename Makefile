@@ -6,6 +6,9 @@ docker-up:
 docker-down:
 	cd geocomponents && docker compose down
 
+docker-delete-db-volume:
+	docker volume rm "geocomponents_pgdata"
+
 frontend-install:
 	npm --prefix gcmapview install --ignore-scripts
 

@@ -1,8 +1,8 @@
 # gcimport
 
-Profile-driven FastAPI service that validates uploaded JSON-FG
-FeatureCollections, transforms their geometries to a dataset CRS, and upserts
-features through a geocomponents OGC API.
+Profile-driven FastAPI service that validates uploaded FeatureCollections,
+transforms their geometries to a dataset CRS, and upserts features through a
+geocomponents OGC API.
 
 The initial built-in profile is Bane. Its feature types, required properties,
 identity fields, target CRS, and default API URL are isolated in
@@ -25,21 +25,26 @@ uv sync
 uv run uvicorn gcimport.app:app --port 8001
 ```
 
-The service has one business endpoint:
+## Uploads
 
 ```text
 POST /imports
 Content-Type: multipart/form-data
-file: a UTF-8 JSON-FG FeatureCollection
+file: a UTF-8 FeatureCollection
 ```
 
-Example:
+- `.json` / `.jsonfg`: JSON-FG (`featureType`, optional `place`, `coordRefSys`)
+- `.geojson`: classic GeoJSON with a `crs` member and `properties.objtype`;
+  converted automatically before validation
+
+Examples:
 
 ```sh
-curl -F 'file=@bane.json;type=application/json' http://localhost:8001/imports
+curl -F 'file=@bane.jsonfg;type=application/json' http://localhost:8001/imports
+curl -F 'file=@bane.geojson;type=application/geo+json' http://localhost:8001/imports
 ```
 
-For the Bane profile, `featureType` is matched case-insensitively to
+For the Bane profile, `featureType` / `objtype` is matched case-insensitively to
 `jernbaneplattformkant` or `spormidt`. JSON-FG `place` is preferred and uses
 `coordRefSys` inherited from the place, feature, or FeatureCollection. If
 `place` is absent, GeoJSON `geometry` is interpreted as EPSG:4326.
@@ -50,6 +55,16 @@ request. Features are then posted individually as `application/geo+json` to
 an upsert keyed by the feature identity, retrying an individual call is
 idempotent.
 The response reports the stable UUID returned by Bane for every feature.
+
+## Offline GeoJSON → JSON-FG conversion
+
+To convert without uploading:
+
+```sh
+uv run geojson-to-jsonfg bane.geojson -o bane.jsonfg
+```
+
+Pass `--crs EPSG:5973` if the source file has no `crs` member.
 
 ## Development
 

@@ -69,7 +69,9 @@ collections:
   neighbouring features, so they are **read-only** for now; edit requests return
   `405 Method Not Allowed`.
 - **`geometry`** — the shape type and coordinate system. The type is enforced
-  exactly: a `MultiPolygon` column rejects a plain `Polygon`.
+  exactly: a `MultiPolygon` column rejects a plain `Polygon`. Set `has_z: true`
+  when coordinates include height; PostGIS then uses the `*Z` typmod
+  (e.g. `LineStringZ`).
 
 ### Fields (attributes)
 
@@ -154,6 +156,8 @@ code_lists:               # controlled vocabularies, used via `codelist`
 `Point`, `MultiPoint`, `LineString`, `MultiLineString`, `Polygon`,
 `MultiPolygon`, `GeometryCollection`. `srid` defaults to `4326` (WGS84
 longitude/latitude). If you omit `geometry`, it defaults to a `Point`.
+Optional `has_z: true` stores XYZ coordinates (PostGIS `PointZ`,
+`LineStringZ`, …).
 
 ### Processes
 

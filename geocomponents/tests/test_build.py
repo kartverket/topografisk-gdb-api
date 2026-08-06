@@ -93,6 +93,16 @@ def test_bane_business_key_gets_unique_nulls_not_distinct_index():
     ) in ddl
 
 
+def test_bane_geometry_columns_include_height():
+    plan = _bane_plan()
+    for collection_name in ("jernbaneplattformkant", "spormidt"):
+        coll = next(c for c in plan.collections if c.collection_name == collection_name)
+        assert coll.table.geometry.has_z
+        assert coll.table.geometry.postgis_type == "LineStringZ"
+    ddl = "\n".join(postgis.table_statements(plan))
+    assert '"geometry" geometry(LineStringZ, 5973)' in ddl
+
+
 # --------------------------------------------------------------------------
 # FK constraint names must fit PG's 63-char NAMEDATALEN
 # --------------------------------------------------------------------------

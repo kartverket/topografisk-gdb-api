@@ -36,7 +36,7 @@ def _column_ddl(col: ColumnPlan) -> str:
 def _table_ddl(table: TablePlan) -> str:
     lines = [_column_ddl(c) for c in table.columns]
     geom = table.geometry
-    lines.append(f'"{geom.name}" geometry({geom.geometry_type}, {geom.srid})')
+    lines.append(f'"{geom.name}" geometry({geom.postgis_type}, {geom.srid})')
     cols = ",\n  ".join(lines)
     return f"create table if not exists {table.qualified} (\n  {cols}\n)"
 

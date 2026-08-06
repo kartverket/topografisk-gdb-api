@@ -312,3 +312,137 @@ def test_rejects_successful_upstream_response_without_uuid() -> None:
 
     assert response.status_code == 502
     assert "UUID string id" in response.json()["detail"]["reason"]
+
+
+def _classic_geojson_document() -> dict[str, Any]:
+    return {
+        "type": "FeatureCollection",
+        "name": "bane",
+        "crs": {
+            "type": "name",
+            "properties": {"name": "urn:ogc:def:crs:EPSG::5973"},
+        },
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {
+                    "objid": 31454,
+                    "objtype": "Spormidt",
+                    "lokalid": "bde1a163-2724-4c48-9101-04c839895292",
+                    "identifikasjon_navnerom": (
+                        "http://data.geonorge.no/SFKB/FKB-Bane/so"
+                    ),
+                    "oppdateringsdato": "2026-02-26T09:04:27",
+                    "datafangstdato": "2005-04-25T00:00:00",
+                    "jernbanetype": "J",
+                    "hoydereferanse": "ukjent",
+                    "medium": "T",
+                },
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [
+                        [279754.0614235144, 7041951.166005967, 5.86],
+                        [279761.8907277025, 7041956.309099379, 5.54],
+                    ],
+                },
+            }
+        ],
+    }
+
+
+def test_imports_classic_geojson_when_filename_ends_with_geojson() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": TRACK_UUID})
+
+    with _test_client(httpx.MockTransport(handler)) as client:
+        response = client.post(
+            "/imports",
+            files={
+                "file": (
+                    "bane.geojson",
+                    json.dumps(_classic_geojson_document()),
+                    "application/geo+json",
+                )
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "total": 1,
+        "features": [{"collection": "spormidt", "id": TRACK_UUID}],
+    }
+    payload = json.loads(requests[0].content)
+    assert payload["geometry"]["type"] == "LineString"
+    assert payload["geometry"]["coordinates"][0][:2] == pytest.approx(
+        [279754.0614235144, 7041951.166005967]
+    )
+
+
+def test_classic_geojson_extension_is_case_insensitive() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"id": TRACK_UUID})
+
+    with _test_client(httpx.MockTransport(handler)) as client:
+        response = client.post(
+            "/imports",
+            files={
+                "file": (
+                    "Bane.GEOJSON",
+                    json.dumps(_classic_geojson_document()),
+                    "application/geo+json",
+                )
+            },
+        )
+
+    assert response.status_code == 200
+
+
+def test_rejects_invalid_classic_geojson_before_upstream_calls() -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(204)
+
+    document = _classic_geojson_document()
+    document.pop("crs")
+
+    with _test_client(httpx.MockTransport(handler)) as client:
+        response = client.post(
+            "/imports",
+            files={
+                "file": (
+                    "bane.geojson",
+                    json.dumps(document),
+                    "application/geo+json",
+                )
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["message"] == "invalid classic GeoJSON document"
+    assert "missing CRS" in response.json()["detail"]["errors"][0]
+    assert calls == 0
+
+
+def test_json_uploads_are_not_auto_converted() -> None:
+    with _test_client(
+        httpx.MockTransport(lambda _request: httpx.Response(204))
+    ) as client:
+        response = client.post(
+            "/imports",
+            files={
+                "file": (
+                    "bane.json",
+                    json.dumps(_classic_geojson_document()),
+                    "application/json",
+                )
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["message"] == "invalid JSON-FG document"

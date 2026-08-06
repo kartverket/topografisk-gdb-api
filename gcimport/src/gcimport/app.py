@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Annotated
+from pathlib import PurePosixPath
+from typing import Annotated, Any
 
 import httpx
 import orjson
 from fastapi import FastAPI, File, HTTPException, UploadFile, status
 
 from gcimport.config import Settings
+from gcimport.geojson_to_jsonfg import ConversionError, convert_document
 from gcimport.importer import (
     DocumentValidationError,
     UpstreamImportError,
@@ -20,6 +22,7 @@ from gcimport.importer import (
 from gcimport.profiles import BANE_PROFILE, ImportProfile
 
 READ_CHUNK_BYTES = 64 * 1024
+CLASSIC_GEOJSON_SUFFIX = ".geojson"
 
 
 def create_app(
@@ -47,7 +50,10 @@ def create_app(
 
     application = FastAPI(
         title="gcimport",
-        description=f"JSON-FG importer using the {profile.title} profile",
+        description=(
+            f"JSON-FG / classic GeoJSON (.geojson) importer using the "
+            f"{profile.title} profile"
+        ),
         lifespan=lifespan,
     )
 
@@ -64,7 +70,16 @@ def create_app(
             ) from err
 
         try:
+            document = _normalize_upload(document, file.filename)
             features = prepare_document(document, profile)
+        except ConversionError as err:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "message": "invalid classic GeoJSON document",
+                    "errors": [str(err)],
+                },
+            ) from err
         except DocumentValidationError as err:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -89,6 +104,19 @@ def create_app(
             ) from err
 
     return application
+
+
+def _is_classic_geojson_filename(filename: str | None) -> bool:
+    if not filename:
+        return False
+    return PurePosixPath(filename).suffix.casefold() == CLASSIC_GEOJSON_SUFFIX
+
+
+def _normalize_upload(document: Any, filename: str | None) -> Any:
+    """Convert classic GeoJSON uploads; leave JSON-FG uploads unchanged."""
+    if not _is_classic_geojson_filename(filename):
+        return document
+    return convert_document(document)
 
 
 async def _read_bounded(file: UploadFile, max_bytes: int) -> bytes:

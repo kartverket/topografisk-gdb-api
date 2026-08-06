@@ -58,7 +58,12 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:
             ForeignKeyPlan(col_name, ref_table=f"{schema}.{rel.target}")
         )
 
-    geometry = GeometryColumnPlan(coll.geometry_field, coll.geometry_type, coll.srid)
+    geometry = GeometryColumnPlan(
+        coll.geometry_field,
+        coll.geometry_type,
+        coll.srid,
+        has_z=coll.has_z,
+    )
     return TablePlan(
         schema=schema,
         name=coll.name,
