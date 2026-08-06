@@ -171,7 +171,11 @@ def _feature_object(table: TablePlan, alias: str) -> str:
 
 
 def _geom_from_feature(table: TablePlan) -> str:
-    return f"ST_SetSRID(ST_GeomFromGeoJSON(feature->'geometry'), {table.geometry.srid})"
+    geom = f"ST_SetSRID(ST_GeomFromGeoJSON(feature->'geometry'), {table.geometry.srid})"
+    if table.geometry.has_z:
+        # Accept 2D GeoJSON into *Z columns (missing Z becomes 0).
+        return f"ST_Force3D({geom})"
+    return geom
 
 
 def _prop_read(col: ColumnPlan) -> str:

@@ -202,6 +202,7 @@ def test_unknown_objtype() -> None:
 def test_convert_document_applies_property_alias_fallbacks() -> None:
     feature = _source_feature()
     feature["properties"].pop("identifikasjon_navnerom")
+    feature["properties"].pop("identifikasjon_versjonid")
     feature["properties"]["navnerom"] = "http://data.geonorge.no/SFKB/FKB-Bane/so"
     feature["properties"]["versjonid"] = "2026-02-25 09:10:42.653812000"
     feature["properties"].pop("kvalitet_datafangstmetode")

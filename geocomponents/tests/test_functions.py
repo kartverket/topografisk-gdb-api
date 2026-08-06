@@ -85,6 +85,17 @@ def test_upsert_function_conflicts_on_declared_business_key():
     assert '"objid"' not in sql.split("values", maxsplit=1)[0]
 
 
+def test_has_z_collections_force_3d_on_ingest():
+    plan = _plan("bane")
+    sql = "\n".join(function_statements(plan))
+    assert (
+        "ST_Force3D(ST_SetSRID(ST_GeomFromGeoJSON(feature->'geometry'), 5973))" in sql
+    )
+
+    cadastre_sql = "\n".join(function_statements(_plan("cadastre")))
+    assert "ST_Force3D(" not in cadastre_sql
+
+
 # --------------------------------------------------------------------------
 # SQL-literal escaping (defense-in-depth against a name containing a quote)
 # --------------------------------------------------------------------------
