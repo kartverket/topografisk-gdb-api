@@ -139,7 +139,7 @@ def build_config(dataset: ResolvedDataset, public_url: str, dsn: str) -> dict:
             "gzip": False,
             "cors": True,
             "pretty_print": True,
-            "limits": {"default_items": 10, "max_items": 1000},
+            "limits": {"default_items": 10, "max_items": 10000},
             "map": {
                 "url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
                 "attribution": "OpenStreetMap",

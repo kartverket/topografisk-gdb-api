@@ -8,8 +8,8 @@ export const trackCentresSourceId = 'bane-track-centres';
 export const platformEdgesLayerId = 'bane-platform-edges-line';
 export const trackCentresLayerId = 'bane-track-centres-line';
 
-// EPSG:5973 is ETRS89 / UTM zone 33N with NN2000 height. MapLibre only
-// consumes horizontal WGS84 coordinates, so its horizontal component is used.
+// EPSG:5973 is ETRS89 / UTM zone 33N with NN2000 height. MapLibre maps use
+// WGS84 horizontally; Z is preserved for 3D extrusion when that mode is on.
 proj4.defs('EPSG:5973', '+proj=utm +zone=33 +ellps=GRS80 +units=m +no_defs +type=crs');
 
 function toWgs84(position: Position): Position {

@@ -1,19 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
-import * as maplibregl from 'maplibre-gl';
-import 'maplibre-gl/dist/maplibre-gl.css';
-import { AlertCircle, Eraser, Plus } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { useEffect, useRef, useState } from "react";
+import * as maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
+import { AlertCircle, Eraser, Plus } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
-import { cn } from '@/lib/utils';
+} from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 import {
   buildingItemUrl,
   buildingsCreateUrl,
@@ -26,28 +26,42 @@ import {
   parcelsItemsUrl,
   platformEdgesItemsInBboxUrl,
   trackCentresItemsInBboxUrl,
-} from './geocomponentsApi';
+} from "./geocomponentsApi";
 import {
   addBaneSourcesAndLayers,
   normalizeBaneFeatureCollection,
   wgs84BboxToBaneBbox,
-} from './baneLayers';
+} from "./baneLayers";
+import {
+  addExtrusionLayers,
+  applyMapDimensionMode,
+  configureInitialMapInteraction,
+  upsertElevatedLineSources,
+} from "./mapDimension";
+import { useMapDimension } from "./MapDimensionContext";
 import type {
   Coordinates,
   Feature,
   FeatureCollection,
   Position,
-} from './geojson';
+} from "./geojson";
 
 const emptyFeatureCollection: FeatureCollection = {
-  type: 'FeatureCollection',
-  features: []
+  type: "FeatureCollection",
+  features: [],
 };
 
+/** Vector features are fetched only when the map zoom is strictly above this. */
+const MIN_VECTOR_ZOOM = 10;
+
+function isVectorZoom(map: maplibregl.Map) {
+  return map.getZoom() > MIN_VECTOR_ZOOM;
+}
+
 type BuildingFeature = {
-  type: 'Feature';
+  type: "Feature";
   geometry: {
-    type: 'MultiPolygon';
+    type: "MultiPolygon";
     coordinates: number[][][][];
   };
   properties: {
@@ -58,9 +72,9 @@ type BuildingFeature = {
 };
 
 type ParcelFeature = {
-  type: 'Feature';
+  type: "Feature";
   geometry: {
-    type: 'MultiPolygon';
+    type: "MultiPolygon";
     coordinates: number[][][][];
   };
   properties: {
@@ -74,49 +88,24 @@ const mapStyle: maplibregl.StyleSpecification = {
   version: 8,
   sources: {
     osm: {
-      type: 'raster',
-      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      type: "raster",
+      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
       tileSize: 256,
       maxzoom: 17,
-      attribution: '&copy; OpenStreetMap contributors'
-    }
+      attribution: "&copy; OpenStreetMap contributors",
+    },
   },
   layers: [
     {
-      id: 'osm',
-      type: 'raster',
-      source: 'osm'
-    }
-  ]
+      id: "osm",
+      type: "raster",
+      source: "osm",
+    },
+  ],
 };
 
-function extendBounds(bounds: maplibregl.LngLatBounds, coordinates: Coordinates) {
-  if (typeof coordinates[0] === 'number') {
-    const [lng, lat] = coordinates as Position;
-    bounds.extend([lng, lat]);
-    return;
-  }
-
-  for (const child of coordinates as Coordinates[]) {
-    extendBounds(bounds, child);
-  }
-}
-
-function featureBounds(featureCollection: FeatureCollection) {
-  const bounds = new maplibregl.LngLatBounds();
-
-  for (const feature of featureCollection.features) {
-    const coordinates = feature.geometry?.coordinates;
-    if (coordinates) {
-      extendBounds(bounds, coordinates);
-    }
-  }
-
-  return bounds.isEmpty() ? undefined : bounds;
-}
-
 function collectPositions(coordinates: Coordinates, positions: Position[]) {
-  if (typeof coordinates[0] === 'number') {
+  if (typeof coordinates[0] === "number") {
     positions.push(coordinates as Position);
     return;
   }
@@ -139,17 +128,22 @@ function featureCentroid(feature: Feature): Position | undefined {
   }
 
   const [lngSum, latSum] = positions.reduce(
-    ([lng, lat], [positionLng, positionLat]) => [lng + positionLng, lat + positionLat],
-    [0, 0]
+    ([lng, lat], [positionLng, positionLat]) => [
+      lng + positionLng,
+      lat + positionLat,
+    ],
+    [0, 0],
   );
 
   return [lngSum / positions.length, latSum / positions.length];
 }
 
-function buildingCentroidsFeatureCollection(buildings: FeatureCollection): FeatureCollection {
+function buildingCentroidsFeatureCollection(
+  buildings: FeatureCollection,
+): FeatureCollection {
   return {
-    type: 'FeatureCollection',
-    features: buildings.features.flatMap(building => {
+    type: "FeatureCollection",
+    features: buildings.features.flatMap((building) => {
       const centroid = featureCentroid(building);
       if (!centroid) {
         return [];
@@ -157,15 +151,15 @@ function buildingCentroidsFeatureCollection(buildings: FeatureCollection): Featu
 
       return [
         {
-          type: 'Feature',
+          type: "Feature",
           geometry: {
-            type: 'Point',
-            coordinates: centroid
+            type: "Point",
+            coordinates: centroid,
           },
-          properties: building.properties
-        }
+          properties: building.properties,
+        },
       ];
-    })
+    }),
   };
 }
 
@@ -193,31 +187,23 @@ function coordinateDebugSummary(featureCollection: FeatureCollection) {
     featureCount: featureCollection.features.length,
     geometryTypes,
     coordinateCount: positions.length,
-    lngRange: lngs.length > 0 ? [Math.min(...lngs), Math.max(...lngs)] : undefined,
-    latRange: lats.length > 0 ? [Math.min(...lats), Math.max(...lats)] : undefined,
-    firstFeatureCoordinates: featureCollection.features[0]?.geometry?.coordinates ?? undefined
+    lngRange:
+      lngs.length > 0 ? [Math.min(...lngs), Math.max(...lngs)] : undefined,
+    latRange:
+      lats.length > 0 ? [Math.min(...lats), Math.max(...lats)] : undefined,
+    firstFeatureCoordinates:
+      featureCollection.features[0]?.geometry?.coordinates ?? undefined,
   };
 }
 
-function logLoadedCoordinates(label: string, featureCollection: FeatureCollection) {
-  console.info(`[gcmapview] loaded ${label} coordinates`, coordinateDebugSummary(featureCollection));
-}
-
-function logLayerState(map: maplibregl.Map) {
-  console.info('[gcmapview] map layer/source state', {
-    parcelsSource: Boolean(map.getSource('parcels')),
-    buildingsSource: Boolean(map.getSource('buildings')),
-    buildingCentroidsSource: Boolean(map.getSource('building-centroids')),
-    platformEdgesSource: Boolean(map.getSource('bane-platform-edges')),
-    trackCentresSource: Boolean(map.getSource('bane-track-centres')),
-    parcelsFillLayer: Boolean(map.getLayer('parcels-fill')),
-    parcelsOutlineLayer: Boolean(map.getLayer('parcels-outline')),
-    buildingsFillLayer: Boolean(map.getLayer('buildings-fill')),
-    buildingsOutlineLayer: Boolean(map.getLayer('buildings-outline')),
-    buildingCentroidsLayer: Boolean(map.getLayer('building-centroids-circle')),
-    platformEdgesLayer: Boolean(map.getLayer('bane-platform-edges-line')),
-    trackCentresLayer: Boolean(map.getLayer('bane-track-centres-line'))
-  });
+function logLoadedCoordinates(
+  label: string,
+  featureCollection: FeatureCollection,
+) {
+  console.info(
+    `[gcmapview] loaded ${label} coordinates`,
+    coordinateDebugSummary(featureCollection),
+  );
 }
 
 function signedRingArea(ring: Position[]) {
@@ -231,52 +217,56 @@ function normalizeRings(rings: Position[][]) {
   return rings.map((ring, index) => {
     const shouldBeCounterClockwise = index === 0;
     const isCounterClockwise = signedRingArea(ring) > 0;
-    return shouldBeCounterClockwise === isCounterClockwise ? ring : [...ring].reverse();
+    return shouldBeCounterClockwise === isCounterClockwise
+      ? ring
+      : [...ring].reverse();
   });
 }
 
-function normalizePolygonFeatureCollection(featureCollection: FeatureCollection): FeatureCollection {
+function normalizePolygonFeatureCollection(
+  featureCollection: FeatureCollection,
+): FeatureCollection {
   return {
-    type: 'FeatureCollection',
-    features: featureCollection.features.map(feature => {
+    type: "FeatureCollection",
+    features: featureCollection.features.map((feature) => {
       const geometry = feature.geometry;
       if (!geometry?.coordinates) {
         return feature;
       }
 
-      if (geometry.type === 'Polygon') {
+      if (geometry.type === "Polygon") {
         return {
           ...feature,
           geometry: {
-            type: 'Polygon',
-            coordinates: normalizeRings(geometry.coordinates as Position[][])
-          }
+            type: "Polygon",
+            coordinates: normalizeRings(geometry.coordinates as Position[][]),
+          },
         };
       }
 
-      if (geometry.type === 'MultiPolygon') {
+      if (geometry.type === "MultiPolygon") {
         const polygons = geometry.coordinates as Position[][][];
         if (polygons.length === 1) {
           return {
             ...feature,
             geometry: {
-              type: 'Polygon',
-              coordinates: normalizeRings(polygons[0])
-            }
+              type: "Polygon",
+              coordinates: normalizeRings(polygons[0]),
+            },
           };
         }
 
         return {
           ...feature,
           geometry: {
-            type: 'MultiPolygon',
-            coordinates: polygons.map(normalizeRings)
-          }
+            type: "MultiPolygon",
+            coordinates: polygons.map(normalizeRings),
+          },
         };
       }
 
       return feature;
-    })
+    }),
   };
 }
 
@@ -285,79 +275,85 @@ function addNativeFeatureSourcesAndLayers(
   parcels: FeatureCollection,
   buildings: FeatureCollection,
   platformEdges: FeatureCollection,
-  trackCentres: FeatureCollection
+  trackCentres: FeatureCollection,
 ) {
-  map.addSource('parcels', {
-    type: 'geojson',
-    data: normalizePolygonFeatureCollection(parcels)
+  map.addSource("parcels", {
+    type: "geojson",
+    data: normalizePolygonFeatureCollection(parcels),
   });
-  map.addSource('buildings', {
-    type: 'geojson',
-    data: normalizePolygonFeatureCollection(buildings)
+  map.addSource("buildings", {
+    type: "geojson",
+    data: normalizePolygonFeatureCollection(buildings),
   });
-  map.addSource('building-centroids', {
-    type: 'geojson',
-    data: buildingCentroidsFeatureCollection(buildings)
+  map.addSource("building-centroids", {
+    type: "geojson",
+    data: buildingCentroidsFeatureCollection(buildings),
   });
 
   map.addLayer({
-    id: 'building-centroids-circle',
-    type: 'circle',
-    source: 'building-centroids',
+    id: "building-centroids-circle",
+    type: "circle",
+    source: "building-centroids",
     paint: {
-      'circle-color': '#006eff',
-      'circle-opacity': 0.8,
-      'circle-radius': 3,
-      'circle-stroke-color': '#ffffff',
-      'circle-stroke-width': 1
-    }
+      "circle-color": "#006eff",
+      "circle-opacity": 0.8,
+      "circle-radius": 3,
+      "circle-stroke-color": "#ffffff",
+      "circle-stroke-width": 1,
+    },
   });
   map.addLayer({
-    id: 'parcels-fill',
-    type: 'fill',
-    source: 'parcels',
-    filter: ['==', '$type', 'Polygon'],
+    id: "parcels-fill",
+    type: "fill",
+    source: "parcels",
+    filter: ["==", "$type", "Polygon"],
     paint: {
-      'fill-color': '#ffc040',
-      'fill-opacity': 0.32,
-      'fill-outline-color': '#005cff'
-    }
+      "fill-color": "#ffc040",
+      "fill-opacity": 0.32,
+      "fill-outline-color": "#005cff",
+    },
   });
   map.addLayer({
-    id: 'parcels-outline',
-    type: 'line',
-    source: 'parcels',
-    filter: ['==', '$type', 'Polygon'],
+    id: "parcels-outline",
+    type: "line",
+    source: "parcels",
+    filter: ["==", "$type", "Polygon"],
     paint: {
-      'line-color': '#ffc040',
-      'line-opacity': 1,
-      'line-width': ['interpolate', ['linear'], ['zoom'], 5, 2, 14, 4]
-    }
+      "line-color": "#ffc040",
+      "line-opacity": 1,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 5, 2, 14, 4],
+    },
   });
   map.addLayer({
-    id: 'buildings-fill',
-    type: 'fill',
-    source: 'buildings',
-    filter: ['==', '$type', 'Polygon'],
+    id: "buildings-fill",
+    type: "fill",
+    source: "buildings",
+    filter: ["==", "$type", "Polygon"],
     paint: {
-      'fill-color': '#2563eb',
-      'fill-opacity': 0.55,
-      'fill-outline-color': '#003cff'
-    }
+      "fill-color": "#2563eb",
+      "fill-opacity": 0.55,
+      "fill-outline-color": "#003cff",
+    },
   });
   map.addLayer({
-    id: 'buildings-outline',
-    type: 'line',
-    source: 'buildings',
-    filter: ['==', '$type', 'Polygon'],
+    id: "buildings-outline",
+    type: "line",
+    source: "buildings",
+    filter: ["==", "$type", "Polygon"],
     paint: {
-      'line-color': '#003cff',
-      'line-opacity': 1,
-      'line-width': ['interpolate', ['linear'], ['zoom'], 5, 2, 14, 4]
-    }
+      "line-color": "#003cff",
+      "line-opacity": 1,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 5, 2, 14, 4],
+    },
   });
   // Bane lines are read-only and drawn above cadastre fills.
   addBaneSourcesAndLayers(map, platformEdges, trackCentres);
+  addExtrusionLayers(map);
+  upsertElevatedLineSources(
+    map,
+    normalizeBaneFeatureCollection(platformEdges),
+    normalizeBaneFeatureCollection(trackCentres),
+  );
 }
 
 async function getFeatureCollection(url: string) {
@@ -381,7 +377,7 @@ function visibleOgcBbox(map: maplibregl.Map): OgcBbox {
     [width, height],
     [width / 2, height],
     [0, height],
-    [0, height / 2]
+    [0, height / 2],
   ];
   const coordinates = screenPoints.map(([x, y]) => map.unproject([x, y]));
   const longitudes = coordinates.map(({ lng }) => lng);
@@ -391,7 +387,7 @@ function visibleOgcBbox(map: maplibregl.Map): OgcBbox {
     Math.min(...longitudes),
     Math.max(-90, Math.min(...latitudes)),
     Math.max(...longitudes),
-    Math.min(90, Math.max(...latitudes))
+    Math.min(90, Math.max(...latitudes)),
   ];
 }
 
@@ -402,7 +398,7 @@ async function getVisibleFeatureCollections(map: maplibregl.Map) {
     getFeatureCollection(parcelsItemsInBboxUrl(bbox)),
     getFeatureCollection(buildingsItemsInBboxUrl(bbox)),
     getFeatureCollection(platformEdgesItemsInBboxUrl(baneBbox)),
-    getFeatureCollection(trackCentresItemsInBboxUrl(baneBbox))
+    getFeatureCollection(trackCentresItemsInBboxUrl(baneBbox)),
   ]);
   return { bbox, parcels, buildings, platformEdges, trackCentres };
 }
@@ -412,23 +408,26 @@ function idFromLocation(location: string | null) {
     return undefined;
   }
 
-  return decodeURIComponent(location.split('/').filter(Boolean).at(-1) ?? '');
+  return decodeURIComponent(location.split("/").filter(Boolean).at(-1) ?? "");
 }
 
-async function createFeature(url: string, feature: BuildingFeature | ParcelFeature) {
+async function createFeature(
+  url: string,
+  feature: BuildingFeature | ParcelFeature,
+) {
   const response = await fetch(url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'content-type': 'application/geo+json'
+      "content-type": "application/geo+json",
     },
-    body: JSON.stringify(feature)
+    body: JSON.stringify(feature),
   });
 
   if (!response.ok) {
     throw new Error(`Create failed with ${response.status}`);
   }
 
-  const locationId = idFromLocation(response.headers.get('location'));
+  const locationId = idFromLocation(response.headers.get("location"));
   if (locationId) {
     return locationId;
   }
@@ -440,21 +439,21 @@ async function createFeature(url: string, feature: BuildingFeature | ParcelFeatu
 
   try {
     const parsed = JSON.parse(body) as unknown;
-    if (typeof parsed === 'string') {
+    if (typeof parsed === "string") {
       return parsed;
     }
-    if (parsed && typeof parsed === 'object' && 'id' in parsed) {
+    if (parsed && typeof parsed === "object" && "id" in parsed) {
       return String((parsed as { id: unknown }).id);
     }
   } catch {
-    return body.replace(/^"|"$/g, '');
+    return body.replace(/^"|"$/g, "");
   }
 
   return undefined;
 }
 
 async function deleteFeature(url: string) {
-  const response = await fetch(url, { method: 'DELETE' });
+  const response = await fetch(url, { method: "DELETE" });
   if (!response.ok && response.status !== 404) {
     throw new Error(`Delete failed with ${response.status}`);
   }
@@ -488,7 +487,9 @@ function scaleOffsetsToArea(offsets: Offset[], targetAreaM2: number) {
 function rotateOffsets(offsets: Offset[], angle: number) {
   const cosine = Math.cos(angle);
   const sine = Math.sin(angle);
-  return offsets.map(([x, y]): Offset => [x * cosine - y * sine, x * sine + y * cosine]);
+  return offsets.map(
+    ([x, y]): Offset => [x * cosine - y * sine, x * sine + y * cosine],
+  );
 }
 
 function parcelOffsets(targetAreaM2: number) {
@@ -499,12 +500,16 @@ function parcelOffsets(targetAreaM2: number) {
   const aspectRatio = randomBetween(0.7, 1.5);
   const offsets = Array.from({ length: pointCount }, (_, index): Offset => {
     const angle =
-      (index / pointCount) * Math.PI * 2 + randomBetween(-Math.PI / pointCount / 3, Math.PI / pointCount / 3);
+      (index / pointCount) * Math.PI * 2 +
+      randomBetween(-Math.PI / pointCount / 3, Math.PI / pointCount / 3);
     const radius = baseRadius * randomBetween(0.82, 1.18);
     return [Math.cos(angle) * radius * aspectRatio, Math.sin(angle) * radius];
   }).sort(([xA, yA], [xB, yB]) => Math.atan2(yA, xA) - Math.atan2(yB, xB));
 
-  return rotateOffsets(scaleOffsetsToArea(offsets, targetAreaM2), randomBetween(0, Math.PI));
+  return rotateOffsets(
+    scaleOffsetsToArea(offsets, targetAreaM2),
+    randomBetween(0, Math.PI),
+  );
 }
 
 function buildingOffsets(targetAreaM2: number) {
@@ -520,7 +525,7 @@ function buildingOffsets(targetAreaM2: number) {
       [width / 2, -height * 0.05],
       [width * 0.15, -height * 0.05],
       [width * 0.15, height / 2],
-      [-width / 2, height / 2]
+      [-width / 2, height / 2],
     ];
   } else {
     const chamfer = Math.min(width, height) * randomBetween(0.12, 0.24);
@@ -532,11 +537,14 @@ function buildingOffsets(targetAreaM2: number) {
       [width / 2 - chamfer, height / 2],
       [-width / 2 + chamfer, height / 2],
       [-width / 2, height / 2 - chamfer],
-      [-width / 2, -height / 2 + chamfer]
+      [-width / 2, -height / 2 + chamfer],
     ];
   }
 
-  return rotateOffsets(scaleOffsetsToArea(offsets, targetAreaM2), randomBetween(0, Math.PI));
+  return rotateOffsets(
+    scaleOffsetsToArea(offsets, targetAreaM2),
+    randomBetween(0, Math.PI),
+  );
 }
 
 function offsetsToRing(
@@ -544,9 +552,12 @@ function offsetsToRing(
   lng: number,
   lat: number,
   metersPerDegreeLng: number,
-  metersPerDegreeLat: number
+  metersPerDegreeLat: number,
 ) {
-  const ring = offsets.map(([x, y]) => [lng + x / metersPerDegreeLng, lat + y / metersPerDegreeLat]);
+  const ring = offsets.map(([x, y]) => [
+    lng + x / metersPerDegreeLng,
+    lat + y / metersPerDegreeLat,
+  ]);
 
   return [...ring, ring[0]];
 }
@@ -570,65 +581,85 @@ function randomBuildingAndParcelInView(map: maplibregl.Map): {
   const area = Math.round(randomBetween(20, 200));
   const parcelArea = area * 15;
   const metersPerDegreeLat = 111_320;
-  const metersPerDegreeLng = Math.max(metersPerDegreeLat * Math.cos((lat * Math.PI) / 180), 1);
-  const buildingRing = offsetsToRing(buildingOffsets(area), lng, lat, metersPerDegreeLng, metersPerDegreeLat);
-  const parcelRing = offsetsToRing(parcelOffsets(parcelArea), lng, lat, metersPerDegreeLng, metersPerDegreeLat);
+  const metersPerDegreeLng = Math.max(
+    metersPerDegreeLat * Math.cos((lat * Math.PI) / 180),
+    1,
+  );
+  const buildingRing = offsetsToRing(
+    buildingOffsets(area),
+    lng,
+    lat,
+    metersPerDegreeLng,
+    metersPerDegreeLat,
+  );
+  const parcelRing = offsetsToRing(
+    parcelOffsets(parcelArea),
+    lng,
+    lat,
+    metersPerDegreeLng,
+    metersPerDegreeLat,
+  );
   const shouldAddSecondaryBuilding = Math.random() < 0.55;
-  const secondaryArea = Math.max(10, Math.round(area * randomBetween(0.2, 0.5)));
+  const secondaryArea = Math.max(
+    10,
+    Math.round(area * randomBetween(0.2, 0.5)),
+  );
   const parcelRadius = Math.sqrt(parcelArea / Math.PI);
   const secondaryAngle = randomBetween(0, Math.PI * 2);
   const secondaryDistance = parcelRadius * randomBetween(0.3, 0.48);
-  const secondaryLng = lng + (Math.cos(secondaryAngle) * secondaryDistance) / metersPerDegreeLng;
-  const secondaryLat = lat + (Math.sin(secondaryAngle) * secondaryDistance) / metersPerDegreeLat;
+  const secondaryLng =
+    lng + (Math.cos(secondaryAngle) * secondaryDistance) / metersPerDegreeLng;
+  const secondaryLat =
+    lat + (Math.sin(secondaryAngle) * secondaryDistance) / metersPerDegreeLat;
   const secondaryRing = offsetsToRing(
     buildingOffsets(secondaryArea),
     secondaryLng,
     secondaryLat,
     metersPerDegreeLng,
-    metersPerDegreeLat
+    metersPerDegreeLat,
   );
 
   return {
     area,
     building: {
-      type: 'Feature',
+      type: "Feature",
       geometry: {
-        type: 'MultiPolygon',
-        coordinates: [[buildingRing]]
+        type: "MultiPolygon",
+        coordinates: [[buildingRing]],
       },
       properties: {
-        use: 'random',
-        floors: Math.floor(randomBetween(1, 5))
-      }
+        use: "random",
+        floors: Math.floor(randomBetween(1, 5)),
+      },
     },
     secondaryBuilding: shouldAddSecondaryBuilding
       ? {
           area: secondaryArea,
           feature: {
-            type: 'Feature',
+            type: "Feature",
             geometry: {
-              type: 'MultiPolygon',
-              coordinates: [[secondaryRing]]
+              type: "MultiPolygon",
+              coordinates: [[secondaryRing]],
             },
             properties: {
-              use: 'outbuilding',
-              floors: 1
-            }
-          }
+              use: "outbuilding",
+              floors: 1,
+            },
+          },
         }
       : undefined,
     parcel: {
-      type: 'Feature',
+      type: "Feature",
       geometry: {
-        type: 'MultiPolygon',
-        coordinates: [[parcelRing]]
+        type: "MultiPolygon",
+        coordinates: [[parcelRing]],
       },
       properties: {
         label: `Parcel ${Date.now()}`,
-        source: 'gcmapview',
-        area_m2: parcelArea
-      }
-    }
+        source: "gcmapview",
+        area_m2: parcelArea,
+      },
+    },
   };
 }
 
@@ -639,7 +670,9 @@ type FeatureRectangle = {
   north: number;
 };
 
-function featureRectangle(feature: Feature | ParcelFeature): FeatureRectangle | undefined {
+function featureRectangle(
+  feature: Feature | ParcelFeature,
+): FeatureRectangle | undefined {
   const coordinates = feature.geometry?.coordinates;
   if (!coordinates) {
     return undefined;
@@ -657,7 +690,7 @@ function featureRectangle(feature: Feature | ParcelFeature): FeatureRectangle | 
     west: Math.min(...longitudes),
     south: Math.min(...latitudes),
     east: Math.max(...longitudes),
-    north: Math.max(...latitudes)
+    north: Math.max(...latitudes),
   };
 }
 
@@ -670,7 +703,10 @@ function rectanglesOverlap(first: FeatureRectangle, second: FeatureRectangle) {
   );
 }
 
-function randomNonOverlappingBuildingAndParcel(map: maplibregl.Map, existingParcels: FeatureCollection) {
+function randomNonOverlappingBuildingAndParcel(
+  map: maplibregl.Map,
+  existingParcels: FeatureCollection,
+) {
   const existingRectangles = existingParcels.features
     .map(featureRectangle)
     .filter((rectangle): rectangle is FeatureRectangle => Boolean(rectangle));
@@ -680,17 +716,28 @@ function randomNonOverlappingBuildingAndParcel(map: maplibregl.Map, existingParc
     const candidateRectangle = featureRectangle(candidate.parcel);
     if (
       candidateRectangle &&
-      existingRectangles.every(existingRectangle => !rectanglesOverlap(candidateRectangle, existingRectangle))
+      existingRectangles.every(
+        (existingRectangle) =>
+          !rectanglesOverlap(candidateRectangle, existingRectangle),
+      )
     ) {
       return { ...candidate, placementAttempts: attempt };
     }
   }
 
-  throw new Error('No non-overlapping parcel placement found in the current map view');
+  throw new Error(
+    "No non-overlapping parcel placement found in the current map view",
+  );
 }
 
-async function upsertGeoJsonSource(map: maplibregl.Map, sourceId: string, data: FeatureCollection) {
-  const source = map.getSource(sourceId) as maplibregl.GeoJSONSource | undefined;
+async function upsertGeoJsonSource(
+  map: maplibregl.Map,
+  sourceId: string,
+  data: FeatureCollection,
+) {
+  const source = map.getSource(sourceId) as
+    | maplibregl.GeoJSONSource
+    | undefined;
 
   if (source) {
     source.setData(data);
@@ -698,8 +745,8 @@ async function upsertGeoJsonSource(map: maplibregl.Map, sourceId: string, data: 
   }
 
   map.addSource(sourceId, {
-    type: 'geojson',
-    data
+    type: "geojson",
+    data,
   });
 }
 
@@ -708,31 +755,60 @@ async function setNativeFeatureSources(
   parcels: FeatureCollection,
   buildings: FeatureCollection,
   platformEdges: FeatureCollection,
-  trackCentres: FeatureCollection
+  trackCentres: FeatureCollection,
 ) {
+  const normalizedPlatformEdges = normalizeBaneFeatureCollection(platformEdges);
+  const normalizedTrackCentres = normalizeBaneFeatureCollection(trackCentres);
   await Promise.all([
-    upsertGeoJsonSource(map, 'parcels', normalizePolygonFeatureCollection(parcels)),
-    upsertGeoJsonSource(map, 'buildings', normalizePolygonFeatureCollection(buildings)),
-    upsertGeoJsonSource(map, 'bane-platform-edges', normalizeBaneFeatureCollection(platformEdges)),
-    upsertGeoJsonSource(map, 'bane-track-centres', normalizeBaneFeatureCollection(trackCentres))
+    upsertGeoJsonSource(
+      map,
+      "parcels",
+      normalizePolygonFeatureCollection(parcels),
+    ),
+    upsertGeoJsonSource(
+      map,
+      "buildings",
+      normalizePolygonFeatureCollection(buildings),
+    ),
+    upsertGeoJsonSource(map, "bane-platform-edges", normalizedPlatformEdges),
+    upsertGeoJsonSource(map, "bane-track-centres", normalizedTrackCentres),
   ]);
+  upsertElevatedLineSources(
+    map,
+    normalizedPlatformEdges,
+    normalizedTrackCentres,
+  );
+}
+
+async function clearVectorSources(map: maplibregl.Map) {
+  await setNativeFeatureSources(
+    map,
+    emptyFeatureCollection,
+    emptyFeatureCollection,
+    emptyFeatureCollection,
+    emptyFeatureCollection,
+  );
+  await upsertGeoJsonSource(map, "building-centroids", emptyFeatureCollection);
 }
 
 function logNativeRenderingState(map: maplibregl.Map) {
   const state = {
-    parcelsSourceLoaded: map.isSourceLoaded('parcels'),
-    buildingsSourceLoaded: map.isSourceLoaded('buildings'),
-    parcelSourceFeatures: map.querySourceFeatures('parcels').length,
-    buildingSourceFeatures: map.querySourceFeatures('buildings').length,
+    parcelsSourceLoaded: map.isSourceLoaded("parcels"),
+    buildingsSourceLoaded: map.isSourceLoaded("buildings"),
+    parcelSourceFeatures: map.querySourceFeatures("parcels").length,
+    buildingSourceFeatures: map.querySourceFeatures("buildings").length,
     parcelRenderedFeatures: map.queryRenderedFeatures({
-      layers: ['parcels-fill', 'parcels-outline']
+      layers: ["parcels-fill", "parcels-outline"],
     }).length,
     buildingRenderedFeatures: map.queryRenderedFeatures({
-      layers: ['buildings-fill', 'buildings-outline']
-    }).length
+      layers: ["buildings-fill", "buildings-outline"],
+    }).length,
   };
 
-  console.info('[gcmapview] native MapLibre rendering state', JSON.stringify(state));
+  console.info(
+    "[gcmapview] native MapLibre rendering state",
+    JSON.stringify(state),
+  );
   return state;
 }
 
@@ -740,35 +816,40 @@ export function MapView() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map>(null);
   const buildingMarkerRefs = useRef<maplibregl.Marker[]>([]);
-  const [status, setStatus] = useState('Loading data from geocomponents...');
+  const { is3d } = useMapDimension();
+  const [status, setStatus] = useState("Loading map...");
   const [error, setError] = useState<string>();
   const [isMapReady, setIsMapReady] = useState(false);
+  const [isVectorZoomActive, setIsVectorZoomActive] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
 
-  function updateBuildingDebugMarkers(map: maplibregl.Map, buildings: FeatureCollection) {
+  function updateBuildingDebugMarkers(
+    map: maplibregl.Map,
+    buildings: FeatureCollection,
+  ) {
     for (const marker of buildingMarkerRefs.current) {
       marker.remove();
     }
 
-    buildingMarkerRefs.current = buildings.features.flatMap(building => {
+    buildingMarkerRefs.current = buildings.features.flatMap((building) => {
       const centroid = featureCentroid(building);
       if (!centroid) {
         return [];
       }
 
-      const markerElement = document.createElement('div');
+      const markerElement = document.createElement("div");
       markerElement.className =
-        'h-1.5 w-1.5 rounded-full border border-white bg-[#006eff] shadow-[0_0_0_1px_rgb(0_110_255/0.45)]';
-      markerElement.title = `Building ${building.id ?? ''}`.trim();
+        "h-1.5 w-1.5 rounded-full border border-white bg-[#006eff] shadow-[0_0_0_1px_rgb(0_110_255/0.45)]";
+      markerElement.title = `Building ${building.id ?? ""}`.trim();
 
       return [
         new maplibregl.Marker({
           element: markerElement,
-          anchor: 'center'
+          anchor: "center",
         })
           .setLngLat([centroid[0], centroid[1]])
-          .addTo(map)
+          .addTo(map),
       ];
     });
   }
@@ -783,133 +864,92 @@ export function MapView() {
       container: mapContainerRef.current,
       style: mapStyle,
       center: [10.75, 59.91],
-      zoom: 5
+      zoom: 5,
     });
     mapRef.current = map;
     const resizeObserver = new ResizeObserver(() => map.resize());
     resizeObserver.observe(mapContainerRef.current);
 
-    map.on('error', event => {
-      console.error('[gcmapview] MapLibre error', event.error);
-      setError(event.error?.message ?? 'Unknown MapLibre error');
-      setStatus('MapLibre failed while loading the map style or layers');
+    map.on("error", (event) => {
+      console.error("[gcmapview] MapLibre error", event.error);
+      setError(event.error?.message ?? "Unknown MapLibre error");
+      setStatus("MapLibre failed while loading the map style or layers");
     });
 
-    map.addControl(new maplibregl.NavigationControl(), 'top-right');
-    map.addControl(new maplibregl.GlobeControl(), 'top-right');
+    map.addControl(new maplibregl.NavigationControl(), "top-right");
+    map.addControl(new maplibregl.GlobeControl(), "top-right");
+    configureInitialMapInteraction(map);
 
     let visibleRequestId = 0;
     async function reloadVisibleData() {
       const requestId = ++visibleRequestId;
+      const vectorZoomActive = isVectorZoom(map);
+      setIsVectorZoomActive(vectorZoomActive);
+
+      if (!vectorZoomActive) {
+        await clearVectorSources(map);
+        updateBuildingDebugMarkers(map, emptyFeatureCollection);
+        if (!cancelled && requestId === visibleRequestId) {
+          setError(undefined);
+          setStatus(
+            `Zoom in above level ${MIN_VECTOR_ZOOM} to load vector data (current z=${map.getZoom().toFixed(1)}).`,
+          );
+        }
+        return;
+      }
+
       try {
-        const { bbox, parcels, buildings, platformEdges, trackCentres } = await getVisibleFeatureCollections(map);
+        const { bbox, parcels, buildings, platformEdges, trackCentres } =
+          await getVisibleFeatureCollections(map);
         if (cancelled || requestId !== visibleRequestId) {
           return;
         }
 
-        await setNativeFeatureSources(map, parcels, buildings, platformEdges, trackCentres);
-        await upsertGeoJsonSource(map, 'building-centroids', buildingCentroidsFeatureCollection(buildings));
+        await setNativeFeatureSources(
+          map,
+          parcels,
+          buildings,
+          platformEdges,
+          trackCentres,
+        );
+        await upsertGeoJsonSource(
+          map,
+          "building-centroids",
+          buildingCentroidsFeatureCollection(buildings),
+        );
         updateBuildingDebugMarkers(map, buildings);
         setError(undefined);
         setStatus(
-          `Loaded ${parcels.features.length} parcels, ${buildings.features.length} buildings, ${platformEdges.features.length} platform edges, and ${trackCentres.features.length} track centres for bbox ${bbox.map(value => value.toFixed(5)).join(',')}.`
+          `Loaded ${parcels.features.length} parcels, ${buildings.features.length} buildings, ${platformEdges.features.length} platform edges, and ${trackCentres.features.length} track centres for bbox ${bbox.map((value) => value.toFixed(5)).join(",")}.`,
         );
       } catch (cause) {
         if (!cancelled && requestId === visibleRequestId) {
-          setError(cause instanceof Error ? cause.message : 'Unknown error');
-          setStatus('Could not reload visible map data');
+          setError(cause instanceof Error ? cause.message : "Unknown error");
+          setStatus("Could not reload visible map data");
         }
       }
     }
 
-    map.once('load', async () => {
-      const initialBbox = visibleOgcBbox(map);
-      const initialBaneBbox = wgs84BboxToBaneBbox(initialBbox);
-      const [parcelsResult, buildingsResult, platformEdgesResult, trackCentresResult] = await Promise.allSettled([
-        getFeatureCollection(parcelsItemsInBboxUrl(initialBbox)),
-        getFeatureCollection(buildingsItemsInBboxUrl(initialBbox)),
-        getFeatureCollection(platformEdgesItemsInBboxUrl(initialBaneBbox)),
-        getFeatureCollection(trackCentresItemsInBboxUrl(initialBaneBbox))
-      ]);
-      if (cancelled) {
-        return;
-      }
-
-      let parcelsCount = 0;
-      let buildingsCount = 0;
-      let platformEdgesCount = 0;
-      let trackCentresCount = 0;
-      let parcels = emptyFeatureCollection;
-      let buildings = emptyFeatureCollection;
-      let platformEdges = emptyFeatureCollection;
-      let trackCentres = emptyFeatureCollection;
-      let initialDataBounds: maplibregl.LngLatBounds | undefined;
-      const errors: string[] = [];
-
-      if (parcelsResult.status === 'fulfilled') {
-        parcels = parcelsResult.value;
-        logLoadedCoordinates('parcels', parcels);
-        parcelsCount = parcels.features.length;
-        initialDataBounds = featureBounds(parcels);
-      } else {
-        errors.push(`parcels: ${parcelsResult.reason}`);
-      }
-
-      if (buildingsResult.status === 'fulfilled') {
-        buildings = buildingsResult.value;
-        logLoadedCoordinates('buildings', buildings);
-        buildingsCount = buildings.features.length;
-        initialDataBounds ??= featureBounds(buildings);
-      } else {
-        errors.push(`buildings: ${buildingsResult.reason}`);
-      }
-
-      if (platformEdgesResult.status === 'fulfilled') {
-        platformEdges = platformEdgesResult.value;
-        logLoadedCoordinates('platform edges', platformEdges);
-        platformEdgesCount = platformEdges.features.length;
-        initialDataBounds ??= featureBounds(normalizeBaneFeatureCollection(platformEdges));
-      } else {
-        errors.push(`platform edges: ${platformEdgesResult.reason}`);
-      }
-
-      if (trackCentresResult.status === 'fulfilled') {
-        trackCentres = trackCentresResult.value;
-        logLoadedCoordinates('track centres', trackCentres);
-        trackCentresCount = trackCentres.features.length;
-        initialDataBounds ??= featureBounds(normalizeBaneFeatureCollection(trackCentres));
-      } else {
-        errors.push(`track centres: ${trackCentresResult.reason}`);
-      }
-
-      addNativeFeatureSourcesAndLayers(map, parcels, buildings, platformEdges, trackCentres);
-      updateBuildingDebugMarkers(map, buildings);
-      map.on('moveend', reloadVisibleData);
-
-      if (initialDataBounds) {
-        map.fitBounds(initialDataBounds, { padding: 64, maxZoom: 19 });
-      }
-
-      logLayerState(map);
-      setIsMapReady(errors.length === 0);
-      setError(errors.length > 0 ? errors.join('; ') : undefined);
-      const loadedStatus =
-        parcelsCount + buildingsCount + platformEdgesCount + trackCentresCount === 0
-          ? 'Datasets loaded, but no visible features were returned.'
-          : `Loaded ${parcelsCount} parcels, ${buildingsCount} buildings, ${platformEdgesCount} platform edges, and ${trackCentresCount} track centres from the API.`;
-      setStatus(loadedStatus);
-      map.once('idle', () => {
-        const nativeState = logNativeRenderingState(map);
-        setStatus(
-          `${loadedStatus} Native source features P:${nativeState.parcelSourceFeatures} B:${nativeState.buildingSourceFeatures}; rendered P:${nativeState.parcelRenderedFeatures} B:${nativeState.buildingRenderedFeatures}.`
-        );
-      });
+    map.once("load", () => {
+      addNativeFeatureSourcesAndLayers(
+        map,
+        emptyFeatureCollection,
+        emptyFeatureCollection,
+        emptyFeatureCollection,
+        emptyFeatureCollection,
+      );
+      updateBuildingDebugMarkers(map, emptyFeatureCollection);
+      map.on("moveend", reloadVisibleData);
+      setIsMapReady(true);
+      setIsVectorZoomActive(isVectorZoom(map));
+      setStatus(`Zoom in above level ${MIN_VECTOR_ZOOM} to load vector data.`);
+      void reloadVisibleData();
     });
 
     return () => {
       cancelled = true;
       visibleRequestId += 1;
-      map.off('moveend', reloadVisibleData);
+      map.off("moveend", reloadVisibleData);
       mapRef.current = null;
       for (const marker of buildingMarkerRefs.current) {
         marker.remove();
@@ -920,9 +960,30 @@ export function MapView() {
     };
   }, []);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady) {
+      return;
+    }
+
+    applyMapDimensionMode(map, is3d);
+    if (is3d) {
+      for (const marker of buildingMarkerRefs.current) {
+        marker.remove();
+      }
+      buildingMarkerRefs.current = [];
+    }
+  }, [is3d, isMapReady]);
+
   async function createRandomBuilding() {
     const map = mapRef.current;
     if (!map) {
+      return;
+    }
+    if (!isVectorZoom(map)) {
+      setError(
+        `Zoom in above level ${MIN_VECTOR_ZOOM} before creating parcels`,
+      );
       return;
     }
 
@@ -930,57 +991,72 @@ export function MapView() {
     setError(undefined);
 
     try {
-      const existingParcels = await getFeatureCollection(parcelsItemsInBboxUrl(visibleOgcBbox(map)));
-      const { area, building, secondaryBuilding, parcel, placementAttempts } = randomNonOverlappingBuildingAndParcel(
-        map,
-        existingParcels
+      const existingParcels = await getFeatureCollection(
+        parcelsItemsInBboxUrl(visibleOgcBbox(map)),
       );
-      console.info('[gcmapview] storing generated parcel/building coordinates', {
-        placementAttempts,
-        existingParcelCount: existingParcels.features.length,
-        buildingAreaM2: area,
-        secondaryBuildingAreaM2: secondaryBuilding?.area,
-        parcelAreaM2: area * 15,
-        buildingCoordinates: building.geometry.coordinates,
-        secondaryBuildingCoordinates: secondaryBuilding?.feature.geometry.coordinates,
-        parcelCoordinates: parcel.geometry.coordinates
-      });
+      const { area, building, secondaryBuilding, parcel, placementAttempts } =
+        randomNonOverlappingBuildingAndParcel(map, existingParcels);
+      console.info(
+        "[gcmapview] storing generated parcel/building coordinates",
+        {
+          placementAttempts,
+          existingParcelCount: existingParcels.features.length,
+          buildingAreaM2: area,
+          secondaryBuildingAreaM2: secondaryBuilding?.area,
+          parcelAreaM2: area * 15,
+          buildingCoordinates: building.geometry.coordinates,
+          secondaryBuildingCoordinates:
+            secondaryBuilding?.feature.geometry.coordinates,
+          parcelCoordinates: parcel.geometry.coordinates,
+        },
+      );
       const parcelId = await createFeature(parcelsCreateUrl, parcel);
       const buildingsToCreate = [building];
       if (secondaryBuilding) {
         buildingsToCreate.push(secondaryBuilding.feature);
       }
       await Promise.all(
-        buildingsToCreate.map(feature =>
+        buildingsToCreate.map((feature) =>
           createFeature(buildingsCreateUrl, {
             ...feature,
             properties: {
               ...feature.properties,
-              ...(parcelId ? { parcel_id: parcelId } : {})
-            }
-          })
-        )
+              ...(parcelId ? { parcel_id: parcelId } : {}),
+            },
+          }),
+        ),
       );
 
       const currentBounds = map.getBounds();
-      const { parcels, buildings, platformEdges, trackCentres } = await getVisibleFeatureCollections(map);
-      logLoadedCoordinates('parcels after create', parcels);
-      logLoadedCoordinates('buildings after create', buildings);
-      await setNativeFeatureSources(map, parcels, buildings, platformEdges, trackCentres);
-      await upsertGeoJsonSource(map, 'building-centroids', buildingCentroidsFeatureCollection(buildings));
+      const { parcels, buildings, platformEdges, trackCentres } =
+        await getVisibleFeatureCollections(map);
+      logLoadedCoordinates("parcels after create", parcels);
+      logLoadedCoordinates("buildings after create", buildings);
+      await setNativeFeatureSources(
+        map,
+        parcels,
+        buildings,
+        platformEdges,
+        trackCentres,
+      );
+      await upsertGeoJsonSource(
+        map,
+        "building-centroids",
+        buildingCentroidsFeatureCollection(buildings),
+      );
       updateBuildingDebugMarkers(map, buildings);
       map.fitBounds(currentBounds, { animate: false });
-      const createdStatus = `Created ${buildingsToCreate.length} building${buildingsToCreate.length === 1 ? '' : 's'} with a ${area * 15} m2 parcel after ${placementAttempts} placement attempt${placementAttempts === 1 ? '' : 's'}. ${buildings.features.length} buildings loaded.`;
+      const createdStatus = `Created ${buildingsToCreate.length} building${buildingsToCreate.length === 1 ? "" : "s"} with a ${area * 15} m2 parcel after ${placementAttempts} placement attempt${placementAttempts === 1 ? "" : "s"}. ${buildings.features.length} buildings loaded.`;
       setStatus(createdStatus);
-      map.once('idle', () => {
+      map.once("idle", () => {
         const nativeState = logNativeRenderingState(map);
         setStatus(
-          `${createdStatus} Native source features P:${nativeState.parcelSourceFeatures} B:${nativeState.buildingSourceFeatures}; rendered P:${nativeState.parcelRenderedFeatures} B:${nativeState.buildingRenderedFeatures}.`
+          `${createdStatus} Native source features P:${nativeState.parcelSourceFeatures} B:${nativeState.buildingSourceFeatures}; rendered P:${nativeState.parcelRenderedFeatures} B:${nativeState.buildingRenderedFeatures}.`,
         );
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unknown error');
-      setStatus('Could not create building');
+      setError(cause instanceof Error ? cause.message : "Unknown error");
+      setStatus("Could not create building");
     } finally {
       setIsCreating(false);
     }
@@ -991,6 +1067,10 @@ export function MapView() {
     if (!map) {
       return;
     }
+    if (!isVectorZoom(map)) {
+      setError(`Zoom in above level ${MIN_VECTOR_ZOOM} before clearing data`);
+      return;
+    }
 
     setIsClearing(true);
     setError(undefined);
@@ -999,52 +1079,60 @@ export function MapView() {
       const currentBounds = map.getBounds();
       const [buildings, parcels] = await Promise.all([
         getFeatureCollection(buildingsItemsUrl),
-        getFeatureCollection(parcelsItemsUrl)
+        getFeatureCollection(parcelsItemsUrl),
       ]);
-      logLoadedCoordinates('buildings before clear', buildings);
-      logLoadedCoordinates('parcels before clear', parcels);
+      logLoadedCoordinates("buildings before clear", buildings);
+      logLoadedCoordinates("parcels before clear", parcels);
 
       await Promise.all(
-        buildings.features.map(building =>
-          building.id === undefined ? Promise.resolve() : deleteFeature(buildingItemUrl(building.id))
-        )
+        buildings.features.map((building) =>
+          building.id === undefined
+            ? Promise.resolve()
+            : deleteFeature(buildingItemUrl(building.id)),
+        ),
       );
       await Promise.all(
-        parcels.features.map(parcel =>
-          parcel.id === undefined ? Promise.resolve() : deleteFeature(parcelItemUrl(parcel.id))
-        )
+        parcels.features.map((parcel) =>
+          parcel.id === undefined
+            ? Promise.resolve()
+            : deleteFeature(parcelItemUrl(parcel.id)),
+        ),
       );
 
       const {
         parcels: reloadedParcels,
         buildings: reloadedBuildings,
         platformEdges: reloadedPlatformEdges,
-        trackCentres: reloadedTrackCentres
+        trackCentres: reloadedTrackCentres,
       } = await getVisibleFeatureCollections(map);
-      logLoadedCoordinates('parcels after clear', reloadedParcels);
-      logLoadedCoordinates('buildings after clear', reloadedBuildings);
+      logLoadedCoordinates("parcels after clear", reloadedParcels);
+      logLoadedCoordinates("buildings after clear", reloadedBuildings);
       await setNativeFeatureSources(
         map,
         reloadedParcels,
         reloadedBuildings,
         reloadedPlatformEdges,
-        reloadedTrackCentres
+        reloadedTrackCentres,
       );
-      await upsertGeoJsonSource(map, 'building-centroids', buildingCentroidsFeatureCollection(reloadedBuildings));
+      await upsertGeoJsonSource(
+        map,
+        "building-centroids",
+        buildingCentroidsFeatureCollection(reloadedBuildings),
+      );
       updateBuildingDebugMarkers(map, reloadedBuildings);
       map.fitBounds(currentBounds, { animate: false });
       const clearedStatus = `Cleared ${buildings.features.length} buildings and ${parcels.features.length} parcels.`;
       setStatus(clearedStatus);
-      map.once('idle', () => {
+      map.once("idle", () => {
         const nativeState = logNativeRenderingState(map);
         setStatus(
-          `${clearedStatus} Native source features P:${nativeState.parcelSourceFeatures} B:${nativeState.buildingSourceFeatures}; rendered P:${nativeState.parcelRenderedFeatures} B:${nativeState.buildingRenderedFeatures}.`
+          `${clearedStatus} Native source features P:${nativeState.parcelSourceFeatures} B:${nativeState.buildingSourceFeatures}; rendered P:${nativeState.parcelRenderedFeatures} B:${nativeState.buildingRenderedFeatures}.`,
         );
       });
       setIsMapReady(true);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unknown error');
-      setStatus('Could not clear data');
+      setError(cause instanceof Error ? cause.message : "Unknown error");
+      setStatus("Could not clear data");
     } finally {
       setIsClearing(false);
     }
@@ -1059,20 +1147,24 @@ export function MapView() {
       <div className="absolute top-4 left-4 z-[3] flex flex-col items-start gap-2 sm:flex-row">
         <Button
           size="sm"
-          disabled={!isMapReady || isCreating || isClearing}
+          disabled={
+            !isMapReady || !isVectorZoomActive || isCreating || isClearing
+          }
           onClick={createRandomBuilding}
         >
           <Plus data-icon="inline-start" />
-          {isCreating ? 'Creating parcel...' : 'Create random parcel'}
+          {isCreating ? "Creating parcel..." : "Create random parcel"}
         </Button>
         <Button
           size="sm"
           variant="destructive"
-          disabled={!isMapReady || isCreating || isClearing}
+          disabled={
+            !isMapReady || !isVectorZoomActive || isCreating || isClearing
+          }
           onClick={clearData}
         >
           <Eraser data-icon="inline-start" />
-          {isClearing ? 'Clearing data...' : 'Clear data'}
+          {isClearing ? "Clearing data..." : "Clear data"}
         </Button>
       </div>
       <Card
@@ -1082,10 +1174,30 @@ export function MapView() {
       >
         <CardHeader className="pb-0">
           <CardTitle>Layers</CardTitle>
-          <CardDescription>Bane layers are read-only</CardDescription>
+          <CardDescription>
+            {is3d
+              ? "Height colour: blue 0 m → red 300 m+"
+              : "Bane layers are read-only"}
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
           <Separator />
+          {is3d ? (
+            <div className="space-y-1">
+              <div
+                className="h-2.5 w-full rounded-full"
+                style={{
+                  background:
+                    "linear-gradient(to right, hsl(240 85% 45%), hsl(120 85% 45%), hsl(0 85% 45%))",
+                }}
+                aria-hidden
+              />
+              <div className="flex justify-between text-[11px] text-muted-foreground">
+                <span>0 m</span>
+                <span>300 m+</span>
+              </div>
+            </div>
+          ) : null}
           <ul className="m-0 space-y-2 p-0 text-sm text-muted-foreground">
             <li className="flex items-center gap-2">
               <span className="inline-block h-2.5 w-4 shrink-0 rounded-full bg-[#ffc040] opacity-80" />
@@ -1124,7 +1236,7 @@ export function MapView() {
         ) : (
           <div
             className={cn(
-              'rounded-2xl border border-border bg-card/95 px-3 py-2 text-sm text-foreground shadow-md',
+              "rounded-2xl border border-border bg-card/95 px-3 py-2 text-sm text-foreground shadow-md",
             )}
           >
             {status}
