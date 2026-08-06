@@ -38,6 +38,10 @@ import {
   configureInitialMapInteraction,
   upsertElevatedLineSources,
 } from "./mapDimension";
+import {
+  buildingExtrusionHeightExpression,
+  heightColorExpression,
+} from "./map3d";
 import { useMapDimension } from "./MapDimensionContext";
 import type {
   Coordinates,
@@ -295,7 +299,7 @@ function addNativeFeatureSourcesAndLayers(
     type: "circle",
     source: "building-centroids",
     paint: {
-      "circle-color": "#006eff",
+      "circle-color": heightColorExpression(buildingExtrusionHeightExpression()),
       "circle-opacity": 0.8,
       "circle-radius": 3,
       "circle-stroke-color": "#ffffff",
@@ -324,15 +328,18 @@ function addNativeFeatureSourcesAndLayers(
       "line-width": ["interpolate", ["linear"], ["zoom"], 5, 2, 14, 4],
     },
   });
+  const buildingHeightColor = heightColorExpression(
+    buildingExtrusionHeightExpression(),
+  );
   map.addLayer({
     id: "buildings-fill",
     type: "fill",
     source: "buildings",
     filter: ["==", "$type", "Polygon"],
     paint: {
-      "fill-color": "#2563eb",
+      "fill-color": buildingHeightColor,
       "fill-opacity": 0.55,
-      "fill-outline-color": "#003cff",
+      "fill-outline-color": buildingHeightColor,
     },
   });
   map.addLayer({
@@ -341,7 +348,7 @@ function addNativeFeatureSourcesAndLayers(
     source: "buildings",
     filter: ["==", "$type", "Polygon"],
     paint: {
-      "line-color": "#003cff",
+      "line-color": buildingHeightColor,
       "line-opacity": 1,
       "line-width": ["interpolate", ["linear"], ["zoom"], 5, 2, 14, 4],
     },
@@ -1175,47 +1182,62 @@ export function MapView() {
         <CardHeader className="pb-0">
           <CardTitle>Layers</CardTitle>
           <CardDescription>
-            {is3d
-              ? "Height colour: blue 0 m → red 300 m+"
-              : "Bane layers are read-only"}
+            Height colour: blue 0 m → red 300 m+
+            {!is3d ? " · Bane read-only" : ""}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
           <Separator />
-          {is3d ? (
-            <div className="space-y-1">
-              <div
-                className="h-2.5 w-full rounded-full"
-                style={{
-                  background:
-                    "linear-gradient(to right, hsl(240 85% 45%), hsl(120 85% 45%), hsl(0 85% 45%))",
-                }}
-                aria-hidden
-              />
-              <div className="flex justify-between text-[11px] text-muted-foreground">
-                <span>0 m</span>
-                <span>300 m+</span>
-              </div>
+          <div className="space-y-1">
+            <div
+              className="h-2.5 w-full rounded-full"
+              style={{
+                background:
+                  "linear-gradient(to right, hsl(240 85% 45%), hsl(120 85% 45%), hsl(0 85% 45%))",
+              }}
+              aria-hidden
+            />
+            <div className="flex justify-between text-[11px] text-muted-foreground">
+              <span>0 m</span>
+              <span>300 m+</span>
             </div>
-          ) : null}
+          </div>
           <ul className="m-0 space-y-2 p-0 text-sm text-muted-foreground">
             <li className="flex items-center gap-2">
               <span className="inline-block h-2.5 w-4 shrink-0 rounded-full bg-[#ffc040] opacity-80" />
               Cadastre parcels
             </li>
             <li className="flex items-center gap-2">
-              <span className="inline-block h-2.5 w-4 shrink-0 rounded-full bg-[#2563eb] opacity-80" />
+              <span
+                className="inline-block h-2.5 w-4 shrink-0 rounded-full opacity-80"
+                style={{
+                  background:
+                    "linear-gradient(to right, hsl(240 85% 45%), hsl(0 85% 45%))",
+                }}
+              />
               Cadastre buildings
             </li>
             <li className="flex items-center gap-2">
-              <span className="inline-block h-1 w-4 shrink-0 rounded-full bg-[#e11d48]" />
+              <span
+                className="inline-block h-1 w-4 shrink-0 rounded-full"
+                style={{
+                  background:
+                    "linear-gradient(to right, hsl(240 85% 45%), hsl(0 85% 45%))",
+                }}
+              />
               Bane platform edges
               <Badge variant="outline" className="ml-auto">
                 RO
               </Badge>
             </li>
             <li className="flex items-center gap-2">
-              <span className="inline-block h-1 w-4 shrink-0 rounded-full bg-[#7c3aed]" />
+              <span
+                className="inline-block h-1 w-4 shrink-0 rounded-full"
+                style={{
+                  background:
+                    "linear-gradient(to right, hsl(240 85% 45%), hsl(0 85% 45%))",
+                }}
+              />
               Bane track centres
               <Badge variant="outline" className="ml-auto">
                 RO

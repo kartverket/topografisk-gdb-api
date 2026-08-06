@@ -98,6 +98,18 @@ export function buildingExtrusionHeightExpression(
 
 export const HEIGHT_COLOR_MAX_M = 300
 
+/** Max finite Z from a LineString coordinate array (meters). */
+export function maxCoordinateHeight(coordinates: Position[]): number {
+  let maxHeight = 0
+  for (const position of coordinates) {
+    const z = position[2]
+    if (typeof z === 'number' && Number.isFinite(z)) {
+      maxHeight = Math.max(maxHeight, z)
+    }
+  }
+  return maxHeight
+}
+
 /** Blue at 0 m → red at {@link HEIGHT_COLOR_MAX_M} m (and above) via HSL hue. */
 export function heightColorExpression(
   heightExpression: ExpressionSpecification = [
