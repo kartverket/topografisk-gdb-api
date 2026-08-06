@@ -163,7 +163,7 @@ def test_convert_document_rejects_multipart_multilinestring() -> None:
 
     with pytest.raises(
         ConversionError,
-        match="geometry.coordinates for MultiLineString must contain exactly one part",
+        match=r"geometry\.coordinates for MultiLineString must contain exactly one part",
     ):
         convert_document(_source_document([feature]))
 
