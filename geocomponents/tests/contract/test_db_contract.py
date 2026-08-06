@@ -42,6 +42,10 @@ def _value(sql_type, variant=0):
         return 1.0 + variant
     if s == "boolean":
         return variant == 0
+    if s in ("timestamptz", "timestamp with time zone", "timestamp"):
+        return "2026-01-01T00:00:00Z" if variant == 0 else "2026-02-01T00:00:00Z"
+    if s == "date":
+        return "2026-01-01" if variant == 0 else "2026-02-01"
     return "x" if variant == 0 else "y"
 
 
