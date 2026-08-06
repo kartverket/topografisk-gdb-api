@@ -21,6 +21,18 @@ _EPSG_HTTP = re.compile(
 )
 _EPSG_PLAIN = re.compile(r"^EPSG:(?P<code>\d+)$", re.IGNORECASE)
 
+_PROPERTY_ALIASES: dict[str, str] = {
+    # Identity fields seen in upstream exports.
+    "navnerom": "identifikasjon_navnerom",
+    "versjonid": "identifikasjon_versjonid",
+    # Quality fields seen without the quality prefix.
+    "datafangstmetode": "kvalitet_datafangstmetode",
+    "noyaktighet": "kvalitet_noyaktighet",
+    "synbarhet": "kvalitet_synbarhet",
+    "datafangstmetodehoyde": "kvalitet_datafangstmetodehoyde",
+    "noyaktighethoyde": "kvalitet_noyaktighethoyde",
+}
+
 
 class ConversionError(ValueError):
     """Raised when the source GeoJSON cannot be converted."""
@@ -66,6 +78,54 @@ def feature_type_from_objtype(objtype: Any) -> str:
     return collection
 
 
+def normalize_properties(properties: dict[str, Any]) -> dict[str, Any]:
+    """Copy known source aliases into canonical property names when missing."""
+    normalized = dict(properties)
+    for source_name, target_name in _PROPERTY_ALIASES.items():
+        if target_name in normalized:
+            continue
+        if source_name in normalized:
+            normalized[target_name] = normalized[source_name]
+    return normalized
+
+
+def normalize_geometry_for_profile(
+    geometry: dict[str, Any], *, index: int
+) -> dict[str, Any]:
+    """Normalize known geometry variants for the active profile."""
+    geometry_type = geometry.get("type")
+    if geometry_type == BANE_PROFILE.geometry_type:
+        return geometry
+
+    if (
+        geometry_type == "MultiLineString"
+        and BANE_PROFILE.geometry_type == "LineString"
+    ):
+        coordinates = geometry.get("coordinates")
+        if not isinstance(coordinates, list):
+            raise ConversionError(
+                f"features[{index}].geometry.coordinates must be an array"
+            )
+        if len(coordinates) != 1:
+            raise ConversionError(
+                f"features[{index}].geometry.coordinates for MultiLineString "
+                "must contain exactly one part"
+            )
+        part = coordinates[0]
+        if not isinstance(part, list):
+            raise ConversionError(
+                f"features[{index}].geometry.coordinates[0] must be an array"
+            )
+        return {
+            "type": "LineString",
+            "coordinates": part,
+        }
+
+    raise ConversionError(
+        f"features[{index}].geometry.type must be '{BANE_PROFILE.geometry_type}'"
+    )
+
+
 def convert_feature(feature: Any, *, index: int) -> dict[str, Any]:
     """Convert one classic GeoJSON feature to JSON-FG."""
     if not isinstance(feature, dict):
@@ -76,14 +136,12 @@ def convert_feature(feature: Any, *, index: int) -> dict[str, Any]:
     properties = feature.get("properties")
     if not isinstance(properties, dict):
         raise ConversionError(f"features[{index}].properties must be an object")
+    properties = normalize_properties(properties)
 
     geometry = feature.get("geometry")
     if not isinstance(geometry, dict):
         raise ConversionError(f"features[{index}].geometry must be an object")
-    if geometry.get("type") != BANE_PROFILE.geometry_type:
-        raise ConversionError(
-            f"features[{index}].geometry.type must be '{BANE_PROFILE.geometry_type}'"
-        )
+    geometry = normalize_geometry_for_profile(geometry, index=index)
     coordinates = geometry.get("coordinates")
     if not isinstance(coordinates, list):
         raise ConversionError(

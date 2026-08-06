@@ -350,6 +350,16 @@ def _classic_geojson_document() -> dict[str, Any]:
     }
 
 
+def _classic_geojson_document_with_alias_names() -> dict[str, Any]:
+    document = _classic_geojson_document()
+    properties = document["features"][0]["properties"]
+    properties["navnerom"] = properties.pop("identifikasjon_navnerom")
+    properties["versjonid"] = "2026-02-25 09:10:42.653812000"
+    properties["datafangstmetode"] = "fot"
+    properties["noyaktighet"] = 19
+    return document
+
+
 def test_imports_classic_geojson_when_filename_ends_with_geojson() -> None:
     requests: list[httpx.Request] = []
 
@@ -398,6 +408,32 @@ def test_classic_geojson_extension_is_case_insensitive() -> None:
         )
 
     assert response.status_code == 200
+
+
+def test_imports_classic_geojson_with_alias_property_names() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": TRACK_UUID})
+
+    with _test_client(httpx.MockTransport(handler)) as client:
+        response = client.post(
+            "/imports",
+            files={
+                "file": (
+                    "bane.geojson",
+                    json.dumps(_classic_geojson_document_with_alias_names()),
+                    "application/geo+json",
+                )
+            },
+        )
+
+    assert response.status_code == 200
+    payload = json.loads(requests[0].content)
+    assert payload["properties"]["identifikasjon_navnerom"] == (
+        "http://data.geonorge.no/SFKB/FKB-Bane/so"
+    )
 
 
 def test_rejects_invalid_classic_geojson_before_upstream_calls() -> None:

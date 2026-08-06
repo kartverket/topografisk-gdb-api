@@ -129,6 +129,45 @@ def test_convert_document_is_accepted_by_importer() -> None:
     )
 
 
+def test_convert_document_converts_single_part_multilinestring() -> None:
+    feature = _source_feature()
+    feature["geometry"] = {
+        "type": "MultiLineString",
+        "coordinates": [feature["geometry"]["coordinates"]],
+    }
+
+    converted = convert_document(_source_document([feature]))
+
+    assert converted["features"][0]["place"]["type"] == "LineString"
+    assert converted["features"][0]["place"]["coordinates"] == [
+        [279754.06142351438757, 7041951.166005967184901, 5.86],
+        [279761.890727702528238, 7041956.309099378995597, 5.54],
+    ]
+
+
+def test_convert_document_rejects_multipart_multilinestring() -> None:
+    feature = _source_feature()
+    feature["geometry"] = {
+        "type": "MultiLineString",
+        "coordinates": [
+            [
+                [279754.06142351438757, 7041951.166005967184901, 5.86],
+                [279761.890727702528238, 7041956.309099378995597, 5.54],
+            ],
+            [
+                [279800.0, 7042000.0, 6.0],
+                [279810.0, 7042010.0, 6.1],
+            ],
+        ],
+    }
+
+    with pytest.raises(
+        ConversionError,
+        match="geometry.coordinates for MultiLineString must contain exactly one part",
+    ):
+        convert_document(_source_document([feature]))
+
+
 def test_convert_file_writes_jsonfg(tmp_path: Path) -> None:
     source = tmp_path / "bane.geojson"
     destination = tmp_path / "bane.jsonfg"
@@ -158,3 +197,24 @@ def test_crs_override() -> None:
 def test_unknown_objtype() -> None:
     with pytest.raises(ConversionError, match=r"properties\.objtype must be one of"):
         convert_document(_source_document([_source_feature(objtype="Veg")]))
+
+
+def test_convert_document_applies_property_alias_fallbacks() -> None:
+    feature = _source_feature()
+    feature["properties"].pop("identifikasjon_navnerom")
+    feature["properties"]["navnerom"] = "http://data.geonorge.no/SFKB/FKB-Bane/so"
+    feature["properties"]["versjonid"] = "2026-02-25 09:10:42.653812000"
+    feature["properties"].pop("kvalitet_datafangstmetode")
+    feature["properties"].pop("kvalitet_noyaktighet")
+    feature["properties"]["datafangstmetode"] = "fot"
+    feature["properties"]["noyaktighet"] = 22
+
+    converted = convert_document(_source_document([feature]))
+    properties = converted["features"][0]["properties"]
+
+    assert properties["identifikasjon_navnerom"] == (
+        "http://data.geonorge.no/SFKB/FKB-Bane/so"
+    )
+    assert properties["identifikasjon_versjonid"] == "2026-02-25 09:10:42.653812000"
+    assert properties["kvalitet_datafangstmetode"] == "fot"
+    assert properties["kvalitet_noyaktighet"] == 22
