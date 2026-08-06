@@ -10,6 +10,8 @@ export const buildingsExtrusionLayerId = 'buildings-extrusion'
 export const DEFAULT_3D_PITCH = 60
 export const FLOOR_HEIGHT_M = 3
 export const ELEVATED_LINE_WIDTH_M = 3
+/** Vertical thickness of elevated line beams (meters). */
+export const ELEVATED_LINE_THICKNESS_M = 2
 const MIN_EXTRUSION_HEIGHT_M = 0.5
 
 function segmentFootprint(
@@ -39,12 +41,21 @@ function segmentFootprint(
   ]
 }
 
-/** Approximate elevated LineStrings as thin fill-extrusion footprints. */
+/**
+ * Approximate elevated LineStrings as thin fill-extrusion beams.
+ *
+ * Z is used as elevation (base/height), not as a column from the ground.
+ * That matters for MapLibre: translucent fill-extrusion punches holes where
+ * footprints overlap in the same layer — tall ground-to-Z columns at crossings
+ * overlap heavily and crop each other down to the basemap.
+ */
 export function elevatedLineSegments(
   featureCollection: FeatureCollection,
   widthMeters = ELEVATED_LINE_WIDTH_M,
+  thicknessMeters = ELEVATED_LINE_THICKNESS_M,
 ): FeatureCollection {
   const features: Feature[] = []
+  const halfThickness = Math.max(thicknessMeters, MIN_EXTRUSION_HEIGHT_M) / 2
 
   for (const feature of featureCollection.features) {
     if (
@@ -64,14 +75,18 @@ export function elevatedLineSegments(
         typeof start[2] === 'number' && Number.isFinite(start[2]) ? start[2] : 0
       const z2 =
         typeof end[2] === 'number' && Number.isFinite(end[2]) ? end[2] : 0
-      const height = Math.max(z1, z2, MIN_EXTRUSION_HEIGHT_M)
+      const midZ = (z1 + z2) / 2
+      const base = Math.max(0, midZ - halfThickness)
+      const height = Math.max(base + MIN_EXTRUSION_HEIGHT_M, midZ + halfThickness)
 
       features.push({
         type: 'Feature',
         properties: {
           ...(feature.properties ?? {}),
+          // Color by rail elevation; base/height define the thin beam.
+          elevation: midZ,
+          base,
           height,
-          base: 0,
         },
         geometry: {
           type: 'Polygon',
@@ -102,12 +117,6 @@ export const HEIGHT_COLOR_MAX_M = 300
 export const EXTRUSION_TOP_CAP_M = 5
 export const EXTRUSION_OPACITY_MIN = 0.35
 export const EXTRUSION_OPACITY_MAX = 0.9
-
-const EXTRUSION_BAND_KEYS = ['shaft', 'cap'] as const
-
-export function extrusionBandLayerIds(baseLayerId: string): string[] {
-  return EXTRUSION_BAND_KEYS.map((band) => `${baseLayerId}-${band}`)
-}
 
 /** Top of the translucent shaft / base of the opaque cap. */
 export function extrusionShaftTopExpression(

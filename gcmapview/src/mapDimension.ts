@@ -6,7 +6,6 @@ import {
   buildingsExtrusionLayerId,
   DEFAULT_3D_PITCH,
   elevatedLineSegments,
-  extrusionBandLayerIds,
   extrusionShaftTopExpression,
   EXTRUSION_OPACITY_MAX,
   EXTRUSION_OPACITY_MIN,
@@ -27,11 +26,26 @@ const flatOnlyLayerIds = [
   trackCentresLayerId,
 ] as const
 
+/**
+ * Buildings: translucent shaft+cap. Elevated lines: opaque beam + flat ground
+ * shadow (2D fill). Do not use translucent fill-extrusion for line shafts —
+ * overlapping footprints punch basemap holes.
+ */
 const extrusionLayerIds = [
-  ...extrusionBandLayerIds(buildingsExtrusionLayerId),
-  ...extrusionBandLayerIds(platformEdgesExtrusionLayerId),
-  ...extrusionBandLayerIds(trackCentresExtrusionLayerId),
-]
+  `${buildingsExtrusionLayerId}-shaft`,
+  `${buildingsExtrusionLayerId}-cap`,
+  `${platformEdgesExtrusionLayerId}-shadow`,
+  `${trackCentresExtrusionLayerId}-shadow`,
+  `${platformEdgesExtrusionLayerId}-solid`,
+  `${trackCentresExtrusionLayerId}-solid`,
+] as const
+
+type OpacityBandedExtrusion = {
+  baseLayerId: string
+  source: string
+  heightExpression: ExpressionSpecification
+  filter?: maplibregl.FilterSpecification
+}
 
 function setLayerVisibility(
   map: maplibregl.Map,
@@ -42,16 +56,11 @@ function setLayerVisibility(
   map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none')
 }
 
-function addOpacityBandedExtrusion(options: {
-  map: maplibregl.Map
-  baseLayerId: string
-  source: string
-  heightExpression: ExpressionSpecification
-  filter?: maplibregl.FilterSpecification
-}) {
-  const { map, baseLayerId, source, heightExpression, filter } = options
-  const color = heightColorExpression(heightExpression)
-  const shaftTop = extrusionShaftTopExpression(heightExpression)
+function addExtrusionShaft(
+  map: maplibregl.Map,
+  options: OpacityBandedExtrusion,
+) {
+  const { baseLayerId, source, heightExpression, filter } = options
   const tallerThanCap: ExpressionSpecification = [
     '>',
     heightExpression,
@@ -61,7 +70,6 @@ function addOpacityBandedExtrusion(options: {
     ? (['all', filter, tallerThanCap] as maplibregl.FilterSpecification)
     : tallerThanCap
 
-  // Translucent shaft: only when feature is taller than the top cap.
   map.addLayer({
     id: `${baseLayerId}-shaft`,
     type: 'fill-extrusion',
@@ -69,14 +77,19 @@ function addOpacityBandedExtrusion(options: {
     filter: shaftFilter,
     layout: { visibility: 'none' },
     paint: {
-      'fill-extrusion-color': color,
+      'fill-extrusion-color': heightColorExpression(heightExpression),
       'fill-extrusion-opacity': EXTRUSION_OPACITY_MIN,
       'fill-extrusion-base': 0,
-      'fill-extrusion-height': shaftTop,
+      'fill-extrusion-height': extrusionShaftTopExpression(heightExpression),
       'fill-extrusion-vertical-gradient': false,
     },
   })
-  // Opaque top cap of at most EXTRUSION_TOP_CAP_M meters.
+}
+
+function addExtrusionCap(map: maplibregl.Map, options: OpacityBandedExtrusion) {
+  const { baseLayerId, source, heightExpression, filter } = options
+  const shaftTop = extrusionShaftTopExpression(heightExpression)
+
   map.addLayer({
     id: `${baseLayerId}-cap`,
     type: 'fill-extrusion',
@@ -84,9 +97,68 @@ function addOpacityBandedExtrusion(options: {
     ...(filter ? { filter } : {}),
     layout: { visibility: 'none' },
     paint: {
-      'fill-extrusion-color': color,
+      'fill-extrusion-color': heightColorExpression(heightExpression),
       'fill-extrusion-opacity': EXTRUSION_OPACITY_MAX,
       'fill-extrusion-base': shaftTop,
+      'fill-extrusion-height': heightExpression,
+      'fill-extrusion-vertical-gradient': false,
+    },
+  })
+}
+
+const elevatedLineElevationExpression: ExpressionSpecification = [
+  'to-number',
+  ['coalesce', ['get', 'elevation'], ['get', 'height'], 0],
+]
+
+/**
+ * Flat footprint on the ground plane (z=0). Uses fill, not fill-extrusion, so
+ * overlapping shadows composite instead of punching holes.
+ */
+function addElevatedLineGroundShadow(
+  map: maplibregl.Map,
+  baseLayerId: string,
+  source: string,
+) {
+  map.addLayer({
+    id: `${baseLayerId}-shadow`,
+    type: 'fill',
+    source,
+    layout: { visibility: 'none' },
+    paint: {
+      'fill-color': heightColorExpression(elevatedLineElevationExpression),
+      'fill-opacity': EXTRUSION_OPACITY_MIN,
+    },
+  })
+}
+
+/** Opaque beam at Z elevation (avoids translucent overlap cropping). */
+function addOpaqueElevatedLineExtrusion(
+  map: maplibregl.Map,
+  baseLayerId: string,
+  source: string,
+) {
+  const baseExpression: ExpressionSpecification = [
+    'to-number',
+    ['coalesce', ['get', 'base'], 0],
+  ]
+  const heightExpression: ExpressionSpecification = [
+    'to-number',
+    ['coalesce', ['get', 'height'], 1],
+  ]
+
+  map.addLayer({
+    id: `${baseLayerId}-solid`,
+    type: 'fill-extrusion',
+    source,
+    layout: { visibility: 'none' },
+    paint: {
+      'fill-extrusion-color': heightColorExpression(
+        elevatedLineElevationExpression,
+      ),
+      // Opacity must stay 1: translucent fill-extrusion crops overlapping footprints.
+      'fill-extrusion-opacity': 1,
+      'fill-extrusion-base': baseExpression,
       'fill-extrusion-height': heightExpression,
       'fill-extrusion-vertical-gradient': false,
     },
@@ -104,30 +176,37 @@ export function addExtrusionLayers(map: maplibregl.Map) {
   })
 
   const buildingHeight = buildingExtrusionHeightExpression()
-  const lineHeight: ExpressionSpecification = [
-    'to-number',
-    ['coalesce', ['get', 'height'], 1],
-  ]
-
-  addOpacityBandedExtrusion({
-    map,
+  const buildingBand: OpacityBandedExtrusion = {
     baseLayerId: buildingsExtrusionLayerId,
     source: 'buildings',
     heightExpression: buildingHeight,
     filter: ['==', '$type', 'Polygon'],
-  })
-  addOpacityBandedExtrusion({
+  }
+
+  addExtrusionShaft(map, buildingBand)
+  addExtrusionCap(map, buildingBand)
+
+  // Ground shadows before opaque beams so fills sit under extrusions.
+  addElevatedLineGroundShadow(
     map,
-    baseLayerId: platformEdgesExtrusionLayerId,
-    source: platformEdgesExtrusionSourceId,
-    heightExpression: lineHeight,
-  })
-  addOpacityBandedExtrusion({
+    platformEdgesExtrusionLayerId,
+    platformEdgesExtrusionSourceId,
+  )
+  addElevatedLineGroundShadow(
     map,
-    baseLayerId: trackCentresExtrusionLayerId,
-    source: trackCentresExtrusionSourceId,
-    heightExpression: lineHeight,
-  })
+    trackCentresExtrusionLayerId,
+    trackCentresExtrusionSourceId,
+  )
+  addOpaqueElevatedLineExtrusion(
+    map,
+    platformEdgesExtrusionLayerId,
+    platformEdgesExtrusionSourceId,
+  )
+  addOpaqueElevatedLineExtrusion(
+    map,
+    trackCentresExtrusionLayerId,
+    trackCentresExtrusionSourceId,
+  )
 }
 
 export function upsertElevatedLineSources(
