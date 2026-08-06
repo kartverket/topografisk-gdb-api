@@ -63,7 +63,8 @@ jobs:
       - name: Sync dependencies
         run: uv sync --project geocomponents --frozen
       - name: Run tests
-        run: uv run --project geocomponents pytest
+        working-directory: geocomponents
+        run: uv run pytest
 
   test-gcimport:
     runs-on: ubuntu-latest
@@ -75,7 +76,8 @@ jobs:
       - name: Sync dependencies
         run: uv sync --project gcimport --frozen
       - name: Run tests
-        run: uv run --project gcimport pytest
+        working-directory: gcimport
+        run: uv run pytest
 
   audit:
     runs-on: ubuntu-latest

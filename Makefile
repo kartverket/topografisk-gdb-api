@@ -28,7 +28,7 @@ gcimport-install:
 	uv sync --project gcimport
 
 gcimport-test:
-	uv run --project gcimport pytest
+	cd gcimport && uv run pytest
 
 gcimport-run:
 	uv run --project gcimport uvicorn gcimport.app:app --port 8001
