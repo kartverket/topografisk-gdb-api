@@ -50,7 +50,11 @@ def _value(sql_type, variant=0):
 
 
 def _sample_feature(coll):
-    props = {f.name: _value(f.sql_type) for f in coll.fields if f.required}
+    props = {
+        f.name: _value(f.sql_type)
+        for f in coll.fields
+        if f.required and not f.auto_increment
+    }
     if any(f.name == "source" for f in coll.fields):
         props["source"] = "orig"
     return {
@@ -121,7 +125,14 @@ def test_simple_collections_support_full_crud_roundtrip(datasets, conn):
                 # Partial update changes only the sent property; `source`
                 # (set to "orig" at create) is the untouched witness.
                 witness = any(f.name == "source" for f in coll.fields)
-                changed = next((f for f in coll.fields if f.name != "source"), None)
+                changed = next(
+                    (
+                        f
+                        for f in coll.fields
+                        if f.name != "source" and not f.auto_increment
+                    ),
+                    None,
+                )
                 if changed and witness:
                     cur.execute(
                         "select ogc.feature_update(%s,%s,%s,%s)",
