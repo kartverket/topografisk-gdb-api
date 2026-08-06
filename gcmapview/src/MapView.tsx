@@ -890,6 +890,7 @@ export function MapView() {
     });
 
     map.addControl(new maplibregl.NavigationControl(), "top-right");
+    map.addControl(new maplibregl.FullscreenControl(), "top-right");
     map.addControl(new maplibregl.GlobeControl(), "top-right");
     configureInitialMapInteraction(map);
 
