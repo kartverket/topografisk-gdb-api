@@ -58,6 +58,10 @@ const emptyFeatureCollection: FeatureCollection = {
 /** Vector features are fetched only when the map zoom is strictly above this. */
 const MIN_VECTOR_ZOOM = 10;
 
+/** Fixed initial view — do not fit the camera to loaded feature extents. */
+const OSLO_CENTER: [number, number] = [10.75, 59.91];
+const OSLO_ZOOM = 11;
+
 function isVectorZoom(map: maplibregl.Map) {
   return map.getZoom() > MIN_VECTOR_ZOOM;
 }
@@ -299,7 +303,9 @@ function addNativeFeatureSourcesAndLayers(
     type: "circle",
     source: "building-centroids",
     paint: {
-      "circle-color": heightColorExpression(buildingExtrusionHeightExpression()),
+      "circle-color": heightColorExpression(
+        buildingExtrusionHeightExpression(),
+      ),
       "circle-opacity": 0.8,
       "circle-radius": 3,
       "circle-stroke-color": "#ffffff",
@@ -870,8 +876,8 @@ export function MapView() {
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
       style: mapStyle,
-      center: [10.75, 59.91],
-      zoom: 5,
+      center: OSLO_CENTER,
+      zoom: OSLO_ZOOM,
     });
     mapRef.current = map;
     const resizeObserver = new ResizeObserver(() => map.resize());
@@ -1034,7 +1040,6 @@ export function MapView() {
         ),
       );
 
-      const currentBounds = map.getBounds();
       const { parcels, buildings, platformEdges, trackCentres } =
         await getVisibleFeatureCollections(map);
       logLoadedCoordinates("parcels after create", parcels);
@@ -1052,7 +1057,6 @@ export function MapView() {
         buildingCentroidsFeatureCollection(buildings),
       );
       updateBuildingDebugMarkers(map, buildings);
-      map.fitBounds(currentBounds, { animate: false });
       const createdStatus = `Created ${buildingsToCreate.length} building${buildingsToCreate.length === 1 ? "" : "s"} with a ${area * 15} m2 parcel after ${placementAttempts} placement attempt${placementAttempts === 1 ? "" : "s"}. ${buildings.features.length} buildings loaded.`;
       setStatus(createdStatus);
       map.once("idle", () => {
@@ -1083,7 +1087,6 @@ export function MapView() {
     setError(undefined);
 
     try {
-      const currentBounds = map.getBounds();
       const [buildings, parcels] = await Promise.all([
         getFeatureCollection(buildingsItemsUrl),
         getFeatureCollection(parcelsItemsUrl),
@@ -1127,7 +1130,6 @@ export function MapView() {
         buildingCentroidsFeatureCollection(reloadedBuildings),
       );
       updateBuildingDebugMarkers(map, reloadedBuildings);
-      map.fitBounds(currentBounds, { animate: false });
       const clearedStatus = `Cleared ${buildings.features.length} buildings and ${parcels.features.length} parcels.`;
       setStatus(clearedStatus);
       map.once("idle", () => {

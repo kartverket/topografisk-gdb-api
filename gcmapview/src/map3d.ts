@@ -98,6 +98,28 @@ export function buildingExtrusionHeightExpression(
 
 export const HEIGHT_COLOR_MAX_M = 300
 
+/** Two-stack 3D opacity: translucent shaft + opaque top cap (≤ this many meters). */
+export const EXTRUSION_TOP_CAP_M = 5
+export const EXTRUSION_OPACITY_MIN = 0.35
+export const EXTRUSION_OPACITY_MAX = 0.9
+
+const EXTRUSION_BAND_KEYS = ['shaft', 'cap'] as const
+
+export function extrusionBandLayerIds(baseLayerId: string): string[] {
+  return EXTRUSION_BAND_KEYS.map((band) => `${baseLayerId}-${band}`)
+}
+
+/** Top of the translucent shaft / base of the opaque cap. */
+export function extrusionShaftTopExpression(
+  heightExpression: ExpressionSpecification,
+): ExpressionSpecification {
+  return [
+    'max',
+    0,
+    ['-', heightExpression, EXTRUSION_TOP_CAP_M],
+  ]
+}
+
 /** Max finite Z from a LineString coordinate array (meters). */
 export function maxCoordinateHeight(coordinates: Position[]): number {
   let maxHeight = 0
