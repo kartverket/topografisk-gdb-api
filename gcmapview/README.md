@@ -1,32 +1,34 @@
 # gcmapview
 
-A small Vite + React map viewer for the `geocomponents` OGC API.
+A small Vite + React map viewer for the `geocomponents` OGC API, plus a
+JSON-FG upload page that talks to `gcimport`.
 
-In development, Vite proxies `/geocomponents-api` to the local API on
-`http://localhost:8000`, avoiding browser CORS checks between Vite and
-geocomponents. The app renders the `cadastre/parcels` collection from:
+Note that this is a small viewer for developer testing, it is not targeted for
+wide deployment.
 
-```text
-/geocomponents-api/datasets/cadastre/ogc_api/collections/parcels/items?f=json&limit=1000
-```
+## Routes
 
-The map also loads `cadastre/buildings`. Use **Create random building** to POST a
-new `MultiPolygon` building inside the current map view. The generated footprint
-is between 20 and 200 square meters. Each building gets a surrounding parcel
-with approximately fifteen times the main building's area. Some parcels also
-receive a smaller secondary outbuilding.
+- `/` — map with Cadastre (editable) and Bane (read-only) layers
+- `/import` — upload a JSON-FG FeatureCollection to `gcimport`
+
+In development, Vite proxies:
+
+- `/geocomponents-api` → `http://localhost:8000`
+- `/gcimport-api` → `http://localhost:8001`
 
 ## Run
 
-Start the API from `geocomponents`, then run the viewer:
+Start geocomponents and gcimport (for example with `make docker-up`), then:
 
 ```bash
 npm install
 npm run dev
 ```
 
-For a deployed app, or if you do want to call another API host directly, set:
+Optional overrides:
 
 ```bash
-VITE_GEOCOMPONENTS_API_URL=http://localhost:8000 npm run dev
+VITE_GEOCOMPONENTS_API_URL=http://localhost:8000 \
+VITE_GCIMPORT_API_URL=http://localhost:8001 \
+npm run dev
 ```

@@ -13,6 +13,8 @@ from those descriptions.
   locally; see [DEPLOY.md](geocomponents/DEPLOY.md) for deployment.
 - [`gcimport/`](gcimport/) — a profile-driven, single-endpoint FastAPI service
   that validates JSON-FG uploads and idempotently imports dataset features.
+- [`gcmapview/`](gcmapview/) — local Vite + React map viewer with an `/import`
+  page for gcimport and read-only Bane layers on the map.
 - [`nibio/`](nibio/) NIBIO AR5 database dump and schema adjustments. Useful for Postgis Topology integration.
 
 ## Development

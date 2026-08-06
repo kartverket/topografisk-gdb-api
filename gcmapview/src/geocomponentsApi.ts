@@ -5,11 +5,14 @@ export const geocomponentsApiBaseUrl = (
 ).replace(/\/$/, '')
 
 const cadastreApiUrl = `${geocomponentsApiBaseUrl}/datasets/cadastre/ogc_api`
+const baneApiUrl = `${geocomponentsApiBaseUrl}/datasets/bane/ogc_api`
 
 export const parcelsItemsUrl = `${cadastreApiUrl}/collections/parcels/items?f=json&limit=1000`
 export const parcelsCreateUrl = `${cadastreApiUrl}/collections/parcels/items`
 export const buildingsItemsUrl = `${cadastreApiUrl}/collections/buildings/items?f=json&limit=1000`
 export const buildingsCreateUrl = `${cadastreApiUrl}/collections/buildings/items`
+export const platformEdgesItemsUrl = `${baneApiUrl}/collections/jernbaneplattformkant/items?f=json&limit=1000`
+export const trackCentresItemsUrl = `${baneApiUrl}/collections/spormidt/items?f=json&limit=1000`
 
 export type OgcBbox = [number, number, number, number]
 
@@ -23,6 +26,14 @@ export function parcelsItemsInBboxUrl(bbox: OgcBbox) {
 
 export function buildingsItemsInBboxUrl(bbox: OgcBbox) {
   return withBbox(buildingsItemsUrl, bbox)
+}
+
+export function platformEdgesItemsInBboxUrl(bbox: OgcBbox) {
+  return withBbox(platformEdgesItemsUrl, bbox)
+}
+
+export function trackCentresItemsInBboxUrl(bbox: OgcBbox) {
+  return withBbox(trackCentresItemsUrl, bbox)
 }
 
 export function parcelItemUrl(id: string | number) {

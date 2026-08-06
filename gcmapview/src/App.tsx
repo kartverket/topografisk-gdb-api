@@ -1,5 +1,6 @@
 import './App.css'
-import { parcelsItemsUrl } from './geocomponentsApi'
+import { NavLink, Navigate, Route, Routes } from 'react-router'
+import { ImportView } from './ImportView'
 import { MapView } from './MapView'
 
 function App() {
@@ -8,17 +9,20 @@ function App() {
       <header className="app-header">
         <div>
           <p className="eyebrow">geocomponents OGC API</p>
-          <h1>Cadastre parcels</h1>
+          <h1>Geocomponents map</h1>
         </div>
-        <a
-          href={parcelsItemsUrl}
-          target="_blank"
-          rel="noreferrer"
-        >
-          GeoJSON endpoint
-        </a>
+        <nav className="app-nav" aria-label="Main navigation">
+          <NavLink to="/" end>
+            Map
+          </NavLink>
+          <NavLink to="/import">Import</NavLink>
+        </nav>
       </header>
-      <MapView />
+      <Routes>
+        <Route path="/" element={<MapView />} />
+        <Route path="/import" element={<ImportView />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </main>
   )
 }

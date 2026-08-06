@@ -11,25 +11,20 @@ import {
   parcelsCreateUrl,
   parcelsItemsInBboxUrl,
   parcelsItemsUrl,
+  platformEdgesItemsInBboxUrl,
+  trackCentresItemsInBboxUrl,
 } from "./geocomponentsApi";
-
-type Position = [number, number, ...number[]];
-type Coordinates = Position | Coordinates[];
-
-type Feature = {
-  id?: string | number;
-  type: "Feature";
-  geometry: {
-    type: string;
-    coordinates?: Coordinates;
-  } | null;
-  properties?: Record<string, unknown> | null;
-};
-
-type FeatureCollection = {
-  type: "FeatureCollection";
-  features: Feature[];
-};
+import {
+  addBaneSourcesAndLayers,
+  normalizeBaneFeatureCollection,
+  wgs84BboxToBaneBbox,
+} from "./baneLayers";
+import type {
+  Coordinates,
+  Feature,
+  FeatureCollection,
+  Position,
+} from "./geojson";
 
 const emptyFeatureCollection: FeatureCollection = {
   type: "FeatureCollection",
@@ -217,11 +212,15 @@ function logLayerState(map: maplibregl.Map) {
     parcelsSource: Boolean(map.getSource("parcels")),
     buildingsSource: Boolean(map.getSource("buildings")),
     buildingCentroidsSource: Boolean(map.getSource("building-centroids")),
+    platformEdgesSource: Boolean(map.getSource("bane-platform-edges")),
+    trackCentresSource: Boolean(map.getSource("bane-track-centres")),
     parcelsFillLayer: Boolean(map.getLayer("parcels-fill")),
     parcelsOutlineLayer: Boolean(map.getLayer("parcels-outline")),
     buildingsFillLayer: Boolean(map.getLayer("buildings-fill")),
     buildingsOutlineLayer: Boolean(map.getLayer("buildings-outline")),
     buildingCentroidsLayer: Boolean(map.getLayer("building-centroids-circle")),
+    platformEdgesLayer: Boolean(map.getLayer("bane-platform-edges-line")),
+    trackCentresLayer: Boolean(map.getLayer("bane-track-centres-line")),
   });
 }
 
@@ -293,6 +292,8 @@ function addNativeFeatureSourcesAndLayers(
   map: maplibregl.Map,
   parcels: FeatureCollection,
   buildings: FeatureCollection,
+  platformEdges: FeatureCollection,
+  trackCentres: FeatureCollection,
 ) {
   map.addSource("parcels", {
     type: "geojson",
@@ -363,6 +364,8 @@ function addNativeFeatureSourcesAndLayers(
       "line-width": ["interpolate", ["linear"], ["zoom"], 5, 2, 14, 4],
     },
   });
+  // Bane lines are read-only and drawn above cadastre fills.
+  addBaneSourcesAndLayers(map, platformEdges, trackCentres);
 }
 
 async function getFeatureCollection(url: string) {
@@ -402,11 +405,14 @@ function visibleOgcBbox(map: maplibregl.Map): OgcBbox {
 
 async function getVisibleFeatureCollections(map: maplibregl.Map) {
   const bbox = visibleOgcBbox(map);
-  const [parcels, buildings] = await Promise.all([
+  const baneBbox = wgs84BboxToBaneBbox(bbox);
+  const [parcels, buildings, platformEdges, trackCentres] = await Promise.all([
     getFeatureCollection(parcelsItemsInBboxUrl(bbox)),
     getFeatureCollection(buildingsItemsInBboxUrl(bbox)),
+    getFeatureCollection(platformEdgesItemsInBboxUrl(baneBbox)),
+    getFeatureCollection(trackCentresItemsInBboxUrl(baneBbox)),
   ]);
-  return { bbox, parcels, buildings };
+  return { bbox, parcels, buildings, platformEdges, trackCentres };
 }
 
 function idFromLocation(location: string | null) {
@@ -759,10 +765,12 @@ async function upsertGeoJsonSource(
   });
 }
 
-async function setNativePolygonSources(
+async function setNativeFeatureSources(
   map: maplibregl.Map,
   parcels: FeatureCollection,
   buildings: FeatureCollection,
+  platformEdges: FeatureCollection,
+  trackCentres: FeatureCollection,
 ) {
   await Promise.all([
     upsertGeoJsonSource(
@@ -774,6 +782,16 @@ async function setNativePolygonSources(
       map,
       "buildings",
       normalizePolygonFeatureCollection(buildings),
+    ),
+    upsertGeoJsonSource(
+      map,
+      "bane-platform-edges",
+      normalizeBaneFeatureCollection(platformEdges),
+    ),
+    upsertGeoJsonSource(
+      map,
+      "bane-track-centres",
+      normalizeBaneFeatureCollection(trackCentres),
     ),
   ]);
 }
@@ -867,13 +885,19 @@ export function MapView() {
     async function reloadVisibleData() {
       const requestId = ++visibleRequestId;
       try {
-        const { bbox, parcels, buildings } =
+        const { bbox, parcels, buildings, platformEdges, trackCentres } =
           await getVisibleFeatureCollections(map);
         if (cancelled || requestId !== visibleRequestId) {
           return;
         }
 
-        await setNativePolygonSources(map, parcels, buildings);
+        await setNativeFeatureSources(
+          map,
+          parcels,
+          buildings,
+          platformEdges,
+          trackCentres,
+        );
         await upsertGeoJsonSource(
           map,
           "building-centroids",
@@ -882,7 +906,7 @@ export function MapView() {
         updateBuildingDebugMarkers(map, buildings);
         setError(undefined);
         setStatus(
-          `Loaded ${parcels.features.length} visible parcels and ${buildings.features.length} visible buildings for bbox ${bbox.map((value) => value.toFixed(5)).join(",")}.`,
+          `Loaded ${parcels.features.length} parcels, ${buildings.features.length} buildings, ${platformEdges.features.length} platform edges, and ${trackCentres.features.length} track centres for bbox ${bbox.map((value) => value.toFixed(5)).join(",")}.`,
         );
       } catch (cause) {
         if (!cancelled && requestId === visibleRequestId) {
@@ -894,9 +918,17 @@ export function MapView() {
 
     map.once("load", async () => {
       const initialBbox = visibleOgcBbox(map);
-      const [parcelsResult, buildingsResult] = await Promise.allSettled([
+      const initialBaneBbox = wgs84BboxToBaneBbox(initialBbox);
+      const [
+        parcelsResult,
+        buildingsResult,
+        platformEdgesResult,
+        trackCentresResult,
+      ] = await Promise.allSettled([
         getFeatureCollection(parcelsItemsInBboxUrl(initialBbox)),
         getFeatureCollection(buildingsItemsInBboxUrl(initialBbox)),
+        getFeatureCollection(platformEdgesItemsInBboxUrl(initialBaneBbox)),
+        getFeatureCollection(trackCentresItemsInBboxUrl(initialBaneBbox)),
       ]);
       if (cancelled) {
         return;
@@ -904,8 +936,12 @@ export function MapView() {
 
       let parcelsCount = 0;
       let buildingsCount = 0;
+      let platformEdgesCount = 0;
+      let trackCentresCount = 0;
       let parcels = emptyFeatureCollection;
       let buildings = emptyFeatureCollection;
+      let platformEdges = emptyFeatureCollection;
+      let trackCentres = emptyFeatureCollection;
       let initialDataBounds: maplibregl.LngLatBounds | undefined;
       const errors: string[] = [];
 
@@ -927,7 +963,35 @@ export function MapView() {
         errors.push(`buildings: ${buildingsResult.reason}`);
       }
 
-      addNativeFeatureSourcesAndLayers(map, parcels, buildings);
+      if (platformEdgesResult.status === "fulfilled") {
+        platformEdges = platformEdgesResult.value;
+        logLoadedCoordinates("platform edges", platformEdges);
+        platformEdgesCount = platformEdges.features.length;
+        initialDataBounds ??= featureBounds(
+          normalizeBaneFeatureCollection(platformEdges),
+        );
+      } else {
+        errors.push(`platform edges: ${platformEdgesResult.reason}`);
+      }
+
+      if (trackCentresResult.status === "fulfilled") {
+        trackCentres = trackCentresResult.value;
+        logLoadedCoordinates("track centres", trackCentres);
+        trackCentresCount = trackCentres.features.length;
+        initialDataBounds ??= featureBounds(
+          normalizeBaneFeatureCollection(trackCentres),
+        );
+      } else {
+        errors.push(`track centres: ${trackCentresResult.reason}`);
+      }
+
+      addNativeFeatureSourcesAndLayers(
+        map,
+        parcels,
+        buildings,
+        platformEdges,
+        trackCentres,
+      );
       updateBuildingDebugMarkers(map, buildings);
       map.on("moveend", reloadVisibleData);
 
@@ -939,9 +1003,13 @@ export function MapView() {
       setIsMapReady(errors.length === 0);
       setError(errors.length > 0 ? errors.join("; ") : undefined);
       const loadedStatus =
-        parcelsCount + buildingsCount === 0
-          ? "Dataset loaded, but no parcels or buildings were returned. Use Create random building to add data."
-          : `Loaded ${parcelsCount} parcels and ${buildingsCount} buildings from the API.`;
+        parcelsCount +
+          buildingsCount +
+          platformEdgesCount +
+          trackCentresCount ===
+        0
+          ? "Datasets loaded, but no visible features were returned."
+          : `Loaded ${parcelsCount} parcels, ${buildingsCount} buildings, ${platformEdgesCount} platform edges, and ${trackCentresCount} track centres from the API.`;
       setStatus(loadedStatus);
       map.once("idle", () => {
         const nativeState = logNativeRenderingState(map);
@@ -1017,10 +1085,21 @@ export function MapView() {
       );
 
       const currentBounds = map.getBounds();
-      const { parcels, buildings } = await getVisibleFeatureCollections(map);
+      const {
+        parcels,
+        buildings,
+        platformEdges,
+        trackCentres,
+      } = await getVisibleFeatureCollections(map);
       logLoadedCoordinates("parcels after create", parcels);
       logLoadedCoordinates("buildings after create", buildings);
-      await setNativePolygonSources(map, parcels, buildings);
+      await setNativeFeatureSources(
+        map,
+        parcels,
+        buildings,
+        platformEdges,
+        trackCentres,
+      );
       await upsertGeoJsonSource(
         map,
         "building-centroids",
@@ -1080,10 +1159,18 @@ export function MapView() {
       const {
         parcels: reloadedParcels,
         buildings: reloadedBuildings,
+        platformEdges: reloadedPlatformEdges,
+        trackCentres: reloadedTrackCentres,
       } = await getVisibleFeatureCollections(map);
       logLoadedCoordinates("parcels after clear", reloadedParcels);
       logLoadedCoordinates("buildings after clear", reloadedBuildings);
-      await setNativePolygonSources(map, reloadedParcels, reloadedBuildings);
+      await setNativeFeatureSources(
+        map,
+        reloadedParcels,
+        reloadedBuildings,
+        reloadedPlatformEdges,
+        reloadedTrackCentres,
+      );
       await upsertGeoJsonSource(
         map,
         "building-centroids",
@@ -1109,7 +1196,7 @@ export function MapView() {
   }
 
   return (
-    <section className="map-card" aria-label="Cadastre parcels map">
+    <section className="map-card" aria-label="Cadastre and Bane map">
       <div ref={mapContainerRef} className="map" />
       <div className="map-actions">
         <button
@@ -1129,6 +1216,28 @@ export function MapView() {
           {isClearing ? "Clearing data..." : "Clear data"}
         </button>
       </div>
+      <aside className="map-legend" aria-label="Map layers">
+        <p className="map-legend__title">Layers</p>
+        <ul>
+          <li>
+            <span className="map-legend__swatch map-legend__swatch--parcel" />
+            Cadastre parcels
+          </li>
+          <li>
+            <span className="map-legend__swatch map-legend__swatch--building" />
+            Cadastre buildings
+          </li>
+          <li>
+            <span className="map-legend__swatch map-legend__swatch--platform" />
+            Bane platform edges
+          </li>
+          <li>
+            <span className="map-legend__swatch map-legend__swatch--track" />
+            Bane track centres
+          </li>
+        </ul>
+        <p className="map-legend__note">Bane layers are read-only</p>
+      </aside>
       <div className={error ? "map-status map-status--error" : "map-status"}>
         <span>{status}</span>
         {error ? <code>{error}</code> : null}

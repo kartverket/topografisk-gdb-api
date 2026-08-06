@@ -11,8 +11,10 @@
   },
   "dependencies": {
     "maplibre-gl": "^6.1.0",
+    "proj4": "^2.21.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "react-router": "^8.3.0"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
