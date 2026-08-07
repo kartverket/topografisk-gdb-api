@@ -93,6 +93,17 @@ def test_bane_business_key_gets_unique_nulls_not_distinct_index():
     ) in ddl
 
 
+def test_every_collection_gets_a_gist_index_on_geometry():
+    plan = _cadastre_plan()
+    stmts = postgis.table_statements(plan)
+    for coll in plan.collections:
+        expected = (
+            f'create index if not exists "{coll.collection_name}_geometry_idx" '
+            f'on {coll.table.qualified} using gist ("geometry")'
+        )
+        assert expected in stmts
+
+
 def test_bane_geometry_columns_include_height():
     plan = _bane_plan()
     for collection_name in ("jernbaneplattformkant", "spormidt"):

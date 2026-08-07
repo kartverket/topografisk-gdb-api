@@ -5,8 +5,9 @@ This is one of only two PostgreSQL-specific modules (the other is
 future migration emitter can reuse ``table_statements`` without executing it.
 
 DDL is intentionally minimal/structural for now (column types, PK, geometry
-type+SRID, FKs). Richer constraints (CHECK, code-list enforcement, nullability
-on every attribute) are the deferred "validation in the DB" concern.
+type+SRID, GiST on geometry, FKs). Richer constraints (CHECK, code-list
+enforcement, nullability on every attribute) are the deferred "validation in
+the DB" concern.
 """
 
 from __future__ import annotations
@@ -70,6 +71,14 @@ def _fk_ddl(table: TablePlan) -> list[str]:
     return stmts
 
 
+def _geometry_index_ddl(plan: CollectionPlan) -> str:
+    geom = plan.table.geometry.name
+    return (
+        f'create index if not exists "{plan.collection_name}_geometry_idx" '
+        f'on {plan.table.qualified} using gist ("{geom}")'
+    )
+
+
 def _upsert_index_ddl(plan: CollectionPlan) -> str | None:
     if not plan.upsert_key:
         return None
@@ -98,6 +107,7 @@ def table_statements(plan: SchemaPlan) -> list[str]:
     for coll in plan.collections:
         stmts.append(_table_ddl(coll.table))
     for coll in plan.collections:
+        stmts.append(_geometry_index_ddl(coll))
         if upsert_index := _upsert_index_ddl(coll):
             stmts.append(upsert_index)
     for coll in plan.collections:
