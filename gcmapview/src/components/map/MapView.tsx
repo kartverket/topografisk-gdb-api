@@ -3,16 +3,7 @@ import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { AlertCircle, Eraser, Plus } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import {
   buildingItemUrl,
@@ -26,29 +17,32 @@ import {
   parcelsItemsUrl,
   platformEdgesItemsInBboxUrl,
   trackCentresItemsInBboxUrl,
-} from "./geocomponentsApi";
+} from "../../api/geocomponentsApi";
 import {
   addBaneSourcesAndLayers,
   normalizeBaneFeatureCollection,
   wgs84BboxToBaneBbox,
-} from "./baneLayers";
+} from "../../map/baneLayers";
 import {
   addExtrusionLayers,
   applyMapDimensionMode,
+  applyMapLayerVisibility,
   configureInitialMapInteraction,
   upsertElevatedLineSources,
-} from "./mapDimension";
+} from "../../map/mapDimension";
 import {
   buildingExtrusionHeightExpression,
   heightColorExpression,
-} from "./map3d";
+} from "../../map/map3d";
 import { useMapDimension } from "./MapDimensionContext";
+import { MapLayersCard } from "./MapLayersCard";
+import { useLayerVisibilityStore } from "../../store/layerVisibilityStore";
 import type {
   Coordinates,
   Feature,
   FeatureCollection,
   Position,
-} from "./geojson";
+} from "../../map/geojson";
 
 const emptyFeatureCollection: FeatureCollection = {
   type: "FeatureCollection",
@@ -830,12 +824,21 @@ export function MapView() {
   const mapRef = useRef<maplibregl.Map>(null);
   const buildingMarkerRefs = useRef<maplibregl.Marker[]>([]);
   const { is3d } = useMapDimension();
+  const is3dRef = useRef(is3d);
+  is3dRef.current = is3d;
+  const layerVisibility = useLayerVisibilityStore((state) => state.visibility);
   const [status, setStatus] = useState("Loading map...");
   const [error, setError] = useState<string>();
   const [isMapReady, setIsMapReady] = useState(false);
   const [isVectorZoomActive, setIsVectorZoomActive] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
+
+  function applyBuildingMarkerVisibility(visible: boolean) {
+    for (const marker of buildingMarkerRefs.current) {
+      marker.getElement().style.display = visible ? "" : "none";
+    }
+  }
 
   function updateBuildingDebugMarkers(
     map: maplibregl.Map,
@@ -844,6 +847,10 @@ export function MapView() {
     for (const marker of buildingMarkerRefs.current) {
       marker.remove();
     }
+
+    const showMarkers =
+      !is3dRef.current &&
+      useLayerVisibilityStore.getState().visibility.buildings;
 
     buildingMarkerRefs.current = buildings.features.flatMap((building) => {
       const centroid = featureCentroid(building);
@@ -855,6 +862,7 @@ export function MapView() {
       markerElement.className =
         "h-1.5 w-1.5 rounded-full border border-white bg-[#006eff] shadow-[0_0_0_1px_rgb(0_110_255/0.45)]";
       markerElement.title = `Building ${building.id ?? ""}`.trim();
+      markerElement.style.display = showMarkers ? "" : "none";
 
       return [
         new maplibregl.Marker({
@@ -980,14 +988,25 @@ export function MapView() {
       return;
     }
 
-    applyMapDimensionMode(map, is3d);
-    if (is3d) {
-      for (const marker of buildingMarkerRefs.current) {
-        marker.remove();
-      }
-      buildingMarkerRefs.current = [];
-    }
+    applyMapDimensionMode(
+      map,
+      is3d,
+      useLayerVisibilityStore.getState().visibility,
+    );
+    applyBuildingMarkerVisibility(
+      useLayerVisibilityStore.getState().visibility.buildings && !is3d,
+    );
   }, [is3d, isMapReady]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady) {
+      return;
+    }
+
+    applyMapLayerVisibility(map, is3d, layerVisibility);
+    applyBuildingMarkerVisibility(layerVisibility.buildings && !is3d);
+  }, [layerVisibility, isMapReady, is3d]);
 
   async function createRandomBuilding() {
     const map = mapRef.current;
@@ -1168,87 +1187,17 @@ export function MapView() {
         <Button
           size="sm"
           variant="destructive"
+          className="border-destructive/30 bg-destructive text-white shadow-md hover:bg-destructive/90 hover:text-white"
           disabled={
             !isMapReady || !isVectorZoomActive || isCreating || isClearing
           }
           onClick={clearData}
         >
           <Eraser data-icon="inline-start" />
-          {isClearing ? "Clearing data..." : "Clear data"}
+          {isClearing ? "Clearing data..." : "Clear parcels"}
         </Button>
       </div>
-      <Card
-        size="sm"
-        className="absolute right-4 bottom-[88px] z-[3] w-[220px] bg-card/95 shadow-md max-sm:top-20 max-sm:right-auto max-sm:bottom-auto max-sm:left-4"
-        aria-label="Map layers"
-      >
-        <CardHeader className="pb-0">
-          <CardTitle>Layers</CardTitle>
-          <CardDescription>
-            Height colour: blue 0 m → red 300 m+
-            {!is3d ? " · Bane read-only" : ""}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <Separator />
-          <div className="space-y-1">
-            <div
-              className="h-2.5 w-full rounded-full"
-              style={{
-                background:
-                  "linear-gradient(to right, hsl(240 85% 45%), hsl(120 85% 45%), hsl(0 85% 45%))",
-              }}
-              aria-hidden
-            />
-            <div className="flex justify-between text-[11px] text-muted-foreground">
-              <span>0 m</span>
-              <span>300 m+</span>
-            </div>
-          </div>
-          <ul className="m-0 space-y-2 p-0 text-sm text-muted-foreground">
-            <li className="flex items-center gap-2">
-              <span className="inline-block h-2.5 w-4 shrink-0 rounded-full bg-[#ffc040] opacity-80" />
-              Cadastre parcels
-            </li>
-            <li className="flex items-center gap-2">
-              <span
-                className="inline-block h-2.5 w-4 shrink-0 rounded-full opacity-80"
-                style={{
-                  background:
-                    "linear-gradient(to right, hsl(240 85% 45%), hsl(0 85% 45%))",
-                }}
-              />
-              Cadastre buildings
-            </li>
-            <li className="flex items-center gap-2">
-              <span
-                className="inline-block h-1 w-4 shrink-0 rounded-full"
-                style={{
-                  background:
-                    "linear-gradient(to right, hsl(240 85% 45%), hsl(0 85% 45%))",
-                }}
-              />
-              Bane platform edges
-              <Badge variant="outline" className="ml-auto">
-                RO
-              </Badge>
-            </li>
-            <li className="flex items-center gap-2">
-              <span
-                className="inline-block h-1 w-4 shrink-0 rounded-full"
-                style={{
-                  background:
-                    "linear-gradient(to right, hsl(240 85% 45%), hsl(0 85% 45%))",
-                }}
-              />
-              Bane track centres
-              <Badge variant="outline" className="ml-auto">
-                RO
-              </Badge>
-            </li>
-          </ul>
-        </CardContent>
-      </Card>
+      <MapLayersCard is3d={is3d} visibility={layerVisibility} />
       <div className="absolute bottom-4 left-4 z-[3] max-w-[min(720px,calc(100%-2rem))]">
         {error ? (
           <Alert variant="destructive" className="bg-card/95 shadow-md">

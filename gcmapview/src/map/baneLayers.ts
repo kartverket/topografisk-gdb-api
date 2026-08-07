@@ -93,7 +93,7 @@ export function addBaneSourcesAndLayers(
     type: 'line',
     source: platformEdgesSourceId,
     paint: {
-      'line-color': heightColorExpression(),
+      'line-color': '#000000',
       'line-opacity': 0.9,
       'line-width': ['interpolate', ['linear'], ['zoom'], 5, 1.5, 14, 4],
     },

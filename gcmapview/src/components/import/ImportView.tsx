@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
-import { type ImportResult, uploadJsonFg } from './gcimportApi'
+import { type ImportResult, uploadJsonFg } from '../../api/gcimportApi'
 
 export function ImportView() {
   const inputRef = useRef<HTMLInputElement>(null)
