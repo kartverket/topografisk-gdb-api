@@ -26,9 +26,9 @@ def _plan(name="cadastre"):
     return build_schema_plan(d)
 
 
-def test_dispatch_exposes_the_six_feature_entrypoints_taking_dataset_and_collection():
+def test_dispatch_exposes_all_feature_entrypoints_taking_dataset_and_collection():
     sql = "\n".join(dispatch_statements())
-    for op in OPERATIONS:
+    for op in (*OPERATIONS, "upsert"):
         assert f"function ogc.feature_{op}(" in sql
     # The fixed entrypoints route by OGC identifiers, not physical names.
     assert "dataset text, collection text" in sql
@@ -55,6 +55,45 @@ def test_topology_collection_has_reads_only():
     plan = _plan()
     blocks = next(c for c in plan.collections if c.collection_name == "blocks")
     assert set(blocks.functions) == set(READ_OPS)
+
+
+def test_create_function_omits_auto_increment_fields():
+    plan = _plan("bane")
+    platform = next(
+        c for c in plan.collections if c.collection_name == "jernbaneplattformkant"
+    )
+    create_sql = next(
+        stmt
+        for stmt in function_statements(plan)
+        if f"function {platform.functions['create']}(" in stmt
+    )
+    insert_columns = create_sql.split("values", maxsplit=1)[0]
+    assert '"objid"' not in insert_columns
+
+
+def test_upsert_function_conflicts_on_declared_business_key():
+    plan = _plan("bane")
+    platform = next(
+        c for c in plan.collections if c.collection_name == "jernbaneplattformkant"
+    )
+    sql = next(
+        stmt
+        for stmt in function_statements(plan)
+        if f"function {platform.functions['upsert']}(" in stmt
+    )
+    assert 'on conflict ("lokalid", "identifikasjon_navnerom")' in sql
+    assert '"objid"' not in sql.split("values", maxsplit=1)[0]
+
+
+def test_has_z_collections_force_3d_on_ingest():
+    plan = _plan("bane")
+    sql = "\n".join(function_statements(plan))
+    assert (
+        "ST_Force3D(ST_SetSRID(ST_GeomFromGeoJSON(feature->'geometry'), 5973))" in sql
+    )
+
+    cadastre_sql = "\n".join(function_statements(_plan("cadastre")))
+    assert "ST_Force3D(" not in cadastre_sql
 
 
 # --------------------------------------------------------------------------

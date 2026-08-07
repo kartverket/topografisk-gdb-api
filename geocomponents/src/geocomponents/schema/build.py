@@ -15,6 +15,7 @@ from __future__ import annotations
 from geocomponents.descriptions.models import ResolvedCollection, ResolvedDataset
 from geocomponents.schema.plan import (
     READ_OPS,
+    UPSERT_OP,
     WRITE_OPS,
     CollectionPlan,
     ColumnPlan,
@@ -40,7 +41,14 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:
     columns: list[ColumnPlan] = _standard_columns()
 
     for fld in coll.fields:
-        columns.append(ColumnPlan(fld.name, fld.sql_type, nullable=not fld.required))
+        columns.append(
+            ColumnPlan(
+                fld.name,
+                fld.sql_type,
+                nullable=not fld.required,
+                auto_increment=fld.auto_increment,
+            )
+        )
 
     foreign_keys: list[ForeignKeyPlan] = []
     for rel in coll.relationships:
@@ -50,7 +58,12 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:
             ForeignKeyPlan(col_name, ref_table=f"{schema}.{rel.target}")
         )
 
-    geometry = GeometryColumnPlan(coll.geometry_field, coll.geometry_type, coll.srid)
+    geometry = GeometryColumnPlan(
+        coll.geometry_field,
+        coll.geometry_type,
+        coll.srid,
+        has_z=coll.has_z,
+    )
     return TablePlan(
         schema=schema,
         name=coll.name,
@@ -70,12 +83,15 @@ def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
         table = _build_table(schema, coll)
         # Reads for every collection; writes only for simple-feature collections.
         ops = READ_OPS + WRITE_OPS if coll.supports_crud else READ_OPS
+        if coll.supports_upsert:
+            ops += (UPSERT_OP,)
         functions = {op: internal_function(schema, coll.name, op) for op in ops}
         collections.append(
             CollectionPlan(
                 collection_name=coll.name,
                 table=table,
                 functions=functions,
+                upsert_key=coll.upsert_key,
             )
         )
     return SchemaPlan(schema_name=schema, collections=tuple(collections))

@@ -11,6 +11,10 @@ from those descriptions.
 - [`geocomponents/`](geocomponents/) — the engine. Start with its
   [README](geocomponents/README.md) for describing datasets and running
   locally; see [DEPLOY.md](geocomponents/DEPLOY.md) for deployment.
+- [`gcimport/`](gcimport/) — a profile-driven, single-endpoint FastAPI service
+  that validates JSON-FG uploads and idempotently imports dataset features.
+- [`gcmapview/`](gcmapview/) — local Vite + React map viewer with an `/import`
+  page for gcimport and read-only Bane layers on the map.
 - [`nibio/`](nibio/) NIBIO AR5 database dump and schema adjustments. Useful for Postgis Topology integration.
 
 ## Development
@@ -19,10 +23,13 @@ The root `Makefile` provides shortcuts for starting PostGIS and working with the
 frontend:
 
 ```bash
-make docker-up         # Start PostGIS with Docker Compose
+make docker-up         # Start PostGIS, geocomponents, and gcimport
 make frontend-install  # Install frontend dependencies without running scripts
 make frontend-build    # Build the frontend
 make frontend-run      # Run the frontend development server
+make gcimport-install  # Install gcimport dependencies
+make gcimport-test     # Run gcimport tests
+make gcimport-run      # Run gcimport on port 8001
 ```
 
 The repo uses [pre-commit](https://pre-commit.com/) at the root to run various file-hygiene checks at commits.
@@ -46,6 +53,13 @@ uv run --project geocomponents pre-commit run --all-files
 For running the geocomponents test suite (unit tests without Docker,
 contract + integration tests against a local PostGIS), see
 [`geocomponents/README.md`](geocomponents/README.md#testing).
+
+With `make docker-up`, Swagger for the importer is available at
+`http://localhost:8001/docs`. Upload a JSON-FG file with:
+
+```bash
+curl -F 'file=@bane.json;type=application/json' http://localhost:8001/imports
+```
 
 # Technical details
 

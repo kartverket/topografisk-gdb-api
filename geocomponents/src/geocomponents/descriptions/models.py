@@ -98,6 +98,7 @@ class FieldDef(BaseModel):
     type_ref: str | None = None
     codelist: str | None = None
     required: bool = False
+    auto_increment: bool = False
     description: str | None = None
 
     @model_validator(mode="after")
@@ -108,12 +109,15 @@ class FieldDef(BaseModel):
                 "field must set exactly one of type / type_ref / codelist "
                 f"(got {n_set})"
             )
+        if self.auto_increment and self.type != "integer":
+            raise ValueError("auto_increment is only supported for integer fields")
         return self
 
 
 class GeometryDef(BaseModel):
     type: GeometryType = "Point"
     srid: int = 4326
+    has_z: bool = False
 
 
 class RelationshipDef(BaseModel):
@@ -135,6 +139,15 @@ class CollectionDef(BaseModel):
     geometry: GeometryDef = Field(default_factory=GeometryDef)
     fields: list[FieldDef] = Field(default_factory=list)
     relationships: list[RelationshipDef] = Field(default_factory=list)
+    upsert_key: list[SafeIdentifier] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _unique_upsert_key(self):
+        if len(self.upsert_key) != len(set(self.upsert_key)):
+            raise ValueError("upsert_key fields must be unique")
+        if self.upsert_key and self.feature_model != "simple":
+            raise ValueError("upsert_key is only supported for simple collections")
+        return self
 
 
 class Commons(BaseModel):
@@ -167,6 +180,7 @@ class ResolvedField:
     sql_type: str
     required: bool = False
     codelist: str | None = None  # kept for future DB-side enforcement
+    auto_increment: bool = False
 
 
 @dataclass(frozen=True)
@@ -185,6 +199,8 @@ class ResolvedCollection:
     srid: int
     fields: tuple[ResolvedField, ...]
     relationships: tuple[ResolvedRelationship, ...]
+    upsert_key: tuple[str, ...] = field(default_factory=tuple)
+    has_z: bool = False
 
     @property
     def id_field(self) -> str:
@@ -198,6 +214,10 @@ class ResolvedCollection:
     def supports_crud(self) -> bool:
         """Simple features get per-feature Part 4 CRUD; topology does not (yet)."""
         return self.feature_model == "simple"
+
+    @property
+    def supports_upsert(self) -> bool:
+        return self.supports_crud and bool(self.upsert_key)
 
 
 @dataclass(frozen=True)

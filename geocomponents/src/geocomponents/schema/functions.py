@@ -119,6 +119,16 @@ begin
   return result;
 end;
 $disp$""",
+        f"""\
+create or replace function {s}.feature_upsert(dataset text, collection text, feature jsonb)
+returns uuid language plpgsql as $disp$
+declare result uuid;
+begin
+  execute format('select %I.%I($1)', dataset, '_' || collection || '_upsert')
+    into result using feature;
+  return result;
+end;
+$disp$""",
     ]
 
 
@@ -133,7 +143,11 @@ def apply_dispatch(conn: psycopg.Connection) -> None:
 # Internal per-collection functions (generated from the description)
 # ==========================================================================
 def _writable_columns(table: TablePlan) -> list[ColumnPlan]:
-    return [c for c in table.property_columns if c.name not in _AUDIT]
+    return [
+        c
+        for c in table.property_columns
+        if c.name not in _AUDIT and not c.auto_increment
+    ]
 
 
 def _properties_object(table: TablePlan, alias: str) -> str:
@@ -157,7 +171,11 @@ def _feature_object(table: TablePlan, alias: str) -> str:
 
 
 def _geom_from_feature(table: TablePlan) -> str:
-    return f"ST_SetSRID(ST_GeomFromGeoJSON(feature->'geometry'), {table.geometry.srid})"
+    geom = f"ST_SetSRID(ST_GeomFromGeoJSON(feature->'geometry'), {table.geometry.srid})"
+    if table.geometry.has_z:
+        # Accept 2D GeoJSON into *Z columns (missing Z becomes 0).
+        return f"ST_Force3D({geom})"
+    return geom
 
 
 def _prop_read(col: ColumnPlan) -> str:
@@ -218,6 +236,31 @@ begin
   values ({vals})
   returning "{t.id_column}" into new_id;
   return new_id;
+end;
+$func$"""
+
+
+def _fn_upsert(plan: CollectionPlan) -> str:
+    t = plan.table
+    writable = _writable_columns(t)
+    cols = ", ".join([f'"{t.geometry.name}"'] + [f'"{c.name}"' for c in writable])
+    vals = ", ".join([_geom_from_feature(t)] + [_prop_read(c) for c in writable])
+    conflict_columns = ", ".join(f'"{name}"' for name in plan.upsert_key)
+    sets = [f'"{t.geometry.name}" = excluded."{t.geometry.name}"']
+    sets += [f'"{c.name}" = excluded."{c.name}"' for c in writable]
+    sets.append('"updated_at" = now()')
+    set_clause = ",\n      ".join(sets)
+    return f"""\
+create or replace function {plan.functions["upsert"]}(feature jsonb)
+returns uuid language plpgsql as $func$
+declare result_id uuid;
+begin
+  insert into {t.qualified} ({cols})
+  values ({vals})
+  on conflict ({conflict_columns}) do update set
+      {set_clause}
+  returning "{t.id_column}" into result_id;
+  return result_id;
 end;
 $func$"""
 
@@ -287,6 +330,7 @@ _BUILDER_BY_OP = {
     "replace": _fn_replace,
     "update": _fn_update,
     "delete": _fn_delete,
+    "upsert": _fn_upsert,
 }
 
 

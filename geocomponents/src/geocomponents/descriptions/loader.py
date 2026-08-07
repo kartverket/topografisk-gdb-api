@@ -74,14 +74,25 @@ def _resolve_field(
             )
         # Code-list columns are plain text for now; DB-side enforcement is a
         # deferred 'validation in the DB' concern.
-        return ResolvedField(fld.name, "text", fld.required, codelist=fld.codelist)
+        return ResolvedField(
+            fld.name,
+            "text",
+            fld.required,
+            codelist=fld.codelist,
+            auto_increment=fld.auto_increment,
+        )
 
     if fld.type_ref is not None:
         if fld.type_ref not in types:
             raise DescriptionError(
                 f"{where}: field '{fld.name}' references unknown type '{fld.type_ref}'"
             )
-        return ResolvedField(fld.name, types[fld.type_ref].sql_type, fld.required)
+        return ResolvedField(
+            fld.name,
+            types[fld.type_ref].sql_type,
+            fld.required,
+            auto_increment=fld.auto_increment,
+        )
 
     if fld.type is not None:
         if fld.type not in BUILTIN_SQL_TYPES:
@@ -89,7 +100,12 @@ def _resolve_field(
                 f"{where}: field '{fld.name}' has unknown builtin type "
                 f"'{fld.type}' (known: {', '.join(sorted(BUILTIN_SQL_TYPES))})"
             )
-        return ResolvedField(fld.name, BUILTIN_SQL_TYPES[fld.type], fld.required)
+        return ResolvedField(
+            fld.name,
+            BUILTIN_SQL_TYPES[fld.type],
+            fld.required,
+            auto_increment=fld.auto_increment,
+        )
 
     # FieldDef enforces "exactly one of type / type_ref / codelist" at parse time,
     # so this branch is unreachable.
@@ -126,6 +142,22 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
             seen.add(fld.name)
             resolved_fields.append(_resolve_field(fld, types, codelists, where=where))
 
+        unknown_upsert_fields = set(coll.upsert_key) - seen
+        if unknown_upsert_fields:
+            raise DescriptionError(
+                f"{where}: upsert_key references unknown field(s) "
+                f"{sorted(unknown_upsert_fields)}"
+            )
+        auto_increment_fields = {
+            fld.name for fld in merged_fields if fld.auto_increment
+        }
+        invalid_upsert_fields = set(coll.upsert_key) & auto_increment_fields
+        if invalid_upsert_fields:
+            raise DescriptionError(
+                f"{where}: upsert_key cannot use auto-increment field(s) "
+                f"{sorted(invalid_upsert_fields)}"
+            )
+
         resolved_rels: list[ResolvedRelationship] = []
         for rel in coll.relationships:
             if rel.target not in collection_names:
@@ -143,8 +175,10 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
                 feature_model=coll.feature_model,
                 geometry_type=coll.geometry.type,
                 srid=coll.geometry.srid,
+                has_z=coll.geometry.has_z,
                 fields=tuple(resolved_fields),
                 relationships=tuple(resolved_rels),
+                upsert_key=tuple(coll.upsert_key),
             )
         )
 

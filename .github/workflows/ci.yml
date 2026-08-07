@@ -63,13 +63,42 @@ jobs:
       - name: Sync dependencies
         run: uv sync --project geocomponents --frozen
       - name: Run tests
-        run: uv run --project geocomponents pytest
+        working-directory: geocomponents
+        run: uv run pytest
+
+  test-gcimport:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+      - name: Sync dependencies
+        run: uv sync --project gcimport --frozen
+      - name: Run tests
+        working-directory: gcimport
+        run: uv run pytest
 
   audit:
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: geocomponents
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+      - name: Export runtime dependencies to requirements.txt
+        run: uv export --frozen --no-dev --no-emit-project --format requirements-txt -o requirements.txt
+      - name: Audit dependencies with pip-audit
+        run: uvx pip-audit -r requirements.txt --disable-pip
+
+  audit-gcimport:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gcimport
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
@@ -105,6 +134,31 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
         with:
           image-ref: geocomponents:scan
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+  build-and-scan-gcimport:
+    needs: [pre-commit-lint, test-gcimport, audit-gcimport]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+      - name: Build gcimport image
+        uses: docker/build-push-action@cb941d0b895b09c17fa011d41c411b33c752cf28  # v6.16.0
+        with:
+          context: ./gcimport
+          load: true
+          tags: gcimport:scan
+          cache-from: type=gha,scope=gcimport
+          cache-to: type=gha,mode=max,scope=gcimport
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          image-ref: gcimport:scan
           format: table
           exit-code: '1'
           ignore-unfixed: true
