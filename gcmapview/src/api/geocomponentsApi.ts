@@ -1,8 +1,9 @@
-const defaultApiBaseUrl = "/geocomponents-api";
+const defaultApiBaseUrl = '/geocomponents-api';
 
-export const geocomponentsApiBaseUrl = (
-  import.meta.env.VITE_GEOCOMPONENTS_API_URL ?? defaultApiBaseUrl
-).replace(/\/$/, "");
+export const geocomponentsApiBaseUrl = (import.meta.env.VITE_GEOCOMPONENTS_API_URL ?? defaultApiBaseUrl).replace(
+  /\/$/,
+  ''
+);
 
 const cadastreApiUrl = `${geocomponentsApiBaseUrl}/datasets/cadastre/ogc_api`;
 const baneApiUrl = `${geocomponentsApiBaseUrl}/datasets/bane/ogc_api`;
@@ -17,7 +18,7 @@ export const trackCentresItemsUrl = `${baneApiUrl}/collections/spormidt/items?f=
 export type OgcBbox = [number, number, number, number];
 
 function withBbox(url: string, bbox: OgcBbox) {
-  return `${url}&bbox=${bbox.join(",")}`;
+  return `${url}&bbox=${bbox.join(',')}`;
 }
 
 export function parcelsItemsInBboxUrl(bbox: OgcBbox) {

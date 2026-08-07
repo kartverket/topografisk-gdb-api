@@ -1,67 +1,51 @@
-import { useRef, useState } from 'react'
-import { Link } from 'react-router'
-import { AlertCircle, CheckCircle2, FileJson, Loader2 } from 'lucide-react'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
-import { Separator } from '@/components/ui/separator'
-import { cn } from '@/lib/utils'
-import { type ImportResult, uploadJsonFg } from '../../api/gcimportApi'
+import { useRef, useState } from 'react';
+import { Link } from 'react-router';
+import { AlertCircle, CheckCircle2, FileJson, Loader2 } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
+import { type ImportResult, uploadJsonFg } from '../../api/gcimportApi';
 
 export function ImportView() {
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [file, setFile] = useState<File | null>(null)
-  const [result, setResult] = useState<ImportResult | null>(null)
-  const [error, setError] = useState('')
-  const [isUploading, setIsUploading] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const [error, setError] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
 
   async function submit() {
-    if (!file) return
-    setIsUploading(true)
-    setError('')
-    setResult(null)
+    if (!file) return;
+    setIsUploading(true);
+    setError('');
+    setResult(null);
     try {
-      setResult(await uploadJsonFg(file))
+      setResult(await uploadJsonFg(file));
     } catch (uploadError) {
-      setError(
-        uploadError instanceof Error ? uploadError.message : 'Import failed',
-      )
+      setError(uploadError instanceof Error ? uploadError.message : 'Import failed');
     } finally {
-      setIsUploading(false)
+      setIsUploading(false);
     }
   }
 
   function chooseFile(selected: File | undefined) {
-    setFile(selected ?? null)
-    setError('')
-    setResult(null)
+    setFile(selected ?? null);
+    setError('');
+    setResult(null);
   }
 
-  const collections = result
-    ? [
-        ...new Set(result.features.map((feature) => feature.collection)),
-      ]
-    : []
+  const collections = result ? [...new Set(result.features.map(feature => feature.collection))] : [];
 
   return (
     <Card className="mx-auto w-full max-w-xl">
       <CardHeader>
-        <p className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
-          Feature import
-        </p>
+        <p className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">Feature import</p>
         <CardTitle className="text-2xl">Import Bane features</CardTitle>
         <CardDescription className="max-w-[52ch]">
-          Upload JSON-FG, or classic GeoJSON (.geojson with CRS and objtype).
-          Features are validated, transformed to EPSG:5973, and upserted by
-          their Bane identity.
+          Upload JSON-FG, or classic GeoJSON (.geojson with CRS and objtype). Features are validated, transformed to
+          EPSG:5973, and upserted by their Bane identity.
         </CardDescription>
       </CardHeader>
 
@@ -70,20 +54,19 @@ export function ImportView() {
           type="button"
           className={cn(
             'grid w-full cursor-pointer gap-1.5 rounded-2xl border border-dashed border-border bg-muted/40 px-5 py-7 text-left transition-colors hover:border-ring hover:bg-muted/60 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none',
-            file && 'border-solid border-primary bg-accent',
+            file && 'border-solid border-primary bg-accent'
           )}
           onClick={() => inputRef.current?.click()}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault()
-            chooseFile(event.dataTransfer.files[0])
-          }}
-        >
+          onDragOver={event => event.preventDefault()}
+          onDrop={event => {
+            event.preventDefault();
+            chooseFile(event.dataTransfer.files[0]);
+          }}>
           <input
             ref={inputRef}
             type="file"
             accept=".json,.jsonfg,.geojson,application/json,application/geo+json"
-            onChange={(event) => chooseFile(event.target.files?.[0])}
+            onChange={event => chooseFile(event.target.files?.[0])}
             hidden
           />
           <span className="inline-flex items-center gap-2 text-base font-medium text-foreground">
@@ -100,11 +83,13 @@ export function ImportView() {
         <Button
           size="lg"
           disabled={!file || isUploading}
-          onClick={submit}
-        >
+          onClick={submit}>
           {isUploading ? (
             <>
-              <Loader2 data-icon="inline-start" className="animate-spin" />
+              <Loader2
+                data-icon="inline-start"
+                className="animate-spin"
+              />
               Importing…
             </>
           ) : (
@@ -130,8 +115,10 @@ export function ImportView() {
             <AlertDescription className="space-y-3">
               <div className="flex flex-wrap gap-1.5">
                 {collections.length > 0 ? (
-                  collections.map((collection) => (
-                    <Badge key={collection} variant="secondary">
+                  collections.map(collection => (
+                    <Badge
+                      key={collection}
+                      variant="secondary">
                       {collection}
                     </Badge>
                   ))
@@ -145,11 +132,9 @@ export function ImportView() {
                   <code className="block rounded-md bg-background/80 px-2 py-1 font-mono text-xs text-foreground">
                     {result.features
                       .slice(0, 3)
-                      .map((feature) => feature.id)
+                      .map(feature => feature.id)
                       .join(', ')}
-                    {result.features.length > 3
-                      ? ` (+${result.features.length - 3} more)`
-                      : ''}
+                    {result.features.length > 3 ? ` (+${result.features.length - 3} more)` : ''}
                   </code>
                 </>
               )}
@@ -157,8 +142,7 @@ export function ImportView() {
                 variant="link"
                 size="sm"
                 className="h-auto px-0"
-                render={<Link to="/" />}
-              >
+                render={<Link to="/" />}>
                 View Bane layers on the map
               </Button>
             </AlertDescription>
@@ -166,9 +150,7 @@ export function ImportView() {
         )}
       </CardContent>
 
-      <CardFooter className="text-xs text-muted-foreground">
-        Upserts are idempotent by Bane business key.
-      </CardFooter>
+      <CardFooter className="text-xs text-muted-foreground">Upserts are idempotent by Bane business key.</CardFooter>
     </Card>
-  )
+  );
 }

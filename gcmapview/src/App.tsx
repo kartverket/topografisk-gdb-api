@@ -1,8 +1,8 @@
-import { Navigate, Route, Routes } from 'react-router'
-import { ImportView } from './components/import/ImportView'
-import { AppNav } from './components/layout/AppNav'
-import { MapDimensionProvider } from './components/map/MapDimensionContext'
-import { MapView } from './components/map/MapView'
+import { Navigate, Route, Routes } from 'react-router';
+import { ImportView } from './components/import/ImportView';
+import { AppNav } from './components/layout/AppNav';
+import { MapDimensionProvider } from './components/map/MapDimensionContext';
+import { MapView } from './components/map/MapView';
 
 function App() {
   return (
@@ -13,20 +13,32 @@ function App() {
             <p className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
               geocomponents OGC API
             </p>
-            <h1 className="text-3xl font-bold tracking-tight text-foreground md:text-4xl">
-              Geocomponents map
-            </h1>
+            <h1 className="text-3xl font-bold tracking-tight text-foreground md:text-4xl">Geocomponents map</h1>
           </div>
           <AppNav />
         </header>
         <Routes>
-          <Route path="/" element={<MapView />} />
-          <Route path="/import" element={<ImportView />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route
+            path="/"
+            element={<MapView />}
+          />
+          <Route
+            path="/import"
+            element={<ImportView />}
+          />
+          <Route
+            path="*"
+            element={
+              <Navigate
+                to="/"
+                replace
+              />
+            }
+          />
         </Routes>
       </main>
     </MapDimensionProvider>
-  )
+  );
 }
 
-export default App
+export default App;
