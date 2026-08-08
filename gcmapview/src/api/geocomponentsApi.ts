@@ -17,6 +17,8 @@ export const platformEdgesItemsUrl = `${baneApiUrl}/collections/jernbaneplattfor
 export const trackCentresItemsUrl = `${baneApiUrl}/collections/spormidt/items?f=json&limit=10000`;
 export const bygningItemsUrl = `${bygningApiUrl}/collections/bygning/items?f=json&limit=10000`;
 export const bygningOmradeItemsUrl = `${bygningApiUrl}/collections/bygning_omrade/items?f=json&limit=10000`;
+export const bygningSenterlinjeItemsUrl = `${bygningApiUrl}/collections/bygning_senterlinje/items?f=json&limit=10000`;
+export const bygningPosisjonItemsUrl = `${bygningApiUrl}/collections/bygning_posisjon/items?f=json&limit=10000`;
 
 export type OgcBbox = [number, number, number, number];
 
@@ -46,6 +48,14 @@ export function bygningItemsInBboxUrl(bbox: OgcBbox) {
 
 export function bygningOmradeItemsInBboxUrl(bbox: OgcBbox) {
   return withBbox(bygningOmradeItemsUrl, bbox);
+}
+
+export function bygningSenterlinjeItemsInBboxUrl(bbox: OgcBbox) {
+  return withBbox(bygningSenterlinjeItemsUrl, bbox);
+}
+
+export function bygningPosisjonItemsInBboxUrl(bbox: OgcBbox) {
+  return withBbox(bygningPosisjonItemsUrl, bbox);
 }
 
 export function parcelItemUrl(id: string | number) {

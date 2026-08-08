@@ -250,6 +250,128 @@ def _building_area_geojson_document(
     }
 
 
+def _building_centerline_feature(
+    *,
+    feature_type: str = "bygning_senterlinje",
+    properties: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": "Feature",
+        "featureType": feature_type,
+        "place": {
+            "type": "MultiLineString",
+            "coordinates": [
+                [
+                    [517473.8998, 6846070.51, 450.46],
+                    [517471.5698, 6846072.11, 450.56],
+                ]
+            ],
+        },
+        "properties": properties
+        or _building_properties(
+            objtype="Hjelpelinje3D",
+            tredniva="2",
+        ),
+    }
+
+
+def _building_centerline_geojson_feature(*, objtype: str = "Hjelpelinje3D") -> dict[str, Any]:
+    return {
+        "type": "Feature",
+        "properties": {
+            "OBJECTID": 1,
+            "objtype": objtype,
+            "lokalid": "building-centreline-1",
+            "datafangstdato": "2011-05-09T00:00:00Z",
+            "oppdateringsdato": "2026-02-28T00:31:01Z",
+            "verifiseringsdato": "2025-07-11T00:00:00Z",
+            "navnerom": "http://data.geonorge.no/SFKB/FKB-Bygning/so",
+            "tredniva": "2",
+        },
+        "geometry": {
+            "type": "MultiLineString",
+            "coordinates": [
+                [
+                    [517473.8998, 6846070.51, 450.46],
+                    [517471.5698, 6846072.11, 450.56],
+                ]
+            ],
+        },
+    }
+
+
+def _building_centerline_geojson_document(
+    features: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": "FeatureCollection",
+        "crs": {
+            "type": "name",
+            "properties": {"name": "urn:ogc:def:crs:EPSG::5972"},
+        },
+        "features": features or [_building_centerline_geojson_feature()],
+    }
+
+
+def _building_position_feature(
+    *,
+    feature_type: str = "bygning_posisjon",
+    properties: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": "Feature",
+        "featureType": feature_type,
+        "place": {
+            "type": "Point",
+            "coordinates": [529542.1498, 6853063.56, -99999.0],
+        },
+        "properties": properties
+        or _building_properties(
+            medium="X",
+            bygningsnummer=301583667,
+            bygningstype=241,
+            bygningsstatus="IG",
+            kommunenummer="3437",
+        ),
+    }
+
+
+def _building_position_geojson_feature(*, objtype: str = "Bygning") -> dict[str, Any]:
+    return {
+        "type": "Feature",
+        "properties": {
+            "OBJECTID": 1,
+            "objtype": objtype,
+            "lokalid": "building-position-1",
+            "datafangstdato": "2026-03-03T00:00:00Z",
+            "oppdateringsdato": "2026-03-05T00:31:07Z",
+            "navnerom": "http://data.geonorge.no/SFKB/FKB-Bygning/so",
+            "medium": "X",
+            "bygningsnummer": 301583667,
+            "bygningstype": 241,
+            "bygningsstatus": "IG",
+            "kommunenummer": "3437",
+        },
+        "geometry": {
+            "type": "Point",
+            "coordinates": [529542.1498, 6853063.56, -99999.0],
+        },
+    }
+
+
+def _building_position_geojson_document(
+    features: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": "FeatureCollection",
+        "crs": {
+            "type": "name",
+            "properties": {"name": "urn:ogc:def:crs:EPSG::5972"},
+        },
+        "features": features or [_building_position_geojson_feature()],
+    }
+
+
 def _post(client: TestClient, document: Any) -> httpx.Response:
     return client.post(
         "/imports",
@@ -480,6 +602,78 @@ def test_imports_built_in_bygning_omrade_profile_with_multipolygon() -> None:
     assert payload["geometry"]["type"] == "MultiPolygon"
 
 
+def test_imports_built_in_bygning_senterlinje_profile_with_multilinestring() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": PLATFORM_UUID})
+
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(
+        settings=Settings(api_url="https://bygning.example/api"),
+        client=upstream_client,
+        profile=BYGNING_PROFILE,
+    )
+
+    with TestClient(app) as client:
+        response = _post(
+            client,
+            {
+                "type": "FeatureCollection",
+                "coordRefSys": "EPSG:5972",
+                "features": [_building_centerline_feature()],
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "total": 1,
+        "features": [{"collection": "bygning_senterlinje", "id": PLATFORM_UUID}],
+    }
+    assert [request.url.path for request in requests] == [
+        "/api/collections/bygning_senterlinje/items:upsert"
+    ]
+    payload = json.loads(requests[0].content)
+    assert payload["geometry"]["type"] == "MultiLineString"
+
+
+def test_imports_built_in_bygning_position_profile_with_point() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": PLATFORM_UUID})
+
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(
+        settings=Settings(api_url="https://bygning.example/api"),
+        client=upstream_client,
+        profile=BYGNING_PROFILE,
+    )
+
+    with TestClient(app) as client:
+        response = _post(
+            client,
+            {
+                "type": "FeatureCollection",
+                "coordRefSys": "EPSG:5972",
+                "features": [_building_position_feature()],
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "total": 1,
+        "features": [{"collection": "bygning_posisjon", "id": PLATFORM_UUID}],
+    }
+    assert [request.url.path for request in requests] == [
+        "/api/collections/bygning_posisjon/items:upsert"
+    ]
+    payload = json.loads(requests[0].content)
+    assert payload["geometry"]["type"] == "Point"
+
+
 def test_create_app_can_read_profile_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     requests: list[httpx.Request] = []
 
@@ -612,6 +806,68 @@ def test_request_profile_can_import_bygning_area_geojson_through_bygning_profile
     assert response.status_code == 200
     assert [request.url.path for request in requests] == [
         "/datasets/bygning/ogc_api/collections/bygning_omrade/items:upsert"
+    ]
+
+
+def test_request_profile_can_import_bygning_position_geojson_through_bygning_profile() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": PLATFORM_UUID})
+
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(
+        settings=Settings(api_url="https://shared.example/datasets/bane/ogc_api"),
+        client=upstream_client,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/imports?profile=bygning",
+            files={
+                "file": (
+                    "source.geojson",
+                    json.dumps(_building_position_geojson_document()),
+                    "application/geo+json",
+                )
+            },
+        )
+
+    assert response.status_code == 200
+    assert [request.url.path for request in requests] == [
+        "/datasets/bygning/ogc_api/collections/bygning_posisjon/items:upsert"
+    ]
+
+
+def test_request_profile_can_import_bygning_senterlinje_geojson_through_bygning_profile() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": PLATFORM_UUID})
+
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(
+        settings=Settings(api_url="https://shared.example/datasets/bane/ogc_api"),
+        client=upstream_client,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/imports?profile=bygning",
+            files={
+                "file": (
+                    "source.geojson",
+                    json.dumps(_building_centerline_geojson_document()),
+                    "application/geo+json",
+                )
+            },
+        )
+
+    assert response.status_code == 200
+    assert [request.url.path for request in requests] == [
+        "/datasets/bygning/ogc_api/collections/bygning_senterlinje/items:upsert"
     ]
 
 

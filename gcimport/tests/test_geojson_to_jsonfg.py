@@ -160,6 +160,86 @@ def _building_area_source_document(features: list[dict] | None = None) -> dict:
     }
 
 
+def _building_centerline_source_feature(
+    *,
+    objtype: str = "Hjelpelinje3D",
+    lokalid: str = "0de78a64-886b-4272-9858-20f50d2ad6e0",
+) -> dict:
+    return {
+        "type": "Feature",
+        "properties": {
+            "OBJECTID": 1,
+            "objtype": objtype,
+            "lokalid": lokalid,
+            "datafangstdato": "2011-05-09T00:00:00Z",
+            "oppdateringsdato": "2026-02-28T00:31:01Z",
+            "verifiseringsdato": "2025-07-11T00:00:00Z",
+            "navnerom": "http://data.geonorge.no/SFKB/FKB-Bygning/so",
+            "tredniva": "2",
+        },
+        "geometry": {
+            "type": "MultiLineString",
+            "coordinates": [
+                [
+                    [517473.8998, 6846070.51, 450.46],
+                    [517471.5698, 6846072.11, 450.56],
+                ]
+            ],
+        },
+    }
+
+
+def _building_centerline_source_document(features: list[dict] | None = None) -> dict:
+    return {
+        "type": "FeatureCollection",
+        "name": "fkb_bygning_senterlinje",
+        "crs": {
+            "type": "name",
+            "properties": {"name": "urn:ogc:def:crs:EPSG::5972"},
+        },
+        "features": features if features is not None else [_building_centerline_source_feature()],
+    }
+
+
+def _building_position_source_feature(
+    *,
+    objtype: str = "Bygning",
+    lokalid: str = "ef033e10-97e2-4039-bc74-54de80a4e665",
+) -> dict:
+    return {
+        "type": "Feature",
+        "properties": {
+            "OBJECTID": 1,
+            "objtype": objtype,
+            "lokalid": lokalid,
+            "datafangstdato": "2026-03-03T00:00:00Z",
+            "oppdateringsdato": "2026-03-05T00:31:07Z",
+            "navnerom": "http://data.geonorge.no/SFKB/FKB-Bygning/so",
+            "medium": "X",
+            "bygningsnummer": 301583667,
+            "bygningstype": 241,
+            "bygningsstatus": "IG",
+            "kommunenummer": "3437",
+        },
+        "geometry": {
+            "type": "Point",
+            "coordinates": [529542.1498, 6853063.56, -99999.0],
+        },
+    }
+
+
+def _building_position_source_document(features: list[dict] | None = None) -> dict:
+    return {
+        "type": "FeatureCollection",
+        "name": "fkb_bygning_posisjon",
+        "crs": {
+            "type": "name",
+            "properties": {"name": "urn:ogc:def:crs:EPSG::5972"},
+        },
+        "features": features if features is not None else [_building_position_source_feature()],
+    }
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
@@ -352,6 +432,53 @@ def test_convert_document_routes_overlapping_bygning_objtype_by_geometry() -> No
     assert converted["features"][0]["featureType"] == "bygning_omrade"
 
 
+def test_convert_document_routes_hjelpelinje3d_to_bygning_senterlinje() -> None:
+    converted = convert_document(
+        _building_centerline_source_document(),
+        profile=BYGNING_PROFILE,
+    )
+
+    assert converted["coordRefSys"] == "EPSG:5972"
+    assert converted["features"][0]["featureType"] == "bygning_senterlinje"
+    assert converted["features"][0]["place"]["type"] == "MultiLineString"
+
+
+def test_convert_document_is_accepted_by_bygning_senterlinje_importer() -> None:
+    converted = convert_document(
+        _building_centerline_source_document(),
+        profile=BYGNING_PROFILE,
+    )
+
+    prepared = prepare_document(converted, BYGNING_PROFILE)
+    assert prepared[0].collection == "bygning_senterlinje"
+    assert prepared[0].geojson["geometry"]["type"] == "MultiLineString"
+
+
+def test_convert_document_routes_bygning_point_objtype_by_geometry() -> None:
+    converted = convert_document(
+        _building_position_source_document(),
+        profile=BYGNING_PROFILE,
+    )
+
+    assert converted["coordRefSys"] == "EPSG:5972"
+    assert converted["features"][0]["featureType"] == "bygning_posisjon"
+    assert converted["features"][0]["place"] == {
+        "type": "Point",
+        "coordinates": [529542.1498, 6853063.56, -99999.0],
+    }
+
+
+def test_convert_document_is_accepted_by_bygning_position_importer() -> None:
+    converted = convert_document(
+        _building_position_source_document(),
+        profile=BYGNING_PROFILE,
+    )
+
+    prepared = prepare_document(converted, BYGNING_PROFILE)
+    assert prepared[0].collection == "bygning_posisjon"
+    assert prepared[0].geojson["geometry"]["type"] == "Point"
+
+
 def test_bygning_omrade_profile_tracks_scanned_objtypes() -> None:
     assert tuple(_BUILDING_AREA_SOURCE_OBJTYPES) == (
         "annenbygning",
@@ -360,7 +487,10 @@ def test_bygning_omrade_profile_tracks_scanned_objtypes() -> None:
     )
 
 
-@pytest.mark.parametrize("objtype", tuple(name for name in _SOURCE_OBJTYPES if name != "bygning"))
+@pytest.mark.parametrize(
+    "objtype",
+    tuple(name for name in _SOURCE_OBJTYPES if name not in {"bygning", "hjelpelinje3d"}),
+)
 def test_convert_document_supports_all_bygning_objtypes(objtype: str) -> None:
     converted = convert_document(
         _building_source_document([_building_source_feature(objtype=objtype)]),

@@ -324,6 +324,8 @@ def _transform_coordinates(
     coordinates: Any,
     transformer: Transformer,
 ) -> list[Any]:
+    if geometry_type == "Point":
+        return _transform_point_coordinates(coordinates, transformer)
     if geometry_type == "LineString":
         return _transform_linestring_coordinates(coordinates, transformer)
     if geometry_type == "MultiLineString":
@@ -333,6 +335,18 @@ def _transform_coordinates(
     if geometry_type == "MultiPolygon":
         return _transform_multipolygon_coordinates(coordinates, transformer)
     raise DocumentValidationError([f"geometry type {geometry_type} is not implemented"])
+
+
+def _transform_point_coordinates(
+    coordinates: Any,
+    transformer: Transformer,
+) -> list[float]:
+    return _transform_position(
+        coordinates,
+        transformer,
+        geometry_type="Point",
+        path="position",
+    )
 
 
 def _transform_linestring_coordinates(

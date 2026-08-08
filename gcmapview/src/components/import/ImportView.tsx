@@ -20,7 +20,7 @@ const PROFILE_META: Record<ImportProfile, { title: string; crs: string; detail: 
     title: 'Bygning',
     crs: 'EPSG:5972',
     detail:
-      'Bygning linework and area footprints are routed through one importer and preserved as MultiLineString or MultiPolygon geometry by collection.',
+      'Bygning linework, centerlines, positions, and area footprints are routed through one importer and preserved by collection geometry.',
     footer: 'Upserts are idempotent by Bygning business key.'
   }
 };

@@ -91,7 +91,12 @@ def test_bygning_dataset_resolves_expected_geometry_and_upsert_key():
     bygning = next(
         d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bygning"
     )
-    assert [coll.name for coll in bygning.collections] == ["bygning", "bygning_omrade"]
+    assert [coll.name for coll in bygning.collections] == [
+        "bygning",
+        "bygning_omrade",
+        "bygning_senterlinje",
+        "bygning_posisjon",
+    ]
 
     linework = next(coll for coll in bygning.collections if coll.name == "bygning")
     assert linework.geometry_type == "MultiLineString"
@@ -106,6 +111,20 @@ def test_bygning_dataset_resolves_expected_geometry_and_upsert_key():
     assert area.has_z is True
     assert area.upsert_key == ("lokalid", "identifikasjon_navnerom")
     assert area.supports_upsert
+
+    centerline = next(coll for coll in bygning.collections if coll.name == "bygning_senterlinje")
+    assert centerline.geometry_type == "MultiLineString"
+    assert centerline.srid == 5972
+    assert centerline.has_z is True
+    assert centerline.upsert_key == ("lokalid", "identifikasjon_navnerom")
+    assert centerline.supports_upsert
+
+    position = next(coll for coll in bygning.collections if coll.name == "bygning_posisjon")
+    assert position.geometry_type == "Point"
+    assert position.srid == 5972
+    assert position.has_z is True
+    assert position.upsert_key == ("lokalid", "identifikasjon_navnerom")
+    assert position.supports_upsert
 
 
 def test_upsert_key_must_reference_writable_fields():

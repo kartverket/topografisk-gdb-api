@@ -7,6 +7,8 @@ import {
   buildingExtrusionHeightExpression,
   bygningExtrusionLayerId,
   bygningExtrusionSourceId,
+  bygningSenterlinjeExtrusionLayerId,
+  bygningSenterlinjeExtrusionSourceId,
   buildingsExtrusionLayerId,
   DEFAULT_3D_PITCH,
   elevatedLineSegments,
@@ -23,6 +25,8 @@ import {
 } from './map3d';
 import { platformEdgesLayerId, trackCentresLayerId } from './baneLayers';
 import { bygningLayerId } from './bygningLayers';
+import { bygningPosisjonLayerId } from './bygningPosisjonLayers';
+import { bygningSenterlinjeColor, bygningSenterlinjeLayerId } from './bygningSenterlinjeLayers';
 import {
   bygningOmradeExtrusionFeatureCollection,
   bygningOmradeFillColor,
@@ -51,8 +55,14 @@ const trackCentres3dLayerIds = [
 
 const bygningFlatLayerIds = [bygningLayerId] as const;
 const bygning3dLayerIds = [`${bygningExtrusionLayerId}-shadow`, `${bygningExtrusionLayerId}-solid`] as const;
+const bygningSenterlinjeFlatLayerIds = [bygningSenterlinjeLayerId] as const;
+const bygningSenterlinje3dLayerIds = [
+  `${bygningSenterlinjeExtrusionLayerId}-shadow`,
+  `${bygningSenterlinjeExtrusionLayerId}-solid`
+] as const;
 const bygningOmradeLayerIds = [bygningOmradeFillLayerId, bygningOmradeOutlineLayerId] as const;
 const bygningOmrade3dLayerIds = [`${bygningOmradeExtrusionLayerId}-shaft`, `${bygningOmradeExtrusionLayerId}-cap`] as const;
+const bygningPosisjonLayerIds = [bygningPosisjonLayerId] as const;
 
 type OpacityBandedExtrusion = {
   baseLayerId: string;
@@ -182,6 +192,10 @@ export function addExtrusionLayers(map: maplibregl.Map) {
     type: 'geojson',
     data: { type: 'FeatureCollection', features: [] }
   });
+  map.addSource(bygningSenterlinjeExtrusionSourceId, {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] }
+  });
   map.addSource(bygningOmradeExtrusionSourceId, {
     type: 'geojson',
     data: { type: 'FeatureCollection', features: [] }
@@ -214,9 +228,21 @@ export function addExtrusionLayers(map: maplibregl.Map) {
   addElevatedLineGroundShadow(map, platformEdgesExtrusionLayerId, platformEdgesExtrusionSourceId, '#000000');
   addElevatedLineGroundShadow(map, trackCentresExtrusionLayerId, trackCentresExtrusionSourceId);
   addElevatedLineGroundShadow(map, bygningExtrusionLayerId, bygningExtrusionSourceId, '#000000');
+  addElevatedLineGroundShadow(
+    map,
+    bygningSenterlinjeExtrusionLayerId,
+    bygningSenterlinjeExtrusionSourceId,
+    bygningSenterlinjeColor
+  );
   addOpaqueElevatedLineExtrusion(map, platformEdgesExtrusionLayerId, platformEdgesExtrusionSourceId, '#000000');
   addOpaqueElevatedLineExtrusion(map, trackCentresExtrusionLayerId, trackCentresExtrusionSourceId);
   addOpaqueElevatedLineExtrusion(map, bygningExtrusionLayerId, bygningExtrusionSourceId, '#000000');
+  addOpaqueElevatedLineExtrusion(
+    map,
+    bygningSenterlinjeExtrusionLayerId,
+    bygningSenterlinjeExtrusionSourceId,
+    bygningSenterlinjeColor
+  );
 }
 
 export function upsertElevatedSources(
@@ -224,19 +250,27 @@ export function upsertElevatedSources(
   platformEdges: FeatureCollection,
   trackCentres: FeatureCollection,
   bygning: FeatureCollection,
+  bygningSenterlinje: FeatureCollection,
   bygningOmrade: FeatureCollection,
-  visibility: Pick<LayerVisibility, 'platformEdges' | 'trackCentres' | 'bygning' | 'bygningOmrade'>,
+  visibility: Pick<
+    LayerVisibility,
+    'platformEdges' | 'trackCentres' | 'bygning' | 'bygningSenterlinje' | 'bygningOmrade'
+  >,
   adjustHeights: boolean
 ) {
   const platformSource = map.getSource(platformEdgesExtrusionSourceId) as maplibregl.GeoJSONSource | undefined;
   const trackSource = map.getSource(trackCentresExtrusionSourceId) as maplibregl.GeoJSONSource | undefined;
   const bygningSource = map.getSource(bygningExtrusionSourceId) as maplibregl.GeoJSONSource | undefined;
+  const bygningSenterlinjeSource = map.getSource(bygningSenterlinjeExtrusionSourceId) as
+    | maplibregl.GeoJSONSource
+    | undefined;
   const bygningOmradeSource = map.getSource(bygningOmradeExtrusionSourceId) as maplibregl.GeoJSONSource | undefined;
 
   const heightSamples = [
     ...(visibility.platformEdges ? [lowestPositiveLineHeight([platformEdges])] : []),
     ...(visibility.trackCentres ? [lowestPositiveLineHeight([trackCentres])] : []),
     ...(visibility.bygning ? [lowestPositiveLineHeight([bygning])] : []),
+    ...(visibility.bygningSenterlinje ? [lowestPositiveLineHeight([bygningSenterlinje])] : []),
     ...(visibility.bygningOmrade ? [lowestPositiveBygningOmradeHeight(bygningOmrade)] : [])
   ].filter(height => height > 0);
 
@@ -246,6 +280,12 @@ export function upsertElevatedSources(
   const trackData = elevatedLineSegments(trackCentres, undefined, undefined, heightOffset);
   const bygningData = elevatedLineSegments(
     bygning,
+    BYGNING_ELEVATED_LINE_WIDTH_M,
+    undefined,
+    heightOffset
+  );
+  const bygningSenterlinjeData = elevatedLineSegments(
+    bygningSenterlinje,
     BYGNING_ELEVATED_LINE_WIDTH_M,
     undefined,
     heightOffset
@@ -279,6 +319,15 @@ export function upsertElevatedSources(
     });
   }
 
+  if (bygningSenterlinjeSource) {
+    bygningSenterlinjeSource.setData(bygningSenterlinjeData);
+  } else {
+    map.addSource(bygningSenterlinjeExtrusionSourceId, {
+      type: 'geojson',
+      data: bygningSenterlinjeData
+    });
+  }
+
   if (bygningOmradeSource) {
     bygningOmradeSource.setData(bygningOmradeData);
   } else {
@@ -304,8 +353,11 @@ export function applyMapLayerVisibility(map: maplibregl.Map, is3d: boolean, visi
 
   setLayersVisibility(map, bygningFlatLayerIds, visibility.bygning && !is3d);
   setLayersVisibility(map, bygning3dLayerIds, visibility.bygning && is3d);
+  setLayersVisibility(map, bygningSenterlinjeFlatLayerIds, visibility.bygningSenterlinje && !is3d);
+  setLayersVisibility(map, bygningSenterlinje3dLayerIds, visibility.bygningSenterlinje && is3d);
   setLayersVisibility(map, bygningOmradeLayerIds, visibility.bygningOmrade && !is3d);
   setLayersVisibility(map, bygningOmrade3dLayerIds, visibility.bygningOmrade && is3d);
+  setLayersVisibility(map, bygningPosisjonLayerIds, visibility.bygningPosisjon);
 }
 
 /** Switch camera + layer visibility for the global 2D/3D mode. */

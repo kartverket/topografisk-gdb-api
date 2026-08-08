@@ -1,7 +1,16 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export const MAP_LAYER_IDS = ['parcels', 'buildings', 'platformEdges', 'trackCentres', 'bygning', 'bygningOmrade'] as const;
+export const MAP_LAYER_IDS = [
+  'parcels',
+  'buildings',
+  'platformEdges',
+  'trackCentres',
+  'bygning',
+  'bygningOmrade',
+  'bygningSenterlinje',
+  'bygningPosisjon'
+] as const;
 
 export type MapLayerId = (typeof MAP_LAYER_IDS)[number];
 
@@ -11,7 +20,9 @@ export const MAP_LAYER_LABELS: Record<MapLayerId, string> = {
   platformEdges: 'Bane platform edges',
   trackCentres: 'Bane track centres',
   bygning: 'Bygning linework',
-  bygningOmrade: 'Bygning area'
+  bygningOmrade: 'Bygning area',
+  bygningSenterlinje: 'Bygning centerline',
+  bygningPosisjon: 'Bygning position'
 };
 
 export type LayerVisibility = Record<MapLayerId, boolean>;
@@ -22,7 +33,9 @@ const defaultVisibility: LayerVisibility = {
   platformEdges: true,
   trackCentres: true,
   bygning: true,
-  bygningOmrade: true
+  bygningOmrade: true,
+  bygningSenterlinje: true,
+  bygningPosisjon: true
 };
 
 type LayerVisibilityState = {

@@ -4,9 +4,11 @@ import type { Feature, FeatureCollection, Position } from './geojson';
 export const platformEdgesExtrusionSourceId = 'bane-platform-edges-3d';
 export const trackCentresExtrusionSourceId = 'bane-track-centres-3d';
 export const bygningExtrusionSourceId = 'bygning-linework-3d';
+export const bygningSenterlinjeExtrusionSourceId = 'bygning-senterlinje-3d';
 export const platformEdgesExtrusionLayerId = 'bane-platform-edges-extrusion';
 export const trackCentresExtrusionLayerId = 'bane-track-centres-extrusion';
 export const bygningExtrusionLayerId = 'bygning-linework-extrusion';
+export const bygningSenterlinjeExtrusionLayerId = 'bygning-senterlinje-extrusion';
 export const buildingsExtrusionLayerId = 'buildings-extrusion';
 
 export const DEFAULT_3D_PITCH = 60;

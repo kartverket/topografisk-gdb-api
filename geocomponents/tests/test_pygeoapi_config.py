@@ -94,6 +94,50 @@ def test_bygning_config_exposes_editable_multipolygon_collection():
     assert provider["always_xy"] is True
 
 
+def test_bygning_config_exposes_editable_centerline_collection():
+    bygning = next(
+        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bygning"
+    )
+    cfg = build_config(
+        bygning,
+        "http://example.org/datasets/bygning/ogc_api",
+        dsn="postgresql://x",
+    )
+    provider = cfg["resources"]["bygning_senterlinje"]["providers"][0]
+    assert provider["editable"] is True
+    assert provider["geometry_type"] == "MultiLineString"
+    assert provider["srid"] == 5972
+    assert provider["upsert_key"] == ["lokalid", "identifikasjon_navnerom"]
+    assert provider["storage_crs"] == "http://www.opengis.net/def/crs/EPSG/0/5972"
+    assert provider["crs"] == [
+        "http://www.opengis.net/def/crs/OGC/1.3/CRS84",
+        "http://www.opengis.net/def/crs/EPSG/0/5972",
+    ]
+    assert provider["always_xy"] is True
+
+
+def test_bygning_config_exposes_editable_point_collection():
+    bygning = next(
+        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bygning"
+    )
+    cfg = build_config(
+        bygning,
+        "http://example.org/datasets/bygning/ogc_api",
+        dsn="postgresql://x",
+    )
+    provider = cfg["resources"]["bygning_posisjon"]["providers"][0]
+    assert provider["editable"] is True
+    assert provider["geometry_type"] == "Point"
+    assert provider["srid"] == 5972
+    assert provider["upsert_key"] == ["lokalid", "identifikasjon_navnerom"]
+    assert provider["storage_crs"] == "http://www.opengis.net/def/crs/EPSG/0/5972"
+    assert provider["crs"] == [
+        "http://www.opengis.net/def/crs/OGC/1.3/CRS84",
+        "http://www.opengis.net/def/crs/EPSG/0/5972",
+    ]
+    assert provider["always_xy"] is True
+
+
 def test_wgs84_collections_keep_default_crs_behaviour():
     cfg = _config()
     provider = cfg["resources"]["parcels"]["providers"][0]

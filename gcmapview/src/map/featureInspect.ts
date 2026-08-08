@@ -7,7 +7,10 @@ import {
 } from './map3d';
 import { platformEdgesLayerId, trackCentresLayerId } from './baneLayers';
 import { bygningLayerId } from './bygningLayers';
+import { bygningPosisjonLayerId } from './bygningPosisjonLayers';
+import { bygningSenterlinjeLayerId } from './bygningSenterlinjeLayers';
 import { bygningOmradeExtrusionLayerId, bygningOmradeFillLayerId } from './bygningOmradeLayers';
+import { bygningSenterlinjeExtrusionLayerId } from './map3d';
 
 /** Layers queried on click (topmost first). Outlines/centroids omitted to reduce duplicates. */
 export const INSPECTABLE_LAYER_IDS = [
@@ -19,6 +22,8 @@ export const INSPECTABLE_LAYER_IDS = [
   `${trackCentresExtrusionLayerId}-shadow`,
   `${bygningExtrusionLayerId}-solid`,
   `${bygningExtrusionLayerId}-shadow`,
+  `${bygningSenterlinjeExtrusionLayerId}-solid`,
+  `${bygningSenterlinjeExtrusionLayerId}-shadow`,
   `${bygningOmradeExtrusionLayerId}-cap`,
   `${bygningOmradeExtrusionLayerId}-shaft`,
   bygningOmradeFillLayerId,
@@ -26,7 +31,9 @@ export const INSPECTABLE_LAYER_IDS = [
   'parcels-fill',
   platformEdgesLayerId,
   trackCentresLayerId,
-  bygningLayerId
+  bygningLayerId,
+  bygningSenterlinjeLayerId,
+  bygningPosisjonLayerId
 ] as const;
 
 const LAYER_LABELS: Record<string, string> = {
@@ -38,6 +45,8 @@ const LAYER_LABELS: Record<string, string> = {
   [`${trackCentresExtrusionLayerId}-shadow`]: 'Bane track centre',
   [`${bygningExtrusionLayerId}-solid`]: 'Bygning linework',
   [`${bygningExtrusionLayerId}-shadow`]: 'Bygning linework',
+  [`${bygningSenterlinjeExtrusionLayerId}-solid`]: 'Bygning centerline',
+  [`${bygningSenterlinjeExtrusionLayerId}-shadow`]: 'Bygning centerline',
   [`${bygningOmradeExtrusionLayerId}-cap`]: 'Bygning area',
   [`${bygningOmradeExtrusionLayerId}-shaft`]: 'Bygning area',
   [bygningOmradeFillLayerId]: 'Bygning area',
@@ -45,7 +54,9 @@ const LAYER_LABELS: Record<string, string> = {
   'parcels-fill': 'Cadastre parcel',
   [platformEdgesLayerId]: 'Bane platform edge',
   [trackCentresLayerId]: 'Bane track centre',
-  [bygningLayerId]: 'Bygning linework'
+  [bygningLayerId]: 'Bygning linework',
+  [bygningSenterlinjeLayerId]: 'Bygning centerline',
+  [bygningPosisjonLayerId]: 'Bygning position'
 };
 
 export type InspectedFeature = {

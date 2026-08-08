@@ -77,6 +77,49 @@ BYGNING_OMRADE = {
     },
 }
 
+BYGNING_SENTERLINJE = {
+    "type": "Feature",
+    "geometry": {
+        "type": "MultiLineString",
+        "coordinates": [
+            [
+                [517473.8998, 6846070.51, 450.46],
+                [517471.5698, 6846072.11, 450.56],
+            ]
+        ],
+    },
+    "properties": {
+        "lokalid": "building-centreline-integration-1",
+        "identifikasjon_navnerom": "http://data.geonorge.no/SFKB/FKB-Bygning/so",
+        "oppdateringsdato": "2026-08-07T12:00:00Z",
+        "datafangstdato": "2026-08-07T12:00:00Z",
+        "objtype": "Hjelpelinje3D",
+        "tredniva": "2",
+        "source": "test",
+    },
+}
+
+BYGNING_POSISJON = {
+    "type": "Feature",
+    "geometry": {
+        "type": "Point",
+        "coordinates": [529542.1498, 6853063.56, -99999.0],
+    },
+    "properties": {
+        "lokalid": "building-position-integration-1",
+        "identifikasjon_navnerom": "http://data.geonorge.no/SFKB/FKB-Bygning/so",
+        "oppdateringsdato": "2026-08-07T12:00:00Z",
+        "datafangstdato": "2026-08-07T12:00:00Z",
+        "objtype": "Bygning",
+        "medium": "X",
+        "bygningsnummer": 301583667,
+        "bygningstype": 241,
+        "bygningsstatus": "IG",
+        "kommunenummer": "3437",
+        "source": "test",
+    },
+}
+
 
 def test_description_to_api_crud_roundtrip(db, datasets):
     client = TestClient(
@@ -199,3 +242,91 @@ def test_bygning_omrade_upsert_roundtrip(db, datasets):
     ).json()
     assert item["geometry"]["type"] == "MultiPolygon"
     assert item["properties"]["informasjon"] == "updated"
+
+
+def test_bygning_senterlinje_upsert_roundtrip(db, datasets):
+    client = TestClient(
+        build_gateway(
+            datasets, PygeoapiProvider(dsn=db), base_url="http://localhost:8000"
+        )
+    )
+
+    first = client.post(
+        f"{BYGNING_API}/collections/bygning_senterlinje/items:upsert",
+        content=orjson.dumps(BYGNING_SENTERLINJE).decode(),
+        headers={"content-type": "application/geo+json"},
+    )
+    assert first.status_code == HTTPStatus.OK
+
+    replaced = dict(BYGNING_SENTERLINJE)
+    replaced["properties"] = dict(BYGNING_SENTERLINJE["properties"])
+    replaced["properties"]["informasjon"] = "updated"
+    second = client.post(
+        f"{BYGNING_API}/collections/bygning_senterlinje/items:upsert",
+        content=orjson.dumps(replaced).decode(),
+        headers={"content-type": "application/geo+json"},
+    )
+    assert second.status_code == HTTPStatus.OK
+    assert second.json()["id"] == first.json()["id"]
+
+    item = client.get(
+        f"{BYGNING_API}/collections/bygning_senterlinje/items/{first.json()['id']}?f=json"
+    ).json()
+    assert item["geometry"]["type"] == "MultiLineString"
+    assert item["properties"]["informasjon"] == "updated"
+
+    transformer = pyproj.Transformer.from_crs(5972, 4326, always_xy=True)
+    lon, lat = transformer.transform(517473.8998, 6846070.51)
+    listed = client.get(
+        f"{BYGNING_API}/collections/bygning_senterlinje/items?"
+        f"bbox={lon - 0.001},{lat - 0.001},{lon + 0.001},{lat + 0.001}&f=json"
+    ).json()
+    match = next(f for f in listed["features"] if f["id"] == first.json()["id"])
+    listed_lon, listed_lat, listed_z = match["geometry"]["coordinates"][0][0]
+    assert abs(listed_lon - lon) < 1e-6
+    assert abs(listed_lat - lat) < 1e-6
+    assert listed_z == 450.46
+
+
+def test_bygning_posisjon_upsert_roundtrip(db, datasets):
+    client = TestClient(
+        build_gateway(
+            datasets, PygeoapiProvider(dsn=db), base_url="http://localhost:8000"
+        )
+    )
+
+    first = client.post(
+        f"{BYGNING_API}/collections/bygning_posisjon/items:upsert",
+        content=orjson.dumps(BYGNING_POSISJON).decode(),
+        headers={"content-type": "application/geo+json"},
+    )
+    assert first.status_code == HTTPStatus.OK
+
+    replaced = dict(BYGNING_POSISJON)
+    replaced["properties"] = dict(BYGNING_POSISJON["properties"])
+    replaced["properties"]["informasjon"] = "updated"
+    second = client.post(
+        f"{BYGNING_API}/collections/bygning_posisjon/items:upsert",
+        content=orjson.dumps(replaced).decode(),
+        headers={"content-type": "application/geo+json"},
+    )
+    assert second.status_code == HTTPStatus.OK
+    assert second.json()["id"] == first.json()["id"]
+
+    item = client.get(
+        f"{BYGNING_API}/collections/bygning_posisjon/items/{first.json()['id']}?f=json"
+    ).json()
+    assert item["geometry"]["type"] == "Point"
+    assert item["properties"]["informasjon"] == "updated"
+
+    transformer = pyproj.Transformer.from_crs(5972, 4326, always_xy=True)
+    lon, lat = transformer.transform(529542.1498, 6853063.56)
+    listed = client.get(
+        f"{BYGNING_API}/collections/bygning_posisjon/items?"
+        f"bbox={lon - 0.001},{lat - 0.001},{lon + 0.001},{lat + 0.001}&f=json"
+    ).json()
+    match = next(f for f in listed["features"] if f["id"] == first.json()["id"])
+    listed_lon, listed_lat, listed_z = match["geometry"]["coordinates"]
+    assert abs(listed_lon - lon) < 1e-6
+    assert abs(listed_lat - lat) < 1e-6
+    assert listed_z == -99999.0

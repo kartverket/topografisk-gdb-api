@@ -24,9 +24,18 @@ function LayerToggleRow({
   readOnly?: boolean;
   onToggle: () => void;
 }) {
-  const isLine = layerId === 'platformEdges' || layerId === 'trackCentres' || layerId === 'bygning';
+  const isLine =
+    layerId === 'platformEdges' ||
+    layerId === 'trackCentres' ||
+    layerId === 'bygning' ||
+    layerId === 'bygningSenterlinje';
   const isReadOnly =
-    layerId === 'platformEdges' || layerId === 'trackCentres' || layerId === 'bygning' || layerId === 'bygningOmrade';
+    layerId === 'platformEdges' ||
+    layerId === 'trackCentres' ||
+    layerId === 'bygning' ||
+    layerId === 'bygningOmrade' ||
+    layerId === 'bygningSenterlinje' ||
+    layerId === 'bygningPosisjon';
 
   return (
     <li>
@@ -47,6 +56,10 @@ function LayerToggleRow({
           <span className={cn(layerSwatchClassName, 'h-1 w-4 bg-black')} />
         ) : layerId === 'bygningOmrade' ? (
           <span className={cn(layerSwatchClassName, 'h-2.5 w-4 bg-black')} />
+        ) : layerId === 'bygningSenterlinje' ? (
+          <span className={cn(layerSwatchClassName, 'h-1 w-4 bg-[#8a5a2b]')} />
+        ) : layerId === 'bygningPosisjon' ? (
+          <span className={cn(layerSwatchClassName, 'h-2.5 w-2.5 border border-white bg-black')} />
         ) : (
           <span
             className={cn(layerSwatchClassName, isLine ? 'h-1 w-4' : 'h-2.5 w-4')}
@@ -96,7 +109,7 @@ export function MapLayersCard({ is3d, visibility }: MapLayersCardProps) {
         <CardTitle>Layers</CardTitle>
         <CardDescription>
           Height colour: blue 0 m → red 300 m+
-          {!is3d ? ' · Imported linework read-only' : ''}
+          {!is3d ? ' · Imported Bygning/Bane layers are read-only' : ''}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
@@ -124,7 +137,9 @@ export function MapLayersCard({ is3d, visibility }: MapLayersCardProps) {
                 layerId === 'platformEdges' ||
                 layerId === 'trackCentres' ||
                 layerId === 'bygning' ||
-                layerId === 'bygningOmrade'
+                layerId === 'bygningOmrade' ||
+                layerId === 'bygningSenterlinje' ||
+                layerId === 'bygningPosisjon'
               }
               onToggle={() => toggleLayer(layerId)}
             />
