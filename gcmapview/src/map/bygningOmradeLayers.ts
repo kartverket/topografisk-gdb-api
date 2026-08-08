@@ -10,57 +10,183 @@ export const bygningOmradeFillColor = '#a727a1';
 export const bygningOmradeOutlineColor = '#601c5a';
 
 const MIN_BYGNING_OMRADE_EXTRUSION_HEIGHT_M = 0.5;
+const MAX_BYGNING_OMRADE_HEIGHT_RANGE_M = 50;
 
-function maxPolygonCoordinateHeight(coordinates: Position[]): number {
-  let maxHeight = 0;
+type HeightRange = {
+  minimum: number;
+  maximum: number;
+};
+
+type FeatureHeightContext = {
+  center?: [number, number];
+  range?: HeightRange;
+};
+
+function isPlausibleHeightRange(range: HeightRange | undefined): range is HeightRange {
+  if (!range) {
+    return false;
+  }
+
+  return range.maximum >= range.minimum && range.maximum - range.minimum <= MAX_BYGNING_OMRADE_HEIGHT_RANGE_M;
+}
+
+function polygonCoordinateHeightRange(coordinates: Position[]): HeightRange | undefined {
+  let minimum = Number.POSITIVE_INFINITY;
+  let maximum = 0;
 
   for (const position of coordinates) {
     const z = position[2];
-    if (typeof z === 'number' && Number.isFinite(z)) {
-      maxHeight = Math.max(maxHeight, z);
+    if (typeof z === 'number' && Number.isFinite(z) && z > 0) {
+      minimum = Math.min(minimum, z);
+      maximum = Math.max(maximum, z);
     }
   }
 
-  return maxHeight;
-}
-
-function polygonHeights(feature: Feature): number[] {
-  const coordinates = feature.geometry?.coordinates;
-  if (!coordinates || !Array.isArray(coordinates)) {
-    return [];
+  if (!Number.isFinite(minimum)) {
+    return undefined;
   }
 
+  const range = { minimum, maximum };
+  return isPlausibleHeightRange(range) ? range : undefined;
+}
+
+function polygonCenter(coordinates: Position[]): [number, number] | undefined {
+  if (coordinates.length === 0) {
+    return undefined;
+  }
+
+  const [xSum, ySum] = coordinates.reduce(([x, y], [positionX, positionY]) => [x + positionX, y + positionY], [0, 0]);
+  return [xSum / coordinates.length, ySum / coordinates.length];
+}
+
+function featureHeightRange(feature: Feature): HeightRange | undefined {
+  const coordinates = feature.geometry?.coordinates;
+  if (!coordinates || !Array.isArray(coordinates)) {
+    return undefined;
+  }
+
+  let minimum = Number.POSITIVE_INFINITY;
+  let maximum = 0;
+
+  const mergeRange = (range: HeightRange | undefined) => {
+    if (!range) {
+      return;
+    }
+
+    minimum = Math.min(minimum, range.minimum);
+    maximum = Math.max(maximum, range.maximum);
+  };
+
   if (feature.geometry?.type === 'Polygon') {
-    return (coordinates as Position[][]).map(maxPolygonCoordinateHeight);
+    for (const ring of coordinates as Position[][]) {
+      mergeRange(polygonCoordinateHeightRange(ring));
+    }
+  }
+  if (feature.geometry?.type === 'MultiPolygon') {
+    for (const polygon of coordinates as Position[][][]) {
+      for (const ring of polygon) {
+        mergeRange(polygonCoordinateHeightRange(ring));
+      }
+    }
+  }
+
+  if (!Number.isFinite(minimum)) {
+    return undefined;
+  }
+
+  return { minimum, maximum };
+}
+
+function featureCenter(feature: Feature): [number, number] | undefined {
+  const coordinates = feature.geometry?.coordinates;
+  if (!coordinates || !Array.isArray(coordinates)) {
+    return undefined;
+  }
+
+  const centers: Array<[number, number]> = [];
+
+  if (feature.geometry?.type === 'Polygon') {
+    for (const ring of coordinates as Position[][]) {
+      const center = polygonCenter(ring);
+      if (center) {
+        centers.push(center);
+      }
+    }
   }
 
   if (feature.geometry?.type === 'MultiPolygon') {
-    return (coordinates as Position[][][]).flatMap(polygon => polygon.map(maxPolygonCoordinateHeight));
+    for (const polygon of coordinates as Position[][][]) {
+      for (const ring of polygon) {
+        const center = polygonCenter(ring);
+        if (center) {
+          centers.push(center);
+        }
+      }
+    }
   }
 
-  return [];
-}
-
-function featureHeight(feature: Feature): number {
-  return Math.max(0, ...polygonHeights(feature));
-}
-
-function adjustedHeight(height: number, heightOffset: number): number {
-  if (!Number.isFinite(height) || height <= 0) {
-    return MIN_BYGNING_OMRADE_EXTRUSION_HEIGHT_M;
+  if (centers.length === 0) {
+    return undefined;
   }
 
-  return Math.max(MIN_BYGNING_OMRADE_EXTRUSION_HEIGHT_M, height - heightOffset);
+  const [xSum, ySum] = centers.reduce(([x, y], [centerX, centerY]) => [x + centerX, y + centerY], [0, 0]);
+  return [xSum / centers.length, ySum / centers.length];
+}
+
+function nearestFeatureHeightRange(contexts: FeatureHeightContext[], targetIndex: number): HeightRange | undefined {
+  const targetCenter = contexts[targetIndex]?.center;
+  if (!targetCenter) {
+    return contexts.find(context => context.range)?.range;
+  }
+
+  let nearestRange: HeightRange | undefined;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  for (let index = 0; index < contexts.length; index += 1) {
+    if (index === targetIndex) {
+      continue;
+    }
+
+    const candidate = contexts[index];
+    if (!candidate?.range || !candidate.center) {
+      continue;
+    }
+
+    const dx = candidate.center[0] - targetCenter[0];
+    const dy = candidate.center[1] - targetCenter[1];
+    const distance = dx * dx + dy * dy;
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestRange = candidate.range;
+    }
+  }
+
+  return nearestRange ?? contexts.find(context => context.range)?.range;
+}
+
+function baseHeight(height: number | undefined): number {
+  if (typeof height !== 'number' || !Number.isFinite(height) || height <= 0) {
+    return 0;
+  }
+
+  return height;
+}
+
+function topHeight(height: number | undefined, currentBaseHeight: number): number {
+  if (typeof height !== 'number' || !Number.isFinite(height) || height <= 0) {
+    return 0;
+  }
+
+  return Math.max(currentBaseHeight + MIN_BYGNING_OMRADE_EXTRUSION_HEIGHT_M, height);
 }
 
 export function lowestPositiveBygningOmradeHeight(featureCollection: FeatureCollection): number {
   let minimum = Number.POSITIVE_INFINITY;
 
   for (const feature of featureCollection.features) {
-    for (const height of polygonHeights(feature)) {
-      if (height > 0) {
-        minimum = Math.min(minimum, height);
-      }
+    const range = featureHeightRange(feature);
+    if (isPlausibleHeightRange(range) && range.minimum > 0) {
+      minimum = Math.min(minimum, range.minimum);
     }
   }
 
@@ -71,18 +197,27 @@ export function bygningOmradeExtrusionFeatureCollection(
   featureCollection: FeatureCollection,
   heightOffset = 0
 ): FeatureCollection {
+  const contexts: FeatureHeightContext[] = featureCollection.features.map(feature => ({
+    center: featureCenter(feature),
+    range: featureHeightRange(feature)
+  }));
+
   return {
     type: 'FeatureCollection',
-    features: featureCollection.features.map(feature => {
-      const height = featureHeight(feature);
+    features: featureCollection.features.map((feature, index) => {
+      const range = contexts[index]?.range ?? nearestFeatureHeightRange(contexts, index);
+      const elevation = range?.maximum ?? 0;
+      const base = baseHeight(range?.minimum);
+      const height = topHeight(range?.maximum, base);
 
       return {
         ...feature,
         properties: {
           ...(feature.properties ?? {}),
-          elevation: height,
-          base: 0,
-          height: adjustedHeight(height, heightOffset)
+          elevation,
+          base,
+          height,
+          zOffset: heightOffset
         }
       };
     })

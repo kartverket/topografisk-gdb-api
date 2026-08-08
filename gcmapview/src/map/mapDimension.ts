@@ -68,9 +68,30 @@ type OpacityBandedExtrusion = {
   baseLayerId: string;
   source: string;
   heightExpression: ExpressionSpecification;
+  baseExpression?: ExpressionSpecification;
   filter?: maplibregl.FilterSpecification;
   color?: string | ExpressionSpecification;
 };
+
+function numericPropertyExpression(propertyName: string, fallback = 0): ExpressionSpecification {
+  return ['to-number', ['coalesce', ['get', propertyName], fallback]];
+}
+
+function offsetBaseExpression(
+  baseExpression: ExpressionSpecification,
+  zOffsetExpression: ExpressionSpecification
+): ExpressionSpecification {
+  return ['max', 0, ['-', baseExpression, zOffsetExpression]];
+}
+
+function offsetHeightExpression(
+  baseExpression: ExpressionSpecification,
+  topExpression: ExpressionSpecification,
+  zOffsetExpression: ExpressionSpecification
+): ExpressionSpecification {
+  const adjustedBase = offsetBaseExpression(baseExpression, zOffsetExpression);
+  return ['case', ['<=', topExpression, zOffsetExpression], 0, ['max', adjustedBase, ['-', topExpression, zOffsetExpression]]];
+}
 
 function setLayerVisibility(map: maplibregl.Map, layerId: string, visible: boolean) {
   if (!map.getLayer(layerId)) return;
@@ -84,11 +105,19 @@ function setLayersVisibility(map: maplibregl.Map, layerIds: readonly string[], v
 }
 
 function addExtrusionShaft(map: maplibregl.Map, options: OpacityBandedExtrusion) {
-  const { baseLayerId, source, heightExpression, filter, color = heightColorExpression(heightExpression) } = options;
+  const {
+    baseLayerId,
+    source,
+    heightExpression,
+    baseExpression = 0,
+    filter,
+    color = heightColorExpression(heightExpression)
+  } = options;
   const tallerThanCap: ExpressionSpecification = ['>', heightExpression, EXTRUSION_TOP_CAP_M];
   const shaftFilter: maplibregl.FilterSpecification = filter
     ? (['all', filter, tallerThanCap] as maplibregl.FilterSpecification)
     : tallerThanCap;
+  const shaftTop = extrusionShaftTopExpression(heightExpression, baseExpression);
 
   map.addLayer({
     id: `${baseLayerId}-shaft`,
@@ -99,16 +128,23 @@ function addExtrusionShaft(map: maplibregl.Map, options: OpacityBandedExtrusion)
     paint: {
       'fill-extrusion-color': color,
       'fill-extrusion-opacity': EXTRUSION_OPACITY_MIN,
-      'fill-extrusion-base': 0,
-      'fill-extrusion-height': extrusionShaftTopExpression(heightExpression),
+      'fill-extrusion-base': baseExpression,
+      'fill-extrusion-height': shaftTop,
       'fill-extrusion-vertical-gradient': false
     }
   });
 }
 
 function addExtrusionCap(map: maplibregl.Map, options: OpacityBandedExtrusion) {
-  const { baseLayerId, source, heightExpression, filter, color = heightColorExpression(heightExpression) } = options;
-  const shaftTop = extrusionShaftTopExpression(heightExpression);
+  const {
+    baseLayerId,
+    source,
+    heightExpression,
+    baseExpression = 0,
+    filter,
+    color = heightColorExpression(heightExpression)
+  } = options;
+  const shaftTop = extrusionShaftTopExpression(heightExpression, baseExpression);
 
   map.addLayer({
     id: `${baseLayerId}-cap`,
@@ -127,8 +163,10 @@ function addExtrusionCap(map: maplibregl.Map, options: OpacityBandedExtrusion) {
 }
 
 const elevatedLineElevationExpression: ExpressionSpecification = [
-  'to-number',
-  ['coalesce', ['get', 'elevation'], ['get', 'height'], 0]
+  'case',
+  ['has', 'elevation'],
+  ['to-number', ['get', 'elevation']],
+  0
 ];
 
 /**
@@ -160,8 +198,11 @@ function addOpaqueElevatedLineExtrusion(
   source: string,
   color: string | ExpressionSpecification = heightColorExpression(elevatedLineElevationExpression)
 ) {
-  const baseExpression: ExpressionSpecification = ['to-number', ['coalesce', ['get', 'base'], 0]];
-  const heightExpression: ExpressionSpecification = ['to-number', ['coalesce', ['get', 'height'], 1]];
+  const rawBaseExpression = numericPropertyExpression('base');
+  const rawHeightExpression = numericPropertyExpression('height');
+  const zOffsetExpression = numericPropertyExpression('zOffset');
+  const baseExpression = offsetBaseExpression(rawBaseExpression, zOffsetExpression);
+  const heightExpression = offsetHeightExpression(rawBaseExpression, rawHeightExpression, zOffsetExpression);
 
   map.addLayer({
     id: `${baseLayerId}-solid`,
@@ -213,10 +254,19 @@ export function addExtrusionLayers(map: maplibregl.Map) {
   addExtrusionShaft(map, buildingBand);
   addExtrusionCap(map, buildingBand);
 
+  const bygningOmradeRawBaseExpression = numericPropertyExpression('base');
+  const bygningOmradeRawHeightExpression = numericPropertyExpression('height');
+  const bygningOmradeZOffsetExpression = numericPropertyExpression('zOffset');
+
   const bygningOmradeBand: OpacityBandedExtrusion = {
     baseLayerId: bygningOmradeExtrusionLayerId,
     source: bygningOmradeExtrusionSourceId,
-    heightExpression: ['to-number', ['coalesce', ['get', 'height'], 0]],
+    baseExpression: offsetBaseExpression(bygningOmradeRawBaseExpression, bygningOmradeZOffsetExpression),
+    heightExpression: offsetHeightExpression(
+      bygningOmradeRawBaseExpression,
+      bygningOmradeRawHeightExpression,
+      bygningOmradeZOffsetExpression
+    ),
     filter: ['==', '$type', 'Polygon'],
     color: bygningOmradeFillColor
   };

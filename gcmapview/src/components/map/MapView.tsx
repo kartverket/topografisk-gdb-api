@@ -55,6 +55,7 @@ import { useMapDimension } from './MapDimensionContext';
 import { FeaturePropertiesCard } from './FeaturePropertiesCard';
 import { MapLayersCard } from './MapLayersCard';
 import { type LayerVisibility, useLayerVisibilityStore } from '../../store/layerVisibilityStore';
+import { useMapViewStore } from '../../store/mapViewStore';
 import {
   hasInspectableFeatureAtPoint,
   inspectFeaturesAtPoint,
@@ -94,7 +95,7 @@ const emptyVisibleFeatureCollections: VisibleFeatureCollections = {
 const MIN_VECTOR_ZOOM = 10;
 const MIN_BUILDING_ZOOM = 15;
 
-/** Fixed initial view — do not fit the camera to loaded feature extents. */
+/** Default initial view when no local favorite view has been saved. */
 const OTTA_CENTER: [number, number] = [9.54, 61.77];
 const OTTA_ZOOM = 15;
 const BUILDING_COLOR = '#000000';
@@ -502,6 +503,10 @@ async function getFeature(url: string) {
   return sanitizeMissingHeightFeature((await response.json()) as Feature);
 }
 
+function visibleCollectionPromise(visible: boolean, url: string) {
+  return visible ? getFeatureCollection(url) : Promise.resolve(emptyFeatureCollection);
+}
+
 function visibleOgcBbox(map: maplibregl.Map): OgcBbox {
   const container = map.getContainer();
   const width = container.clientWidth;
@@ -528,20 +533,33 @@ function visibleOgcBbox(map: maplibregl.Map): OgcBbox {
   ];
 }
 
-async function getVisibleFeatureCollections(map: maplibregl.Map) {
+async function getVisibleFeatureCollections(map: maplibregl.Map, visibility: LayerVisibility) {
   const bbox = visibleOgcBbox(map);
   const buildingZoomActive = isBuildingZoom(map);
   const [parcels, buildings, platformEdges, trackCentres, bygning, bygningOmrade, bygningSenterlinje, bygningPosisjon] = await Promise.all([
-    getFeatureCollection(parcelsItemsInBboxUrl(bbox)),
-    buildingZoomActive ? getFeatureCollection(buildingsItemsInBboxUrl(bbox)) : Promise.resolve(emptyFeatureCollection),
-    getFeatureCollection(platformEdgesItemsInBboxUrl(bbox)),
-    getFeatureCollection(trackCentresItemsInBboxUrl(bbox)),
-    buildingZoomActive ? getFeatureCollection(bygningItemsInBboxUrl(bbox)) : Promise.resolve(emptyFeatureCollection),
-    buildingZoomActive ? getFeatureCollection(bygningOmradeItemsInBboxUrl(bbox)) : Promise.resolve(emptyFeatureCollection),
-    buildingZoomActive ? getFeatureCollection(bygningSenterlinjeItemsInBboxUrl(bbox)) : Promise.resolve(emptyFeatureCollection),
-    buildingZoomActive ? getFeatureCollection(bygningPosisjonItemsInBboxUrl(bbox)) : Promise.resolve(emptyFeatureCollection)
+    visibleCollectionPromise(visibility.parcels, parcelsItemsInBboxUrl(bbox)),
+    visibleCollectionPromise(visibility.buildings && buildingZoomActive, buildingsItemsInBboxUrl(bbox)),
+    visibleCollectionPromise(visibility.platformEdges, platformEdgesItemsInBboxUrl(bbox)),
+    visibleCollectionPromise(visibility.trackCentres, trackCentresItemsInBboxUrl(bbox)),
+    visibleCollectionPromise(visibility.bygning && buildingZoomActive, bygningItemsInBboxUrl(bbox)),
+    visibleCollectionPromise(visibility.bygningOmrade && buildingZoomActive, bygningOmradeItemsInBboxUrl(bbox)),
+    visibleCollectionPromise(visibility.bygningSenterlinje && buildingZoomActive, bygningSenterlinjeItemsInBboxUrl(bbox)),
+    visibleCollectionPromise(visibility.bygningPosisjon && buildingZoomActive, bygningPosisjonItemsInBboxUrl(bbox))
   ]);
   return { bbox, parcels, buildings, platformEdges, trackCentres, bygning, bygningOmrade, bygningSenterlinje, bygningPosisjon };
+}
+
+function layerVisibilityChanged(previous: LayerVisibility, current: LayerVisibility) {
+  return (
+    previous.parcels !== current.parcels ||
+    previous.buildings !== current.buildings ||
+    previous.platformEdges !== current.platformEdges ||
+    previous.trackCentres !== current.trackCentres ||
+    previous.bygning !== current.bygning ||
+    previous.bygningOmrade !== current.bygningOmrade ||
+    previous.bygningSenterlinje !== current.bygningSenterlinje ||
+    previous.bygningPosisjon !== current.bygningPosisjon
+  );
 }
 
 function idFromLocation(location: string | null) {
@@ -931,6 +949,7 @@ export function MapView() {
   const mapRef = useRef<maplibregl.Map>(null);
   const buildingMarkerRefs = useRef<maplibregl.Marker[]>([]);
   const pendingReloadTimeoutRef = useRef<number | undefined>(undefined);
+  const reloadVisibleDataRef = useRef<(() => Promise<void>) | undefined>(undefined);
   const { is3d, adjustElevatedHeights } = useMapDimension();
   const is3dRef = useRef(is3d);
   is3dRef.current = is3d;
@@ -938,6 +957,13 @@ export function MapView() {
   adjustElevatedHeightsRef.current = adjustElevatedHeights;
   const latestVectorDataRef = useRef<VisibleFeatureCollections>(emptyVisibleFeatureCollections);
   const layerVisibility = useLayerVisibilityStore(state => state.visibility);
+  const previousLayerVisibilityRef = useRef(layerVisibility);
+  const favoriteViews = useMapViewStore(state => state.favoriteViews);
+  const activeFavoriteName = useMapViewStore(state => state.activeFavoriteName);
+  const saveFavoriteView = useMapViewStore(state => state.saveFavoriteView);
+  const selectFavoriteView = useMapViewStore(state => state.selectFavoriteView);
+  const removeFavoriteView = useMapViewStore(state => state.removeFavoriteView);
+  const activeFavoriteView = favoriteViews.find(favoriteView => favoriteView.name === activeFavoriteName) ?? favoriteViews[0];
   const [status, setStatus] = useState('Loading map...');
   const [error, setError] = useState<string>();
   const [isMapReady, setIsMapReady] = useState(false);
@@ -1055,6 +1081,58 @@ export function MapView() {
     });
   }
 
+  function saveCurrentFavoriteView() {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    const suggestedName = activeFavoriteName ?? `Favorite ${favoriteViews.length + 1}`;
+    const rawName = window.prompt('Name for favorite location:', suggestedName);
+    if (rawName === null) {
+      return;
+    }
+
+    const favoriteName = rawName.trim();
+    if (!favoriteName) {
+      setStatus('Favorite location was not saved because no name was provided.');
+      return;
+    }
+
+    const center = map.getCenter();
+    const savedCenter: [number, number] = [Number(center.lng.toFixed(6)), Number(center.lat.toFixed(6))];
+    const savedZoom = Number(map.getZoom().toFixed(2));
+    const existed = favoriteViews.some(favoriteView => favoriteView.name === favoriteName);
+    saveFavoriteView({ name: favoriteName, center: savedCenter, zoom: savedZoom });
+    setStatus(
+      `${existed ? 'Updated' : 'Saved'} favorite "${favoriteName}" at ${savedCenter[0].toFixed(5)}, ${savedCenter[1].toFixed(5)} (z=${savedZoom.toFixed(2)}).`
+    );
+  }
+
+  function goToFavoriteView() {
+    const map = mapRef.current;
+    if (!map || !activeFavoriteView) {
+      return;
+    }
+
+    setError(undefined);
+    map.easeTo({ center: activeFavoriteView.center, zoom: activeFavoriteView.zoom, duration: 700 });
+  }
+
+  function clearStoredFavoriteView() {
+    if (!activeFavoriteView) {
+      return;
+    }
+
+    removeFavoriteView(activeFavoriteView.name);
+    setStatus(`Removed favorite "${activeFavoriteView.name}".`);
+  }
+
+  function selectStoredFavoriteView(name: string) {
+    selectFavoriteView(name);
+    setStatus(`Selected favorite "${name}".`);
+  }
+
   useEffect(() => {
     if (!mapContainerRef.current) {
       return;
@@ -1064,8 +1142,8 @@ export function MapView() {
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
       style: mapStyle,
-      center: OTTA_CENTER,
-      zoom: OTTA_ZOOM
+      center: activeFavoriteView?.center ?? OTTA_CENTER,
+      zoom: activeFavoriteView?.zoom ?? OTTA_ZOOM
     });
     mapRef.current = map;
     const resizeObserver = new ResizeObserver(() => map.resize());
@@ -1103,8 +1181,10 @@ export function MapView() {
       }
 
       try {
+        const currentVisibility = useLayerVisibilityStore.getState().visibility;
         const { bbox, parcels, buildings, platformEdges, trackCentres, bygning, bygningOmrade, bygningSenterlinje, bygningPosisjon } = await getVisibleFeatureCollections(
-          map
+          map,
+          currentVisibility
         );
         if (cancelled || requestId !== visibleRequestId) {
           return;
@@ -1130,7 +1210,7 @@ export function MapView() {
           bygningOmrade,
           bygningSenterlinje,
           bygningPosisjon,
-          useLayerVisibilityStore.getState().visibility,
+          currentVisibility,
           adjustElevatedHeightsRef.current
         );
         await upsertGeoJsonSource(map, 'building-centroids', buildingCentroidsFeatureCollection(buildings));
@@ -1146,6 +1226,8 @@ export function MapView() {
         }
       }
     }
+
+    reloadVisibleDataRef.current = reloadVisibleData;
 
     function scheduleVisibleDataReload() {
       if (pendingReloadTimeoutRef.current !== undefined) {
@@ -1191,6 +1273,7 @@ export function MapView() {
     return () => {
       cancelled = true;
       visibleRequestId += 1;
+      reloadVisibleDataRef.current = undefined;
       if (pendingReloadTimeoutRef.current !== undefined) {
         window.clearTimeout(pendingReloadTimeoutRef.current);
         pendingReloadTimeoutRef.current = undefined;
@@ -1224,6 +1307,14 @@ export function MapView() {
 
     applyMapLayerVisibility(map, is3d, layerVisibility);
     applyBuildingMarkerVisibility(layerVisibility.buildings && !is3d);
+
+    const visibilityChanged = layerVisibilityChanged(previousLayerVisibilityRef.current, layerVisibility);
+    previousLayerVisibilityRef.current = layerVisibility;
+
+    if (visibilityChanged && isVectorZoom(map)) {
+      void reloadVisibleDataRef.current?.();
+      return;
+    }
 
     const latest = latestVectorDataRef.current;
     void setNativeFeatureSources(
@@ -1296,7 +1387,7 @@ export function MapView() {
         bygningOmrade,
         bygningSenterlinje,
         bygningPosisjon
-      } = await getVisibleFeatureCollections(map);
+      } = await getVisibleFeatureCollections(map, layerVisibility);
       logLoadedCoordinates('parcels after create', parcels);
       logLoadedCoordinates('buildings after create', buildings);
       latestVectorDataRef.current = {
@@ -1381,7 +1472,7 @@ export function MapView() {
         bygningOmrade: reloadedBygningOmrade,
         bygningSenterlinje: reloadedBygningSenterlinje,
         bygningPosisjon: reloadedBygningPosisjon
-      } = await getVisibleFeatureCollections(map);
+      } = await getVisibleFeatureCollections(map, layerVisibility);
       logLoadedCoordinates('parcels after clear', reloadedParcels);
       logLoadedCoordinates('buildings after clear', reloadedBuildings);
       latestVectorDataRef.current = {
@@ -1455,6 +1546,12 @@ export function MapView() {
       <MapLayersCard
         is3d={is3d}
         visibility={layerVisibility}
+        favoriteViews={favoriteViews}
+        activeFavoriteName={activeFavoriteView?.name}
+        onSaveFavoriteView={saveCurrentFavoriteView}
+        onGoToFavoriteView={goToFavoriteView}
+        onClearFavoriteView={clearStoredFavoriteView}
+        onSelectFavoriteView={selectStoredFavoriteView}
       />
       {selectedFeature ? (
         <FeaturePropertiesCard

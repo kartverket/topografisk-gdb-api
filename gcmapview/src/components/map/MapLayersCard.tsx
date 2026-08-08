@@ -1,5 +1,6 @@
 import { Eye, EyeOff } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
@@ -10,6 +11,7 @@ import {
   type MapLayerId,
   useLayerVisibilityStore
 } from '../../store/layerVisibilityStore';
+import type { FavoriteMapView } from '../../store/mapViewStore';
 
 const layerSwatchClassName = 'inline-block shrink-0 rounded-full opacity-80';
 
@@ -95,10 +97,26 @@ function LayerToggleRow({
 type MapLayersCardProps = {
   is3d: boolean;
   visibility: LayerVisibility;
+  favoriteViews: FavoriteMapView[];
+  activeFavoriteName?: string;
+  onSaveFavoriteView: () => void;
+  onGoToFavoriteView: () => void;
+  onClearFavoriteView: () => void;
+  onSelectFavoriteView: (name: string) => void;
 };
 
-export function MapLayersCard({ is3d, visibility }: MapLayersCardProps) {
+export function MapLayersCard({
+  is3d,
+  visibility,
+  favoriteViews,
+  activeFavoriteName,
+  onSaveFavoriteView,
+  onGoToFavoriteView,
+  onClearFavoriteView,
+  onSelectFavoriteView
+}: MapLayersCardProps) {
   const toggleLayer = useLayerVisibilityStore(state => state.toggleLayer);
+  const activeFavoriteView = favoriteViews.find(favoriteView => favoriteView.name === activeFavoriteName) ?? favoriteViews[0];
 
   return (
     <Card
@@ -145,6 +163,68 @@ export function MapLayersCard({ is3d, visibility }: MapLayersCardProps) {
             />
           ))}
         </ul>
+        <Separator />
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-medium">Favorite locations</span>
+            {activeFavoriteView ? (
+              <Badge
+                variant="secondary"
+                className="font-mono text-[11px]">
+                z {activeFavoriteView.zoom.toFixed(2)}
+              </Badge>
+            ) : (
+              <Badge variant="outline">Not set</Badge>
+            )}
+          </div>
+          {favoriteViews.length > 0 ? (
+            <>
+              <select
+                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                aria-label="Select favorite location"
+                value={activeFavoriteView?.name ?? ''}
+                onChange={event => onSelectFavoriteView(event.target.value)}>
+                {favoriteViews.map(favoriteView => (
+                  <option
+                    key={favoriteView.name}
+                    value={favoriteView.name}>
+                    {favoriteView.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] font-mono text-muted-foreground">
+                {activeFavoriteView?.center[0].toFixed(5)}, {activeFavoriteView?.center[1].toFixed(5)}
+              </p>
+            </>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">Save named map centers and zoom levels locally.</p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              onClick={onSaveFavoriteView}>
+              Save current
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              disabled={!activeFavoriteView}
+              onClick={onGoToFavoriteView}>
+              Go to selected
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              disabled={!activeFavoriteView}
+              onClick={onClearFavoriteView}>
+              Delete selected
+            </Button>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );

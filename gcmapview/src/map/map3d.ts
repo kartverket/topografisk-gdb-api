@@ -91,11 +91,9 @@ export function elevatedLineSegments(
         const rawZ1 = adjustedHeight(start[2], 0);
         const rawZ2 = adjustedHeight(end[2], 0);
         const rawMidZ = (rawZ1 + rawZ2) / 2;
-        const z1 = adjustedHeight(start[2], heightOffset);
-        const z2 = adjustedHeight(end[2], heightOffset);
-        const midZ = (z1 + z2) / 2;
-        const base = Math.max(0, midZ - halfThickness);
-        const height = Math.max(base + MIN_EXTRUSION_HEIGHT_M, midZ + halfThickness);
+        const isGroundLevel = rawMidZ <= 0;
+        const base = isGroundLevel ? 0 : Math.max(0, rawMidZ - halfThickness);
+        const height = isGroundLevel ? 0 : Math.max(base + MIN_EXTRUSION_HEIGHT_M, rawMidZ + halfThickness);
 
         features.push({
           type: 'Feature',
@@ -103,7 +101,8 @@ export function elevatedLineSegments(
             ...(feature.properties ?? {}),
             elevation: rawMidZ,
             base,
-            height
+            height,
+            zOffset: heightOffset
           },
           geometry: {
             type: 'Polygon',
@@ -148,8 +147,11 @@ export const EXTRUSION_OPACITY_MIN = 0.35;
 export const EXTRUSION_OPACITY_MAX = 0.9;
 
 /** Top of the translucent shaft / base of the opaque cap. */
-export function extrusionShaftTopExpression(heightExpression: ExpressionSpecification): ExpressionSpecification {
-  return ['max', 0, ['-', heightExpression, EXTRUSION_TOP_CAP_M]];
+export function extrusionShaftTopExpression(
+  heightExpression: ExpressionSpecification,
+  baseExpression: ExpressionSpecification | number = 0
+): ExpressionSpecification {
+  return ['max', baseExpression, ['-', heightExpression, EXTRUSION_TOP_CAP_M]];
 }
 
 /** Max finite Z from a LineString coordinate array (meters). */
