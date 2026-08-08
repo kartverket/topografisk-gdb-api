@@ -1,10 +1,12 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { LayerVisibility } from './layerVisibilityStore';
 
 export type FavoriteMapView = {
   name: string;
   center: [number, number];
   zoom: number;
+  visibility?: LayerVisibility;
 };
 
 type LegacyFavoriteMapView = {
@@ -68,7 +70,7 @@ export const useMapViewStore = create<MapViewState>()(
     }),
     {
       name: 'gcmapview-favorite-view',
-      version: 2,
+      version: 3,
       migrate: persistedState => {
         const state = (persistedState ?? {}) as PersistedMapViewState;
 

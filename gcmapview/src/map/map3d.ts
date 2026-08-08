@@ -14,10 +14,17 @@ export const buildingsExtrusionLayerId = 'buildings-extrusion';
 export const DEFAULT_3D_PITCH = 60;
 export const FLOOR_HEIGHT_M = 3;
 export const ELEVATED_LINE_WIDTH_M = 3;
+export const BYGNING_LINEWORK_ELEVATED_LINE_WIDTH_M = 1;
 export const BYGNING_ELEVATED_LINE_WIDTH_M = 1.5;
 /** Vertical thickness of elevated line beams (meters). */
 export const ELEVATED_LINE_THICKNESS_M = 2;
 const MIN_EXTRUSION_HEIGHT_M = 0.5;
+const MAX_LINE_HEIGHT_RANGE_M = 50;
+
+type HeightRange = {
+  minimum: number;
+  maximum: number;
+};
 
 function lineCoordinateSets(feature: Feature): Position[][] {
   if (!feature.geometry?.coordinates || !Array.isArray(feature.geometry.coordinates)) {
@@ -41,6 +48,45 @@ function adjustedHeight(z: number | undefined, heightOffset: number): number {
   }
 
   return Math.max(0, z - heightOffset);
+}
+
+function featurePositiveHeightRange(feature: Feature): HeightRange | undefined {
+  let minimum = Number.POSITIVE_INFINITY;
+  let maximum = 0;
+
+  for (const coordinates of lineCoordinateSets(feature)) {
+    for (const position of coordinates) {
+      const z = position[2];
+      if (typeof z === 'number' && Number.isFinite(z) && z > 0) {
+        minimum = Math.min(minimum, z);
+        maximum = Math.max(maximum, z);
+      }
+    }
+  }
+
+  if (!Number.isFinite(minimum)) {
+    return undefined;
+  }
+
+  return { minimum, maximum };
+}
+
+function percentile(sortedValues: number[], fraction: number): number {
+  if (sortedValues.length === 0) {
+    return 0;
+  }
+
+  const index = (sortedValues.length - 1) * fraction;
+  const lowerIndex = Math.floor(index);
+  const upperIndex = Math.ceil(index);
+  const lowerValue = sortedValues[lowerIndex] ?? sortedValues[sortedValues.length - 1] ?? 0;
+  const upperValue = sortedValues[upperIndex] ?? lowerValue;
+
+  if (lowerIndex === upperIndex) {
+    return lowerValue;
+  }
+
+  return lowerValue + (upperValue - lowerValue) * (index - lowerIndex);
 }
 
 function segmentFootprint(lon1: number, lat1: number, lon2: number, lat2: number, widthMeters: number): Position[] {
@@ -117,22 +163,35 @@ export function elevatedLineSegments(
 }
 
 export function lowestPositiveLineHeight(featureCollections: readonly FeatureCollection[]): number {
-  let minimum = Number.POSITIVE_INFINITY;
+  const minimumHeights: number[] = [];
 
   for (const featureCollection of featureCollections) {
     for (const feature of featureCollection.features) {
-      for (const coordinates of lineCoordinateSets(feature)) {
-        for (const position of coordinates) {
-          const z = position[2];
-          if (typeof z === 'number' && Number.isFinite(z) && z > 0) {
-            minimum = Math.min(minimum, z);
-          }
-        }
+      const range = featurePositiveHeightRange(feature);
+      if (!range) {
+        continue;
       }
+
+      if (range.maximum - range.minimum > MAX_LINE_HEIGHT_RANGE_M) {
+        continue;
+      }
+
+      minimumHeights.push(range.minimum);
     }
   }
 
-  return Number.isFinite(minimum) ? minimum : 0;
+  if (minimumHeights.length === 0) {
+    return 0;
+  }
+
+  const sortedMinimumHeights = [...minimumHeights].sort((left, right) => left - right);
+  const firstQuartile = percentile(sortedMinimumHeights, 0.25);
+  const thirdQuartile = percentile(sortedMinimumHeights, 0.75);
+  const interquartileRange = thirdQuartile - firstQuartile;
+  const lowerFence = firstQuartile - interquartileRange * 1.5;
+  const filteredMinimumHeights = sortedMinimumHeights.filter(height => height >= lowerFence);
+
+  return filteredMinimumHeights[0] ?? sortedMinimumHeights[0] ?? 0;
 }
 
 export function buildingExtrusionHeightExpression(floorHeightM = FLOOR_HEIGHT_M): ExpressionSpecification {

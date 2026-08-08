@@ -40,6 +40,7 @@ const defaultVisibility: LayerVisibility = {
 
 type LayerVisibilityState = {
   visibility: LayerVisibility;
+  setVisibility: (visibility: LayerVisibility) => void;
   setLayerVisible: (id: MapLayerId, visible: boolean) => void;
   toggleLayer: (id: MapLayerId) => void;
 };
@@ -48,6 +49,7 @@ export const useLayerVisibilityStore = create<LayerVisibilityState>()(
   persist(
     set => ({
       visibility: { ...defaultVisibility },
+      setVisibility: visibility => set({ visibility: { ...visibility } }),
       setLayerVisible: (id, visible) =>
         set(state => ({
           visibility: { ...state.visibility, [id]: visible }

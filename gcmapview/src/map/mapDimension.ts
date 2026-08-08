@@ -3,6 +3,7 @@ import type { ExpressionSpecification } from 'maplibre-gl';
 import type { FeatureCollection } from './geojson';
 import type { LayerVisibility } from '../store/layerVisibilityStore';
 import {
+  BYGNING_LINEWORK_ELEVATED_LINE_WIDTH_M,
   BYGNING_ELEVATED_LINE_WIDTH_M,
   buildingExtrusionHeightExpression,
   bygningExtrusionLayerId,
@@ -330,7 +331,7 @@ export function upsertElevatedSources(
   const trackData = elevatedLineSegments(trackCentres, undefined, undefined, heightOffset);
   const bygningData = elevatedLineSegments(
     bygning,
-    BYGNING_ELEVATED_LINE_WIDTH_M,
+    BYGNING_LINEWORK_ELEVATED_LINE_WIDTH_M,
     undefined,
     heightOffset
   );

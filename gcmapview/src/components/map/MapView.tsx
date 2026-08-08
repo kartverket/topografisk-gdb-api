@@ -957,6 +957,7 @@ export function MapView() {
   adjustElevatedHeightsRef.current = adjustElevatedHeights;
   const latestVectorDataRef = useRef<VisibleFeatureCollections>(emptyVisibleFeatureCollections);
   const layerVisibility = useLayerVisibilityStore(state => state.visibility);
+  const setLayerVisibility = useLayerVisibilityStore(state => state.setVisibility);
   const previousLayerVisibilityRef = useRef(layerVisibility);
   const favoriteViews = useMapViewStore(state => state.favoriteViews);
   const activeFavoriteName = useMapViewStore(state => state.activeFavoriteName);
@@ -974,6 +975,14 @@ export function MapView() {
   const setSelectedFeatureRef = useRef(setSelectedFeature);
   setSelectedFeatureRef.current = setSelectedFeature;
   const collectionStorageCrsRef = useRef(new Map<CollectionId, string>());
+
+  useEffect(() => {
+    if (!activeFavoriteView?.visibility) {
+      return;
+    }
+
+    setLayerVisibility(activeFavoriteView.visibility);
+  }, [activeFavoriteView, setLayerVisibility]);
 
   useEffect(() => {
     if (!selectedFeature?.positionsLoading || !selectedFeature.collectionId || selectedFeature.featureId === undefined) {
@@ -1103,9 +1112,9 @@ export function MapView() {
     const savedCenter: [number, number] = [Number(center.lng.toFixed(6)), Number(center.lat.toFixed(6))];
     const savedZoom = Number(map.getZoom().toFixed(2));
     const existed = favoriteViews.some(favoriteView => favoriteView.name === favoriteName);
-    saveFavoriteView({ name: favoriteName, center: savedCenter, zoom: savedZoom });
+    saveFavoriteView({ name: favoriteName, center: savedCenter, zoom: savedZoom, visibility: layerVisibility });
     setStatus(
-      `${existed ? 'Updated' : 'Saved'} favorite "${favoriteName}" at ${savedCenter[0].toFixed(5)}, ${savedCenter[1].toFixed(5)} (z=${savedZoom.toFixed(2)}).`
+      `${existed ? 'Updated' : 'Saved'} favorite "${favoriteName}" at ${savedCenter[0].toFixed(5)}, ${savedCenter[1].toFixed(5)} (z=${savedZoom.toFixed(2)}) with current layers.`
     );
   }
 
@@ -1116,6 +1125,9 @@ export function MapView() {
     }
 
     setError(undefined);
+    if (activeFavoriteView.visibility) {
+      setLayerVisibility(activeFavoriteView.visibility);
+    }
     map.easeTo({ center: activeFavoriteView.center, zoom: activeFavoriteView.zoom, duration: 700 });
   }
 
@@ -1129,7 +1141,21 @@ export function MapView() {
   }
 
   function selectStoredFavoriteView(name: string) {
+    const map = mapRef.current;
+    const selectedFavoriteView = favoriteViews.find(favoriteView => favoriteView.name === name);
+
     selectFavoriteView(name);
+
+    if (map && selectedFavoriteView) {
+      setError(undefined);
+      if (selectedFavoriteView.visibility) {
+        setLayerVisibility(selectedFavoriteView.visibility);
+      }
+      map.easeTo({ center: selectedFavoriteView.center, zoom: selectedFavoriteView.zoom, duration: 700 });
+      setStatus(`Selected favorite "${name}", restored its layers, and moved to it.`);
+      return;
+    }
+
     setStatus(`Selected favorite "${name}".`);
   }
 
