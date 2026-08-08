@@ -8,6 +8,10 @@ import { cn } from '@/lib/utils';
 import {
   buildingItemUrl,
   bygningItemsInBboxUrl,
+  collectionItemUrl,
+  collectionMetadataUrl,
+  type CollectionId,
+  type CollectionMetadata,
   bygningOmradeItemsInBboxUrl,
   bygningPosisjonItemsInBboxUrl,
   bygningSenterlinjeItemsInBboxUrl,
@@ -23,9 +27,10 @@ import {
   trackCentresItemsInBboxUrl
 } from '../../api/geocomponentsApi';
 import { addBaneSourcesAndLayers, normalizeBaneFeatureCollection } from '../../map/baneLayers';
+import { platformEdgesSourceId, trackCentresSourceId } from '../../map/baneLayers';
 import {
   addBygningSourcesAndLayers,
-  bygningLayerFeatureCollection,
+  bygningSourceId,
   normalizeBygningFeatureCollection
 } from '../../map/bygningLayers';
 import {
@@ -35,7 +40,6 @@ import {
 } from '../../map/bygningPosisjonLayers';
 import {
   addBygningSenterlinjeSourceAndLayer,
-  bygningSenterlinjeLayerFeatureCollection,
   bygningSenterlinjeSourceId,
   normalizeBygningSenterlinjeFeatureCollection
 } from '../../map/bygningSenterlinjeLayers';
@@ -51,7 +55,12 @@ import { useMapDimension } from './MapDimensionContext';
 import { FeaturePropertiesCard } from './FeaturePropertiesCard';
 import { MapLayersCard } from './MapLayersCard';
 import { type LayerVisibility, useLayerVisibilityStore } from '../../store/layerVisibilityStore';
-import { hasInspectableFeatureAtPoint, inspectFeaturesAtPoint, type InspectedFeature } from '../../map/featureInspect';
+import {
+  hasInspectableFeatureAtPoint,
+  inspectFeaturesAtPoint,
+  registerInspectableSourceData,
+  type InspectedFeature
+} from '../../map/featureInspect';
 import type { Coordinates, Feature, FeatureCollection, Position } from '../../map/geojson';
 
 const emptyFeatureCollection: FeatureCollection = {
@@ -90,6 +99,7 @@ const OTTA_CENTER: [number, number] = [9.54, 61.77];
 const OTTA_ZOOM = 15;
 const BUILDING_COLOR = '#000000';
 const BUILDING_FILL_COLOR = '#a541c3';
+const MISSING_HEIGHT_Z = -99_999;
 
 function isVectorZoom(map: maplibregl.Map) {
   return map.getZoom() > MIN_VECTOR_ZOOM;
@@ -306,17 +316,34 @@ function addNativeFeatureSourcesAndLayers(
   visibility: LayerVisibility,
   adjustElevatedHeights: boolean
 ) {
+  const inspectableParcels = registerInspectableSourceData('parcels', parcels);
+  const inspectableBuildings = registerInspectableSourceData('buildings', buildings);
+  const inspectablePlatformEdges = registerInspectableSourceData(platformEdgesSourceId, platformEdges);
+  const inspectableTrackCentres = registerInspectableSourceData(trackCentresSourceId, trackCentres);
+  const inspectableBygning = registerInspectableSourceData(bygningSourceId, bygning);
+  const inspectableBygningOmrade = registerInspectableSourceData(bygningOmradeSourceId, bygningOmrade);
+  const inspectableBygningSenterlinje = registerInspectableSourceData(bygningSenterlinjeSourceId, bygningSenterlinje);
+  const inspectableBygningPosisjon = registerInspectableSourceData(bygningPosisjonSourceId, bygningPosisjon);
+  const normalizedParcels = normalizePolygonFeatureCollection(inspectableParcels);
+  const normalizedBuildings = normalizePolygonFeatureCollection(inspectableBuildings);
+  const normalizedPlatformEdges = normalizeBaneFeatureCollection(inspectablePlatformEdges);
+  const normalizedTrackCentres = normalizeBaneFeatureCollection(inspectableTrackCentres);
+  const normalizedBygning = normalizeBygningFeatureCollection(inspectableBygning);
+  const normalizedBygningOmrade = normalizePolygonFeatureCollection(inspectableBygningOmrade);
+  const normalizedBygningSenterlinje = normalizeBygningSenterlinjeFeatureCollection(inspectableBygningSenterlinje);
+  const normalizedBygningPosisjon = normalizeBygningPosisjonFeatureCollection(inspectableBygningPosisjon);
+
   map.addSource('parcels', {
     type: 'geojson',
-    data: normalizePolygonFeatureCollection(parcels)
+    data: normalizedParcels
   });
   map.addSource('buildings', {
     type: 'geojson',
-    data: normalizePolygonFeatureCollection(buildings)
+    data: normalizedBuildings
   });
   map.addSource('building-centroids', {
     type: 'geojson',
-    data: buildingCentroidsFeatureCollection(buildings)
+    data: buildingCentroidsFeatureCollection(normalizedBuildings)
   });
 
   map.addLayer({
@@ -376,22 +403,85 @@ function addNativeFeatureSourcesAndLayers(
     }
   });
   // Bane lines are read-only and drawn above cadastre fills.
-  addBaneSourcesAndLayers(map, platformEdges, trackCentres);
-  addBygningSourcesAndLayers(map, bygning);
-  addBygningOmradeSourceAndLayers(map, normalizePolygonFeatureCollection(bygningOmrade));
-  addBygningSenterlinjeSourceAndLayer(map, normalizeBygningSenterlinjeFeatureCollection(bygningSenterlinje));
-  addBygningPosisjonSourceAndLayer(map, normalizeBygningPosisjonFeatureCollection(bygningPosisjon));
+  addBaneSourcesAndLayers(map, inspectablePlatformEdges, inspectableTrackCentres);
+  addBygningSourcesAndLayers(map, inspectableBygning);
+  addBygningOmradeSourceAndLayers(map, normalizedBygningOmrade);
+  addBygningSenterlinjeSourceAndLayer(map, normalizedBygningSenterlinje);
+  addBygningPosisjonSourceAndLayer(map, normalizedBygningPosisjon);
   addExtrusionLayers(map);
   upsertElevatedSources(
     map,
-    normalizeBaneFeatureCollection(platformEdges),
-    normalizeBaneFeatureCollection(trackCentres),
-    normalizeBygningFeatureCollection(bygning),
-    normalizeBygningSenterlinjeFeatureCollection(bygningSenterlinje),
-    normalizePolygonFeatureCollection(bygningOmrade),
+    normalizedPlatformEdges,
+    normalizedTrackCentres,
+    normalizedBygning,
+    normalizedBygningSenterlinje,
+    normalizedBygningOmrade,
     visibility,
     adjustElevatedHeights
   );
+}
+
+function sanitizeMissingHeightPosition(position: Position): Position {
+  return position[2] === MISSING_HEIGHT_Z ? ([position[0], position[1]] as Position) : position;
+}
+
+function sanitizeMissingHeightCoordinates(coordinates: Coordinates): Coordinates {
+  if (typeof coordinates[0] === 'number') {
+    return sanitizeMissingHeightPosition(coordinates as Position);
+  }
+
+  return (coordinates as Coordinates[]).map(child => sanitizeMissingHeightCoordinates(child));
+}
+
+function sanitizeMissingHeightFeature(feature: Feature): Feature {
+  const geometry = feature.geometry;
+  if (!geometry?.coordinates) {
+    return feature;
+  }
+
+  return {
+    ...feature,
+    geometry: {
+      ...geometry,
+      coordinates: sanitizeMissingHeightCoordinates(geometry.coordinates)
+    }
+  };
+}
+
+function sanitizeMissingHeights(featureCollection: FeatureCollection): FeatureCollection {
+  return {
+    ...featureCollection,
+    features: featureCollection.features.map(sanitizeMissingHeightFeature)
+  };
+}
+
+function sourcePositions(feature: Feature): Position[] {
+  const coordinates = feature.geometry?.coordinates;
+  if (!coordinates) {
+    return [];
+  }
+
+  const positions: Position[] = [];
+  collectPositions(coordinates, positions);
+  return positions;
+}
+
+function featureSelectionKey(feature: Pick<InspectedFeature, 'collectionId' | 'featureId' | 'layerId'>) {
+  return `${feature.collectionId ?? 'unknown'}:${String(feature.featureId ?? 'missing')}:${feature.layerId}`;
+}
+
+function displayCoordinateSystemName(crs: string) {
+  const epsgMatch = crs.match(/\/EPSG\/0\/(\d+)$/i);
+  if (epsgMatch) {
+    return `EPSG:${epsgMatch[1]}`;
+  }
+
+  const crs84Match = crs.match(/\/OGC\/1\.3\/(CRS84)$/i);
+  if (crs84Match) {
+    return crs84Match[1];
+  }
+
+  return crs;
 }
 
 async function getFeatureCollection(url: string) {
@@ -400,7 +490,16 @@ async function getFeatureCollection(url: string) {
     throw new Error(`Request failed with ${response.status}`);
   }
 
-  return (await response.json()) as FeatureCollection;
+  return sanitizeMissingHeights((await response.json()) as FeatureCollection);
+}
+
+async function getFeature(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Request failed with ${response.status}`);
+  }
+
+  return sanitizeMissingHeightFeature((await response.json()) as Feature);
 }
 
 function visibleOgcBbox(map: maplibregl.Map): OgcBbox {
@@ -754,20 +853,30 @@ async function setNativeFeatureSources(
   visibility: LayerVisibility,
   adjustElevatedHeights: boolean
 ) {
-  const normalizedPlatformEdges = normalizeBaneFeatureCollection(platformEdges);
-  const normalizedTrackCentres = normalizeBaneFeatureCollection(trackCentres);
-  const normalizedBygning = normalizeBygningFeatureCollection(bygning);
-  const normalizedBygningOmrade = normalizePolygonFeatureCollection(bygningOmrade);
-  const normalizedBygningSenterlinje = normalizeBygningSenterlinjeFeatureCollection(bygningSenterlinje);
-  const normalizedBygningPosisjon = normalizeBygningPosisjonFeatureCollection(bygningPosisjon);
+  const inspectableParcels = registerInspectableSourceData('parcels', parcels);
+  const inspectableBuildings = registerInspectableSourceData('buildings', buildings);
+  const inspectablePlatformEdges = registerInspectableSourceData(platformEdgesSourceId, platformEdges);
+  const inspectableTrackCentres = registerInspectableSourceData(trackCentresSourceId, trackCentres);
+  const inspectableBygning = registerInspectableSourceData(bygningSourceId, bygning);
+  const inspectableBygningOmrade = registerInspectableSourceData(bygningOmradeSourceId, bygningOmrade);
+  const inspectableBygningSenterlinje = registerInspectableSourceData(bygningSenterlinjeSourceId, bygningSenterlinje);
+  const inspectableBygningPosisjon = registerInspectableSourceData(bygningPosisjonSourceId, bygningPosisjon);
+  const normalizedParcels = normalizePolygonFeatureCollection(inspectableParcels);
+  const normalizedBuildings = normalizePolygonFeatureCollection(inspectableBuildings);
+  const normalizedPlatformEdges = normalizeBaneFeatureCollection(inspectablePlatformEdges);
+  const normalizedTrackCentres = normalizeBaneFeatureCollection(inspectableTrackCentres);
+  const normalizedBygning = normalizeBygningFeatureCollection(inspectableBygning);
+  const normalizedBygningOmrade = normalizePolygonFeatureCollection(inspectableBygningOmrade);
+  const normalizedBygningSenterlinje = normalizeBygningSenterlinjeFeatureCollection(inspectableBygningSenterlinje);
+  const normalizedBygningPosisjon = normalizeBygningPosisjonFeatureCollection(inspectableBygningPosisjon);
   await Promise.all([
-    upsertGeoJsonSource(map, 'parcels', normalizePolygonFeatureCollection(parcels)),
-    upsertGeoJsonSource(map, 'buildings', normalizePolygonFeatureCollection(buildings)),
+    upsertGeoJsonSource(map, 'parcels', normalizedParcels),
+    upsertGeoJsonSource(map, 'buildings', normalizedBuildings),
     upsertGeoJsonSource(map, 'bane-platform-edges', normalizedPlatformEdges),
     upsertGeoJsonSource(map, 'bane-track-centres', normalizedTrackCentres),
-    upsertGeoJsonSource(map, 'bygning-linework', bygningLayerFeatureCollection(bygning)),
+    upsertGeoJsonSource(map, 'bygning-linework', normalizedBygning),
     upsertGeoJsonSource(map, bygningOmradeSourceId, normalizedBygningOmrade),
-    upsertGeoJsonSource(map, bygningSenterlinjeSourceId, bygningSenterlinjeLayerFeatureCollection(bygningSenterlinje)),
+    upsertGeoJsonSource(map, bygningSenterlinjeSourceId, normalizedBygningSenterlinje),
     upsertGeoJsonSource(map, bygningPosisjonSourceId, normalizedBygningPosisjon)
   ]);
   upsertElevatedSources(
@@ -838,6 +947,77 @@ export function MapView() {
   const [selectedFeature, setSelectedFeature] = useState<InspectedFeature>();
   const setSelectedFeatureRef = useRef(setSelectedFeature);
   setSelectedFeatureRef.current = setSelectedFeature;
+  const collectionStorageCrsRef = useRef(new Map<CollectionId, string>());
+
+  useEffect(() => {
+    if (!selectedFeature?.positionsLoading || !selectedFeature.collectionId || selectedFeature.featureId === undefined) {
+      return;
+    }
+
+    let cancelled = false;
+    const selectionKey = featureSelectionKey(selectedFeature);
+    const { collectionId, featureId } = selectedFeature;
+
+    async function loadStoredPositions() {
+      try {
+        let storageCrs = collectionStorageCrsRef.current.get(collectionId);
+        if (!storageCrs) {
+          const response = await fetch(collectionMetadataUrl(collectionId));
+          if (!response.ok) {
+            throw new Error(`Request failed with ${response.status}`);
+          }
+
+          const metadata = (await response.json()) as CollectionMetadata;
+          storageCrs = metadata.storageCrs;
+          if (storageCrs) {
+            collectionStorageCrsRef.current.set(collectionId, storageCrs);
+          }
+        }
+
+        if (!storageCrs) {
+          if (!cancelled) {
+            setSelectedFeature(current =>
+              current && featureSelectionKey(current) === selectionKey
+                ? { ...current, positionsLoading: false }
+                : current
+            );
+          }
+          return;
+        }
+
+        const storedFeature = await getFeature(collectionItemUrl(collectionId, featureId, storageCrs));
+        if (cancelled) {
+          return;
+        }
+
+        setSelectedFeature(current =>
+          current && featureSelectionKey(current) === selectionKey
+            ? {
+                ...current,
+                positions: sourcePositions(storedFeature),
+                positionsCoordinateSystem: displayCoordinateSystemName(storageCrs),
+                positionsLoading: false
+              }
+            : current
+        );
+      } catch (cause) {
+        console.error('[gcmapview] failed to load stored coordinate positions', cause);
+        if (!cancelled) {
+          setSelectedFeature(current =>
+            current && featureSelectionKey(current) === selectionKey
+              ? { ...current, positionsLoading: false }
+              : current
+          );
+        }
+      }
+    }
+
+    void loadStoredPositions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFeature]);
 
   function applyBuildingMarkerVisibility(visible: boolean) {
     for (const marker of buildingMarkerRefs.current) {

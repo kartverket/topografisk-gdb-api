@@ -16,7 +16,7 @@ export function FeaturePropertiesCard({ feature, onClose }: FeaturePropertiesCar
   return (
     <Card
       size="sm"
-      className="absolute top-4 right-4 z-[3] max-h-[min(70vh,28rem)] w-[min(320px,calc(100%-2rem))] overflow-hidden bg-card/95 shadow-md max-sm:top-auto max-sm:right-4 max-sm:bottom-[88px] max-sm:left-4 max-sm:w-auto"
+      className="absolute top-4 right-4 z-[3] max-h-[min(70vh,28rem)] w-[min(350px,calc(100%-2rem))] overflow-hidden bg-card/95 shadow-md max-sm:top-auto max-sm:right-4 max-sm:bottom-[88px] max-sm:left-4 max-sm:w-auto"
       aria-label="Selected feature properties">
       <CardHeader className="pb-0">
         <CardTitle className="truncate pr-8 text-base">{feature.layerLabel}</CardTitle>
@@ -45,6 +45,59 @@ export function FeaturePropertiesCard({ feature, onClose }: FeaturePropertiesCar
       </CardHeader>
       <CardContent className="space-y-2 overflow-y-auto pt-2">
         <Separator />
+        {feature.positions.length > 0 || feature.positionsLoading ? (
+          <details className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+            <summary className="cursor-pointer text-sm font-medium text-foreground">
+              <span className="inline-flex items-center gap-2">
+                Positions
+                {feature.positionsLoading ? (
+                  <Badge
+                    variant="outline"
+                    className="font-mono text-[11px]">
+                    loading
+                  </Badge>
+                ) : (
+                  <Badge
+                    variant="outline"
+                    className="font-mono text-[11px]">
+                    {feature.positions.length}
+                  </Badge>
+                )}
+                {feature.positionsCoordinateSystem ? (
+                  <Badge
+                    variant="secondary"
+                    className="font-mono text-[11px]">
+                    {feature.positionsCoordinateSystem}
+                  </Badge>
+                ) : null}
+              </span>
+            </summary>
+            {feature.positionsLoading ? (
+              <p className="mt-2 text-xs text-muted-foreground">Loading stored coordinates…</p>
+            ) : (
+              <div className="mt-2 overflow-x-auto">
+                <table className="min-w-full border-separate border-spacing-y-1 text-left text-[12px] font-mono">
+                  <thead>
+                    <tr className="text-muted-foreground">
+                      <th className="pr-3 font-medium">x</th>
+                      <th className="pr-3 font-medium">y</th>
+                      <th className="font-medium">z</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {feature.positions.map(([x, y, z], index) => (
+                      <tr key={`${x}-${y}-${z ?? 'na'}-${index}`}>
+                        <td className="pr-3 text-foreground">{formatPropertyValue(x)}</td>
+                        <td className="pr-3 text-foreground">{formatPropertyValue(y)}</td>
+                        <td className="text-foreground">{z === undefined ? '—' : formatPropertyValue(z)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </details>
+        ) : null}
         {entries.length === 0 ? (
           <p className="text-sm text-muted-foreground">No properties</p>
         ) : (
