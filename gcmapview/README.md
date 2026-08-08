@@ -9,7 +9,7 @@ wide deployment.
 ## Routes
 
 - `/` — map with Cadastre (editable) and Bane (read-only) layers
-- `/import` — upload a JSON-FG FeatureCollection to `gcimport`
+- `/import` — upload a JSON-FG or classic GeoJSON FeatureCollection to `gcimport`, choosing either the Bane or Bygning profile
 
 In development, Vite proxies:
 

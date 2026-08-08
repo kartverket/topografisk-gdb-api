@@ -3,16 +3,43 @@ import type { Feature, FeatureCollection, Position } from './geojson';
 
 export const platformEdgesExtrusionSourceId = 'bane-platform-edges-3d';
 export const trackCentresExtrusionSourceId = 'bane-track-centres-3d';
+export const bygningExtrusionSourceId = 'bygning-linework-3d';
 export const platformEdgesExtrusionLayerId = 'bane-platform-edges-extrusion';
 export const trackCentresExtrusionLayerId = 'bane-track-centres-extrusion';
+export const bygningExtrusionLayerId = 'bygning-linework-extrusion';
 export const buildingsExtrusionLayerId = 'buildings-extrusion';
 
 export const DEFAULT_3D_PITCH = 60;
 export const FLOOR_HEIGHT_M = 3;
 export const ELEVATED_LINE_WIDTH_M = 3;
+export const BYGNING_ELEVATED_LINE_WIDTH_M = 1.5;
 /** Vertical thickness of elevated line beams (meters). */
 export const ELEVATED_LINE_THICKNESS_M = 2;
 const MIN_EXTRUSION_HEIGHT_M = 0.5;
+
+function lineCoordinateSets(feature: Feature): Position[][] {
+  if (!feature.geometry?.coordinates || !Array.isArray(feature.geometry.coordinates)) {
+    return [];
+  }
+
+  if (feature.geometry.type === 'LineString') {
+    return [feature.geometry.coordinates as Position[]];
+  }
+
+  if (feature.geometry.type === 'MultiLineString') {
+    return feature.geometry.coordinates as Position[][];
+  }
+
+  return [];
+}
+
+function adjustedHeight(z: number | undefined, heightOffset: number): number {
+  if (typeof z !== 'number' || !Number.isFinite(z) || z <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, z - heightOffset);
+}
 
 function segmentFootprint(lon1: number, lat1: number, lon2: number, lat2: number, widthMeters: number): Position[] {
   const midLat = (((lat1 + lat2) / 2) * Math.PI) / 180;
@@ -36,7 +63,7 @@ function segmentFootprint(lon1: number, lat1: number, lon2: number, lat2: number
 }
 
 /**
- * Approximate elevated LineStrings as thin fill-extrusion beams.
+ * Approximate elevated LineStrings and MultiLineStrings as thin fill-extrusion beams.
  *
  * Z is used as elevation (base/height), not as a column from the ground.
  * That matters for MapLibre: translucent fill-extrusion punches holes where
@@ -46,46 +73,65 @@ function segmentFootprint(lon1: number, lat1: number, lon2: number, lat2: number
 export function elevatedLineSegments(
   featureCollection: FeatureCollection,
   widthMeters = ELEVATED_LINE_WIDTH_M,
-  thicknessMeters = ELEVATED_LINE_THICKNESS_M
+  thicknessMeters = ELEVATED_LINE_THICKNESS_M,
+  heightOffset = 0
 ): FeatureCollection {
   const features: Feature[] = [];
   const halfThickness = Math.max(thicknessMeters, MIN_EXTRUSION_HEIGHT_M) / 2;
 
   for (const feature of featureCollection.features) {
-    if (feature.geometry?.type !== 'LineString' || !Array.isArray(feature.geometry.coordinates)) {
-      continue;
-    }
+    for (const coordinates of lineCoordinateSets(feature)) {
+      for (let index = 0; index < coordinates.length - 1; index += 1) {
+        const start = coordinates[index];
+        const end = coordinates[index + 1];
+        if (!start || !end) continue;
 
-    const coordinates = feature.geometry.coordinates as Position[];
-    for (let index = 0; index < coordinates.length - 1; index += 1) {
-      const start = coordinates[index];
-      const end = coordinates[index + 1];
-      if (!start || !end) continue;
+        const rawZ1 = adjustedHeight(start[2], 0);
+        const rawZ2 = adjustedHeight(end[2], 0);
+        const rawMidZ = (rawZ1 + rawZ2) / 2;
+        const z1 = adjustedHeight(start[2], heightOffset);
+        const z2 = adjustedHeight(end[2], heightOffset);
+        const midZ = (z1 + z2) / 2;
+        const base = Math.max(0, midZ - halfThickness);
+        const height = Math.max(base + MIN_EXTRUSION_HEIGHT_M, midZ + halfThickness);
 
-      const z1 = typeof start[2] === 'number' && Number.isFinite(start[2]) ? start[2] : 0;
-      const z2 = typeof end[2] === 'number' && Number.isFinite(end[2]) ? end[2] : 0;
-      const midZ = (z1 + z2) / 2;
-      const base = Math.max(0, midZ - halfThickness);
-      const height = Math.max(base + MIN_EXTRUSION_HEIGHT_M, midZ + halfThickness);
-
-      features.push({
-        type: 'Feature',
-        properties: {
-          ...(feature.properties ?? {}),
-          // Color by rail elevation; base/height define the thin beam.
-          elevation: midZ,
-          base,
-          height
-        },
-        geometry: {
-          type: 'Polygon',
-          coordinates: [segmentFootprint(start[0], start[1], end[0], end[1], widthMeters)]
-        }
-      });
+        features.push({
+          type: 'Feature',
+          properties: {
+            ...(feature.properties ?? {}),
+            elevation: rawMidZ,
+            base,
+            height
+          },
+          geometry: {
+            type: 'Polygon',
+            coordinates: [segmentFootprint(start[0], start[1], end[0], end[1], widthMeters)]
+          }
+        });
+      }
     }
   }
 
   return { type: 'FeatureCollection', features };
+}
+
+export function lowestPositiveLineHeight(featureCollections: readonly FeatureCollection[]): number {
+  let minimum = Number.POSITIVE_INFINITY;
+
+  for (const featureCollection of featureCollections) {
+    for (const feature of featureCollection.features) {
+      for (const coordinates of lineCoordinateSets(feature)) {
+        for (const position of coordinates) {
+          const z = position[2];
+          if (typeof z === 'number' && Number.isFinite(z) && z > 0) {
+            minimum = Math.min(minimum, z);
+          }
+        }
+      }
+    }
+  }
+
+  return Number.isFinite(minimum) ? minimum : 0;
 }
 
 export function buildingExtrusionHeightExpression(floorHeightM = FLOOR_HEIGHT_M): ExpressionSpecification {

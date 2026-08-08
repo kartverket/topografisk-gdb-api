@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from gcimport.profiles.bane import BANE_PROFILE
+from gcimport.profiles import BANE_PROFILE, BUILTIN_PROFILES, ImportProfile, get_profile
 
 _EPSG_URN = re.compile(
     r"^urn:ogc:def:crs:EPSG::(?P<code>\d+)$",
@@ -66,16 +66,50 @@ def crs_from_geojson(document: dict[str, Any]) -> str | None:
     return normalize_crs(name)
 
 
-def feature_type_from_objtype(objtype: Any) -> str:
-    """Map FKB ``objtype`` to a Bane JSON-FG ``featureType``."""
+def feature_type_from_objtype(
+    objtype: Any,
+    geometry_type: Any,
+    profile: ImportProfile,
+) -> str:
+    """Map FKB ``objtype`` to a profile-specific JSON-FG ``featureType``."""
     if not isinstance(objtype, str) or not objtype.strip():
         raise ConversionError("properties.objtype must be a non-empty string")
-    collection = BANE_PROFILE.collection_for(objtype)
+    if not isinstance(geometry_type, str) or not geometry_type.strip():
+        raise ConversionError("geometry.type must be a non-empty string")
+    collection = profile.collection_for_objtype(objtype, geometry_type)
     if collection is None:
         raise ConversionError(
-            f"properties.objtype must be one of {BANE_PROFILE.supported_feature_types}"
+            _unsupported_objtype_message(objtype, geometry_type, profile)
         )
     return collection
+
+
+def _unsupported_objtype_message(
+    objtype: str,
+    geometry_type: str,
+    profile: ImportProfile,
+) -> str:
+    candidates = profile.collections_for_objtype(objtype)
+    if candidates:
+        supported_geometry_types = " or ".join(
+            sorted({profile.geometry_type_for_collection(collection) for collection in candidates})
+        )
+        return (
+            f"properties.objtype '{objtype}' requires geometry.type "
+            f"{supported_geometry_types}; got '{geometry_type}'"
+        )
+
+    message = f"properties.objtype must be one of {profile.supported_objtypes}"
+    matching_profiles = [
+        candidate.name
+        for candidate in BUILTIN_PROFILES.values()
+        if candidate.name != profile.name and candidate.collections_for_objtype(objtype)
+    ]
+    if len(matching_profiles) == 1:
+        return (
+            f"{message}; '{objtype}' belongs to the {matching_profiles[0]} profile"
+        )
+    return message
 
 
 def normalize_properties(properties: dict[str, Any]) -> dict[str, Any]:
@@ -90,17 +124,30 @@ def normalize_properties(properties: dict[str, Any]) -> dict[str, Any]:
 
 
 def normalize_geometry_for_profile(
-    geometry: dict[str, Any], *, index: int
+    geometry: dict[str, Any],
+    *,
+    profile: ImportProfile,
+    collection: str,
+    index: int,
 ) -> dict[str, Any]:
     """Normalize known geometry variants for the active profile."""
     geometry_type = geometry.get("type")
-    if geometry_type == BANE_PROFILE.geometry_type:
+    target_geometry_type = profile.geometry_type_for_collection(collection)
+    if geometry_type == target_geometry_type:
         return geometry
 
-    if (
-        geometry_type == "MultiLineString"
-        and BANE_PROFILE.geometry_type == "LineString"
-    ):
+    if geometry_type == "LineString" and target_geometry_type == "MultiLineString":
+        coordinates = geometry.get("coordinates")
+        if not isinstance(coordinates, list):
+            raise ConversionError(
+                f"features[{index}].geometry.coordinates must be an array"
+            )
+        return {
+            "type": "MultiLineString",
+            "coordinates": [coordinates],
+        }
+
+    if geometry_type == "MultiLineString" and target_geometry_type == "LineString":
         coordinates = geometry.get("coordinates")
         if not isinstance(coordinates, list):
             raise ConversionError(
@@ -121,12 +168,40 @@ def normalize_geometry_for_profile(
             "coordinates": part,
         }
 
+    if (
+        geometry_type == "MultiLineString"
+        and target_geometry_type == "MultiPolygon"
+    ):
+        coordinates = geometry.get("coordinates")
+        if not isinstance(coordinates, list):
+            raise ConversionError(
+                f"features[{index}].geometry.coordinates must be an array"
+            )
+        if not coordinates:
+            raise ConversionError(
+                f"features[{index}].geometry.coordinates must contain at least one part"
+            )
+        for part_index, part in enumerate(coordinates):
+            if not isinstance(part, list):
+                raise ConversionError(
+                    f"features[{index}].geometry.coordinates[{part_index}] must be an array"
+                )
+        return {
+            "type": "MultiPolygon",
+            "coordinates": [[part] for part in coordinates],
+        }
+
     raise ConversionError(
-        f"features[{index}].geometry.type must be '{BANE_PROFILE.geometry_type}'"
+        f"features[{index}].geometry.type must be '{target_geometry_type}'"
     )
 
 
-def convert_feature(feature: Any, *, index: int) -> dict[str, Any]:
+def convert_feature(
+    feature: Any,
+    *,
+    profile: ImportProfile = BANE_PROFILE,
+    index: int,
+) -> dict[str, Any]:
     """Convert one classic GeoJSON feature to JSON-FG."""
     if not isinstance(feature, dict):
         raise ConversionError(f"features[{index}] must be an object")
@@ -138,20 +213,29 @@ def convert_feature(feature: Any, *, index: int) -> dict[str, Any]:
         raise ConversionError(f"features[{index}].properties must be an object")
     properties = normalize_properties(properties)
 
+    try:
+        feature_type = feature_type_from_objtype(
+            properties.get("objtype"),
+            feature.get("geometry", {}).get("type") if isinstance(feature.get("geometry"), dict) else None,
+            profile,
+        )
+    except ConversionError as err:
+        raise ConversionError(f"features[{index}]: {err}") from err
+
     geometry = feature.get("geometry")
     if not isinstance(geometry, dict):
         raise ConversionError(f"features[{index}].geometry must be an object")
-    geometry = normalize_geometry_for_profile(geometry, index=index)
+    geometry = normalize_geometry_for_profile(
+        geometry,
+        profile=profile,
+        collection=feature_type,
+        index=index,
+    )
     coordinates = geometry.get("coordinates")
     if not isinstance(coordinates, list):
         raise ConversionError(
             f"features[{index}].geometry.coordinates must be an array"
         )
-
-    try:
-        feature_type = feature_type_from_objtype(properties.get("objtype"))
-    except ConversionError as err:
-        raise ConversionError(f"features[{index}]: {err}") from err
 
     converted: dict[str, Any] = {
         "type": "Feature",
@@ -171,6 +255,7 @@ def convert_document(
     document: Any,
     *,
     crs: str | None = None,
+    profile: ImportProfile = BANE_PROFILE,
 ) -> dict[str, Any]:
     """Convert a classic GeoJSON FeatureCollection to JSON-FG."""
     if not isinstance(document, dict):
@@ -191,7 +276,8 @@ def convert_document(
         raise ConversionError("missing CRS; provide a GeoJSON crs member")
 
     converted_features = [
-        convert_feature(feature, index=index) for index, feature in enumerate(features)
+        convert_feature(feature, profile=profile, index=index)
+        for index, feature in enumerate(features)
     ]
     return {
         "type": "FeatureCollection",
@@ -205,6 +291,7 @@ def convert_file(
     destination: Path | None = None,
     *,
     crs: str | None = None,
+    profile: ImportProfile = BANE_PROFILE,
 ) -> dict[str, Any]:
     """Read GeoJSON from disk, convert, and optionally write JSON-FG."""
     try:
@@ -212,7 +299,7 @@ def convert_file(
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as err:
         raise ConversionError(f"could not read {source}: {err}") from err
 
-    converted = convert_document(document, crs=crs)
+    converted = convert_document(document, crs=crs, profile=profile)
     payload = json.dumps(converted, ensure_ascii=False, indent=2) + "\n"
     if destination is None:
         sys.stdout.write(payload)
@@ -225,7 +312,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Convert classic GeoJSON (QGIS/ESRI-style CRS + objtype) to JSON-FG "
-            "for the gcimport Bane importer."
+            "for a gcimport dataset profile."
         )
     )
     parser.add_argument(
@@ -243,10 +330,21 @@ def main(argv: list[str] | None = None) -> int:
         "--crs",
         help="Override CRS as EPSG:<code> (default: read from GeoJSON crs)",
     )
+    parser.add_argument(
+        "--profile",
+        default=BANE_PROFILE.name,
+        choices=sorted(BUILTIN_PROFILES),
+        help="Built-in profile name (default: bane)",
+    )
     args = parser.parse_args(argv)
 
     try:
-        convert_file(args.source, args.output, crs=args.crs)
+        convert_file(
+            args.source,
+            args.output,
+            crs=args.crs,
+            profile=get_profile(args.profile),
+        )
     except ConversionError as err:
         print(f"error: {err}", file=sys.stderr)
         return 1

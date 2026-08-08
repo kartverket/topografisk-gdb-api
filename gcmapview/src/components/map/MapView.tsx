@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   buildingItemUrl,
+  bygningItemsInBboxUrl,
+  bygningOmradeItemsInBboxUrl,
   buildingsCreateUrl,
   buildingsItemsInBboxUrl,
   buildingsItemsUrl,
@@ -18,19 +20,24 @@ import {
   platformEdgesItemsInBboxUrl,
   trackCentresItemsInBboxUrl
 } from '../../api/geocomponentsApi';
-import { addBaneSourcesAndLayers, normalizeBaneFeatureCollection, wgs84BboxToBaneBbox } from '../../map/baneLayers';
+import { addBaneSourcesAndLayers, normalizeBaneFeatureCollection } from '../../map/baneLayers';
+import {
+  addBygningSourcesAndLayers,
+  bygningLayerFeatureCollection,
+  normalizeBygningFeatureCollection
+} from '../../map/bygningLayers';
+import { addBygningOmradeSourceAndLayers, bygningOmradeSourceId } from '../../map/bygningOmradeLayers';
 import {
   addExtrusionLayers,
   applyMapDimensionMode,
   applyMapLayerVisibility,
   configureInitialMapInteraction,
-  upsertElevatedLineSources
+  upsertElevatedSources
 } from '../../map/mapDimension';
-import { buildingExtrusionHeightExpression, heightColorExpression } from '../../map/map3d';
 import { useMapDimension } from './MapDimensionContext';
 import { FeaturePropertiesCard } from './FeaturePropertiesCard';
 import { MapLayersCard } from './MapLayersCard';
-import { useLayerVisibilityStore } from '../../store/layerVisibilityStore';
+import { type LayerVisibility, useLayerVisibilityStore } from '../../store/layerVisibilityStore';
 import { hasInspectableFeatureAtPoint, inspectFeaturesAtPoint, type InspectedFeature } from '../../map/featureInspect';
 import type { Coordinates, Feature, FeatureCollection, Position } from '../../map/geojson';
 
@@ -39,15 +46,40 @@ const emptyFeatureCollection: FeatureCollection = {
   features: []
 };
 
+type VisibleFeatureCollections = {
+  parcels: FeatureCollection;
+  buildings: FeatureCollection;
+  platformEdges: FeatureCollection;
+  trackCentres: FeatureCollection;
+  bygning: FeatureCollection;
+  bygningOmrade: FeatureCollection;
+};
+
+const emptyVisibleFeatureCollections: VisibleFeatureCollections = {
+  parcels: emptyFeatureCollection,
+  buildings: emptyFeatureCollection,
+  platformEdges: emptyFeatureCollection,
+  trackCentres: emptyFeatureCollection,
+  bygning: emptyFeatureCollection,
+  bygningOmrade: emptyFeatureCollection
+};
+
 /** Vector features are fetched only when the map zoom is strictly above this. */
 const MIN_VECTOR_ZOOM = 10;
+const MIN_BUILDING_ZOOM = 15;
 
 /** Fixed initial view — do not fit the camera to loaded feature extents. */
-const OSLO_CENTER: [number, number] = [10.75, 59.91];
-const OSLO_ZOOM = 11;
+const OTTA_CENTER: [number, number] = [9.54, 61.77];
+const OTTA_ZOOM = 15;
+const BUILDING_COLOR = '#000000';
+const BUILDING_FILL_COLOR = '#a541c3';
 
 function isVectorZoom(map: maplibregl.Map) {
   return map.getZoom() > MIN_VECTOR_ZOOM;
+}
+
+function isBuildingZoom(map: maplibregl.Map) {
+  return map.getZoom() >= MIN_BUILDING_ZOOM;
 }
 
 type BuildingFeature = {
@@ -249,7 +281,11 @@ function addNativeFeatureSourcesAndLayers(
   parcels: FeatureCollection,
   buildings: FeatureCollection,
   platformEdges: FeatureCollection,
-  trackCentres: FeatureCollection
+  trackCentres: FeatureCollection,
+  bygning: FeatureCollection,
+  bygningOmrade: FeatureCollection,
+  visibility: LayerVisibility,
+  adjustElevatedHeights: boolean
 ) {
   map.addSource('parcels', {
     type: 'geojson',
@@ -269,7 +305,7 @@ function addNativeFeatureSourcesAndLayers(
     type: 'circle',
     source: 'building-centroids',
     paint: {
-      'circle-color': heightColorExpression(buildingExtrusionHeightExpression()),
+      'circle-color': BUILDING_COLOR,
       'circle-opacity': 0.8,
       'circle-radius': 3,
       'circle-stroke-color': '#ffffff',
@@ -298,16 +334,15 @@ function addNativeFeatureSourcesAndLayers(
       'line-width': ['interpolate', ['linear'], ['zoom'], 5, 2, 14, 4]
     }
   });
-  const buildingHeightColor = heightColorExpression(buildingExtrusionHeightExpression());
   map.addLayer({
     id: 'buildings-fill',
     type: 'fill',
     source: 'buildings',
     filter: ['==', '$type', 'Polygon'],
     paint: {
-      'fill-color': buildingHeightColor,
+      'fill-color': BUILDING_FILL_COLOR,
       'fill-opacity': 0.55,
-      'fill-outline-color': buildingHeightColor
+      'fill-outline-color': BUILDING_COLOR
     }
   });
   map.addLayer({
@@ -316,18 +351,24 @@ function addNativeFeatureSourcesAndLayers(
     source: 'buildings',
     filter: ['==', '$type', 'Polygon'],
     paint: {
-      'line-color': buildingHeightColor,
+      'line-color': BUILDING_COLOR,
       'line-opacity': 1,
       'line-width': ['interpolate', ['linear'], ['zoom'], 5, 2, 14, 4]
     }
   });
   // Bane lines are read-only and drawn above cadastre fills.
   addBaneSourcesAndLayers(map, platformEdges, trackCentres);
+  addBygningSourcesAndLayers(map, bygning);
+  addBygningOmradeSourceAndLayers(map, normalizePolygonFeatureCollection(bygningOmrade));
   addExtrusionLayers(map);
-  upsertElevatedLineSources(
+  upsertElevatedSources(
     map,
     normalizeBaneFeatureCollection(platformEdges),
-    normalizeBaneFeatureCollection(trackCentres)
+    normalizeBaneFeatureCollection(trackCentres),
+    normalizeBygningFeatureCollection(bygning),
+    normalizePolygonFeatureCollection(bygningOmrade),
+    visibility,
+    adjustElevatedHeights
   );
 }
 
@@ -368,14 +409,16 @@ function visibleOgcBbox(map: maplibregl.Map): OgcBbox {
 
 async function getVisibleFeatureCollections(map: maplibregl.Map) {
   const bbox = visibleOgcBbox(map);
-  const baneBbox = wgs84BboxToBaneBbox(bbox);
-  const [parcels, buildings, platformEdges, trackCentres] = await Promise.all([
+  const buildingZoomActive = isBuildingZoom(map);
+  const [parcels, buildings, platformEdges, trackCentres, bygning, bygningOmrade] = await Promise.all([
     getFeatureCollection(parcelsItemsInBboxUrl(bbox)),
-    getFeatureCollection(buildingsItemsInBboxUrl(bbox)),
-    getFeatureCollection(platformEdgesItemsInBboxUrl(baneBbox)),
-    getFeatureCollection(trackCentresItemsInBboxUrl(baneBbox))
+    buildingZoomActive ? getFeatureCollection(buildingsItemsInBboxUrl(bbox)) : Promise.resolve(emptyFeatureCollection),
+    getFeatureCollection(platformEdgesItemsInBboxUrl(bbox)),
+    getFeatureCollection(trackCentresItemsInBboxUrl(bbox)),
+    buildingZoomActive ? getFeatureCollection(bygningItemsInBboxUrl(bbox)) : Promise.resolve(emptyFeatureCollection),
+    buildingZoomActive ? getFeatureCollection(bygningOmradeItemsInBboxUrl(bbox)) : Promise.resolve(emptyFeatureCollection)
   ]);
-  return { bbox, parcels, buildings, platformEdges, trackCentres };
+  return { bbox, parcels, buildings, platformEdges, trackCentres, bygning, bygningOmrade };
 }
 
 function idFromLocation(location: string | null) {
@@ -679,17 +722,33 @@ async function setNativeFeatureSources(
   parcels: FeatureCollection,
   buildings: FeatureCollection,
   platformEdges: FeatureCollection,
-  trackCentres: FeatureCollection
+  trackCentres: FeatureCollection,
+  bygning: FeatureCollection,
+  bygningOmrade: FeatureCollection,
+  visibility: LayerVisibility,
+  adjustElevatedHeights: boolean
 ) {
   const normalizedPlatformEdges = normalizeBaneFeatureCollection(platformEdges);
   const normalizedTrackCentres = normalizeBaneFeatureCollection(trackCentres);
+  const normalizedBygning = normalizeBygningFeatureCollection(bygning);
+  const normalizedBygningOmrade = normalizePolygonFeatureCollection(bygningOmrade);
   await Promise.all([
     upsertGeoJsonSource(map, 'parcels', normalizePolygonFeatureCollection(parcels)),
     upsertGeoJsonSource(map, 'buildings', normalizePolygonFeatureCollection(buildings)),
     upsertGeoJsonSource(map, 'bane-platform-edges', normalizedPlatformEdges),
-    upsertGeoJsonSource(map, 'bane-track-centres', normalizedTrackCentres)
+    upsertGeoJsonSource(map, 'bane-track-centres', normalizedTrackCentres),
+    upsertGeoJsonSource(map, 'bygning-linework', bygningLayerFeatureCollection(bygning)),
+    upsertGeoJsonSource(map, bygningOmradeSourceId, normalizedBygningOmrade)
   ]);
-  upsertElevatedLineSources(map, normalizedPlatformEdges, normalizedTrackCentres);
+  upsertElevatedSources(
+    map,
+    normalizedPlatformEdges,
+    normalizedTrackCentres,
+    normalizedBygning,
+    normalizedBygningOmrade,
+    visibility,
+    adjustElevatedHeights
+  );
 }
 
 async function clearVectorSources(map: maplibregl.Map) {
@@ -698,7 +757,11 @@ async function clearVectorSources(map: maplibregl.Map) {
     emptyFeatureCollection,
     emptyFeatureCollection,
     emptyFeatureCollection,
-    emptyFeatureCollection
+    emptyFeatureCollection,
+    emptyFeatureCollection,
+      emptyFeatureCollection,
+    useLayerVisibilityStore.getState().visibility,
+    false
   );
   await upsertGeoJsonSource(map, 'building-centroids', emptyFeatureCollection);
 }
@@ -725,9 +788,13 @@ export function MapView() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map>(null);
   const buildingMarkerRefs = useRef<maplibregl.Marker[]>([]);
-  const { is3d } = useMapDimension();
+  const pendingReloadTimeoutRef = useRef<number | undefined>(undefined);
+  const { is3d, adjustElevatedHeights } = useMapDimension();
   const is3dRef = useRef(is3d);
   is3dRef.current = is3d;
+  const adjustElevatedHeightsRef = useRef(adjustElevatedHeights);
+  adjustElevatedHeightsRef.current = adjustElevatedHeights;
+  const latestVectorDataRef = useRef<VisibleFeatureCollections>(emptyVisibleFeatureCollections);
   const layerVisibility = useLayerVisibilityStore(state => state.visibility);
   const [status, setStatus] = useState('Loading map...');
   const [error, setError] = useState<string>();
@@ -760,7 +827,7 @@ export function MapView() {
 
       const markerElement = document.createElement('div');
       markerElement.className =
-        'h-1.5 w-1.5 rounded-full border border-white bg-[#006eff] shadow-[0_0_0_1px_rgb(0_110_255/0.45)]';
+        'h-1.5 w-1.5 rounded-full border border-white bg-black shadow-[0_0_0_1px_rgb(0_0_0/0.45)]';
       markerElement.title = `Building ${building.id ?? ''}`.trim();
       markerElement.style.display = showMarkers ? '' : 'none';
 
@@ -784,8 +851,8 @@ export function MapView() {
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
       style: mapStyle,
-      center: OSLO_CENTER,
-      zoom: OSLO_ZOOM
+      center: OTTA_CENTER,
+      zoom: OTTA_ZOOM
     });
     mapRef.current = map;
     const resizeObserver = new ResizeObserver(() => map.resize());
@@ -809,6 +876,7 @@ export function MapView() {
       setIsVectorZoomActive(vectorZoomActive);
 
       if (!vectorZoomActive) {
+        latestVectorDataRef.current = emptyVisibleFeatureCollections;
         await clearVectorSources(map);
         updateBuildingDebugMarkers(map, emptyFeatureCollection);
         if (!cancelled && requestId === visibleRequestId) {
@@ -822,17 +890,30 @@ export function MapView() {
       }
 
       try {
-        const { bbox, parcels, buildings, platformEdges, trackCentres } = await getVisibleFeatureCollections(map);
+        const { bbox, parcels, buildings, platformEdges, trackCentres, bygning, bygningOmrade } = await getVisibleFeatureCollections(
+          map
+        );
         if (cancelled || requestId !== visibleRequestId) {
           return;
         }
 
-        await setNativeFeatureSources(map, parcels, buildings, platformEdges, trackCentres);
+        latestVectorDataRef.current = { parcels, buildings, platformEdges, trackCentres, bygning, bygningOmrade };
+        await setNativeFeatureSources(
+          map,
+          parcels,
+          buildings,
+          platformEdges,
+          trackCentres,
+          bygning,
+          bygningOmrade,
+          useLayerVisibilityStore.getState().visibility,
+          adjustElevatedHeightsRef.current
+        );
         await upsertGeoJsonSource(map, 'building-centroids', buildingCentroidsFeatureCollection(buildings));
         updateBuildingDebugMarkers(map, buildings);
         setError(undefined);
         setStatus(
-          `Loaded ${parcels.features.length} parcels, ${buildings.features.length} buildings, ${platformEdges.features.length} platform edges, and ${trackCentres.features.length} track centres for bbox ${bbox.map(value => value.toFixed(5)).join(',')}.`
+          `Loaded ${parcels.features.length} parcels, ${buildings.features.length} buildings, ${platformEdges.features.length} platform edges, ${trackCentres.features.length} track centres, ${bygning.features.length} Bygning line features, and ${bygningOmrade.features.length} Bygning area features for bbox ${bbox.map(value => value.toFixed(5)).join(',')}.${isBuildingZoom(map) ? '' : ` Building layers load from zoom ${MIN_BUILDING_ZOOM}.`}`
         );
       } catch (cause) {
         if (!cancelled && requestId === visibleRequestId) {
@@ -842,16 +923,31 @@ export function MapView() {
       }
     }
 
+    function scheduleVisibleDataReload() {
+      if (pendingReloadTimeoutRef.current !== undefined) {
+        window.clearTimeout(pendingReloadTimeoutRef.current);
+      }
+
+      pendingReloadTimeoutRef.current = window.setTimeout(() => {
+        pendingReloadTimeoutRef.current = undefined;
+        void reloadVisibleData();
+      }, 120);
+    }
+
     map.once('load', () => {
       addNativeFeatureSourcesAndLayers(
         map,
         emptyFeatureCollection,
         emptyFeatureCollection,
         emptyFeatureCollection,
-        emptyFeatureCollection
+        emptyFeatureCollection,
+        emptyFeatureCollection,
+        emptyFeatureCollection,
+        useLayerVisibilityStore.getState().visibility,
+        adjustElevatedHeightsRef.current
       );
       updateBuildingDebugMarkers(map, emptyFeatureCollection);
-      map.on('moveend', reloadVisibleData);
+      map.on('moveend', scheduleVisibleDataReload);
 
       map.on('click', event => {
         setSelectedFeatureRef.current(inspectFeaturesAtPoint(map, event.point));
@@ -869,7 +965,11 @@ export function MapView() {
     return () => {
       cancelled = true;
       visibleRequestId += 1;
-      map.off('moveend', reloadVisibleData);
+      if (pendingReloadTimeoutRef.current !== undefined) {
+        window.clearTimeout(pendingReloadTimeoutRef.current);
+        pendingReloadTimeoutRef.current = undefined;
+      }
+      map.off('moveend', scheduleVisibleDataReload);
       mapRef.current = null;
       for (const marker of buildingMarkerRefs.current) {
         marker.remove();
@@ -898,7 +998,20 @@ export function MapView() {
 
     applyMapLayerVisibility(map, is3d, layerVisibility);
     applyBuildingMarkerVisibility(layerVisibility.buildings && !is3d);
-  }, [layerVisibility, isMapReady, is3d]);
+
+    const latest = latestVectorDataRef.current;
+    void setNativeFeatureSources(
+      map,
+      latest.parcels,
+      latest.buildings,
+      latest.platformEdges,
+      latest.trackCentres,
+      latest.bygning,
+      latest.bygningOmrade,
+      layerVisibility,
+      adjustElevatedHeights && is3d
+    );
+  }, [adjustElevatedHeights, layerVisibility, isMapReady, is3d]);
 
   async function createRandomBuilding() {
     const map = mapRef.current;
@@ -946,10 +1059,21 @@ export function MapView() {
         )
       );
 
-      const { parcels, buildings, platformEdges, trackCentres } = await getVisibleFeatureCollections(map);
+      const { parcels, buildings, platformEdges, trackCentres, bygning, bygningOmrade } = await getVisibleFeatureCollections(map);
       logLoadedCoordinates('parcels after create', parcels);
       logLoadedCoordinates('buildings after create', buildings);
-      await setNativeFeatureSources(map, parcels, buildings, platformEdges, trackCentres);
+      latestVectorDataRef.current = { parcels, buildings, platformEdges, trackCentres, bygning, bygningOmrade };
+      await setNativeFeatureSources(
+        map,
+        parcels,
+        buildings,
+        platformEdges,
+        trackCentres,
+        bygning,
+        bygningOmrade,
+        layerVisibility,
+        adjustElevatedHeights && is3d
+      );
       await upsertGeoJsonSource(map, 'building-centroids', buildingCentroidsFeatureCollection(buildings));
       updateBuildingDebugMarkers(map, buildings);
       const createdStatus = `Created ${buildingsToCreate.length} building${buildingsToCreate.length === 1 ? '' : 's'} with a ${area * 15} m2 parcel after ${placementAttempts} placement attempt${placementAttempts === 1 ? '' : 's'}. ${buildings.features.length} buildings loaded.`;
@@ -1004,16 +1128,30 @@ export function MapView() {
         parcels: reloadedParcels,
         buildings: reloadedBuildings,
         platformEdges: reloadedPlatformEdges,
-        trackCentres: reloadedTrackCentres
+        trackCentres: reloadedTrackCentres,
+        bygning: reloadedBygning,
+        bygningOmrade: reloadedBygningOmrade
       } = await getVisibleFeatureCollections(map);
       logLoadedCoordinates('parcels after clear', reloadedParcels);
       logLoadedCoordinates('buildings after clear', reloadedBuildings);
+      latestVectorDataRef.current = {
+        parcels: reloadedParcels,
+        buildings: reloadedBuildings,
+        platformEdges: reloadedPlatformEdges,
+        trackCentres: reloadedTrackCentres,
+        bygning: reloadedBygning,
+        bygningOmrade: reloadedBygningOmrade
+      };
       await setNativeFeatureSources(
         map,
         reloadedParcels,
         reloadedBuildings,
         reloadedPlatformEdges,
-        reloadedTrackCentres
+        reloadedTrackCentres,
+        reloadedBygning,
+        reloadedBygningOmrade,
+        layerVisibility,
+        adjustElevatedHeights && is3d
       );
       await upsertGeoJsonSource(map, 'building-centroids', buildingCentroidsFeatureCollection(reloadedBuildings));
       updateBuildingDebugMarkers(map, reloadedBuildings);
@@ -1037,7 +1175,7 @@ export function MapView() {
   return (
     <section
       className="relative min-h-0 w-full overflow-hidden rounded-[min(var(--radius-4xl),24px)] border border-border bg-card shadow-sm"
-      aria-label="Cadastre and Bane map">
+      aria-label="Cadastre, Bane, and Bygning map">
       <div
         ref={mapContainerRef}
         className="absolute inset-0 h-full w-full"

@@ -87,6 +87,27 @@ def test_bane_upsert_key_resolves():
         assert coll.supports_upsert
 
 
+def test_bygning_dataset_resolves_expected_geometry_and_upsert_key():
+    bygning = next(
+        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bygning"
+    )
+    assert [coll.name for coll in bygning.collections] == ["bygning", "bygning_omrade"]
+
+    linework = next(coll for coll in bygning.collections if coll.name == "bygning")
+    assert linework.geometry_type == "MultiLineString"
+    assert linework.srid == 5972
+    assert linework.has_z is True
+    assert linework.upsert_key == ("lokalid", "identifikasjon_navnerom")
+    assert linework.supports_upsert
+
+    area = next(coll for coll in bygning.collections if coll.name == "bygning_omrade")
+    assert area.geometry_type == "MultiPolygon"
+    assert area.srid == 5972
+    assert area.has_z is True
+    assert area.upsert_key == ("lokalid", "identifikasjon_navnerom")
+    assert area.supports_upsert
+
+
 def test_upsert_key_must_reference_writable_fields():
     dataset = DatasetDef.model_validate(
         {

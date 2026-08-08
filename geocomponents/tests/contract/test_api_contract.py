@@ -319,8 +319,8 @@ def test_bane_upsert_is_idempotent_by_business_key(client):
     feature = {
         "type": "Feature",
         "geometry": {
-            "type": "LineString",
-            "coordinates": [[100000, 7000000], [100010, 7000010]],
+            "type": "MultiLineString",
+            "coordinates": [[[100000, 7000000], [100010, 7000010]]],
         },
         "properties": {
             "lokalid": "platform-1",

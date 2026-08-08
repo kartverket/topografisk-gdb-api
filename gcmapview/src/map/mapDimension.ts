@@ -3,7 +3,10 @@ import type { ExpressionSpecification } from 'maplibre-gl';
 import type { FeatureCollection } from './geojson';
 import type { LayerVisibility } from '../store/layerVisibilityStore';
 import {
+  BYGNING_ELEVATED_LINE_WIDTH_M,
   buildingExtrusionHeightExpression,
+  bygningExtrusionLayerId,
+  bygningExtrusionSourceId,
   buildingsExtrusionLayerId,
   DEFAULT_3D_PITCH,
   elevatedLineSegments,
@@ -12,12 +15,23 @@ import {
   EXTRUSION_OPACITY_MIN,
   EXTRUSION_TOP_CAP_M,
   heightColorExpression,
+  lowestPositiveLineHeight,
   platformEdgesExtrusionLayerId,
   platformEdgesExtrusionSourceId,
   trackCentresExtrusionLayerId,
   trackCentresExtrusionSourceId
 } from './map3d';
 import { platformEdgesLayerId, trackCentresLayerId } from './baneLayers';
+import { bygningLayerId } from './bygningLayers';
+import {
+  bygningOmradeExtrusionFeatureCollection,
+  bygningOmradeFillColor,
+  bygningOmradeExtrusionLayerId,
+  bygningOmradeExtrusionSourceId,
+  bygningOmradeFillLayerId,
+  bygningOmradeOutlineLayerId,
+  lowestPositiveBygningOmradeHeight
+} from './bygningOmradeLayers';
 
 const buildingFlatLayerIds = ['building-centroids-circle', 'buildings-fill', 'buildings-outline'] as const;
 
@@ -35,11 +49,17 @@ const trackCentres3dLayerIds = [
   `${trackCentresExtrusionLayerId}-solid`
 ] as const;
 
+const bygningFlatLayerIds = [bygningLayerId] as const;
+const bygning3dLayerIds = [`${bygningExtrusionLayerId}-shadow`, `${bygningExtrusionLayerId}-solid`] as const;
+const bygningOmradeLayerIds = [bygningOmradeFillLayerId, bygningOmradeOutlineLayerId] as const;
+const bygningOmrade3dLayerIds = [`${bygningOmradeExtrusionLayerId}-shaft`, `${bygningOmradeExtrusionLayerId}-cap`] as const;
+
 type OpacityBandedExtrusion = {
   baseLayerId: string;
   source: string;
   heightExpression: ExpressionSpecification;
   filter?: maplibregl.FilterSpecification;
+  color?: string | ExpressionSpecification;
 };
 
 function setLayerVisibility(map: maplibregl.Map, layerId: string, visible: boolean) {
@@ -54,7 +74,7 @@ function setLayersVisibility(map: maplibregl.Map, layerIds: readonly string[], v
 }
 
 function addExtrusionShaft(map: maplibregl.Map, options: OpacityBandedExtrusion) {
-  const { baseLayerId, source, heightExpression, filter } = options;
+  const { baseLayerId, source, heightExpression, filter, color = heightColorExpression(heightExpression) } = options;
   const tallerThanCap: ExpressionSpecification = ['>', heightExpression, EXTRUSION_TOP_CAP_M];
   const shaftFilter: maplibregl.FilterSpecification = filter
     ? (['all', filter, tallerThanCap] as maplibregl.FilterSpecification)
@@ -67,7 +87,7 @@ function addExtrusionShaft(map: maplibregl.Map, options: OpacityBandedExtrusion)
     filter: shaftFilter,
     layout: { visibility: 'none' },
     paint: {
-      'fill-extrusion-color': heightColorExpression(heightExpression),
+      'fill-extrusion-color': color,
       'fill-extrusion-opacity': EXTRUSION_OPACITY_MIN,
       'fill-extrusion-base': 0,
       'fill-extrusion-height': extrusionShaftTopExpression(heightExpression),
@@ -77,7 +97,7 @@ function addExtrusionShaft(map: maplibregl.Map, options: OpacityBandedExtrusion)
 }
 
 function addExtrusionCap(map: maplibregl.Map, options: OpacityBandedExtrusion) {
-  const { baseLayerId, source, heightExpression, filter } = options;
+  const { baseLayerId, source, heightExpression, filter, color = heightColorExpression(heightExpression) } = options;
   const shaftTop = extrusionShaftTopExpression(heightExpression);
 
   map.addLayer({
@@ -87,7 +107,7 @@ function addExtrusionCap(map: maplibregl.Map, options: OpacityBandedExtrusion) {
     ...(filter ? { filter } : {}),
     layout: { visibility: 'none' },
     paint: {
-      'fill-extrusion-color': heightColorExpression(heightExpression),
+      'fill-extrusion-color': color,
       'fill-extrusion-opacity': EXTRUSION_OPACITY_MAX,
       'fill-extrusion-base': shaftTop,
       'fill-extrusion-height': heightExpression,
@@ -158,35 +178,79 @@ export function addExtrusionLayers(map: maplibregl.Map) {
     type: 'geojson',
     data: { type: 'FeatureCollection', features: [] }
   });
+  map.addSource(bygningExtrusionSourceId, {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] }
+  });
+  map.addSource(bygningOmradeExtrusionSourceId, {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] }
+  });
 
   const buildingHeight = buildingExtrusionHeightExpression();
   const buildingBand: OpacityBandedExtrusion = {
     baseLayerId: buildingsExtrusionLayerId,
     source: 'buildings',
     heightExpression: buildingHeight,
-    filter: ['==', '$type', 'Polygon']
+    filter: ['==', '$type', 'Polygon'],
+    color: '#000000'
   };
 
   addExtrusionShaft(map, buildingBand);
   addExtrusionCap(map, buildingBand);
 
+  const bygningOmradeBand: OpacityBandedExtrusion = {
+    baseLayerId: bygningOmradeExtrusionLayerId,
+    source: bygningOmradeExtrusionSourceId,
+    heightExpression: ['to-number', ['coalesce', ['get', 'height'], 0]],
+    filter: ['==', '$type', 'Polygon'],
+    color: bygningOmradeFillColor
+  };
+
+  addExtrusionShaft(map, bygningOmradeBand);
+  addExtrusionCap(map, bygningOmradeBand);
+
   // Ground shadows before opaque beams so fills sit under extrusions.
   addElevatedLineGroundShadow(map, platformEdgesExtrusionLayerId, platformEdgesExtrusionSourceId, '#000000');
   addElevatedLineGroundShadow(map, trackCentresExtrusionLayerId, trackCentresExtrusionSourceId);
+  addElevatedLineGroundShadow(map, bygningExtrusionLayerId, bygningExtrusionSourceId, '#000000');
   addOpaqueElevatedLineExtrusion(map, platformEdgesExtrusionLayerId, platformEdgesExtrusionSourceId, '#000000');
   addOpaqueElevatedLineExtrusion(map, trackCentresExtrusionLayerId, trackCentresExtrusionSourceId);
+  addOpaqueElevatedLineExtrusion(map, bygningExtrusionLayerId, bygningExtrusionSourceId, '#000000');
 }
 
-export function upsertElevatedLineSources(
+export function upsertElevatedSources(
   map: maplibregl.Map,
   platformEdges: FeatureCollection,
-  trackCentres: FeatureCollection
+  trackCentres: FeatureCollection,
+  bygning: FeatureCollection,
+  bygningOmrade: FeatureCollection,
+  visibility: Pick<LayerVisibility, 'platformEdges' | 'trackCentres' | 'bygning' | 'bygningOmrade'>,
+  adjustHeights: boolean
 ) {
   const platformSource = map.getSource(platformEdgesExtrusionSourceId) as maplibregl.GeoJSONSource | undefined;
   const trackSource = map.getSource(trackCentresExtrusionSourceId) as maplibregl.GeoJSONSource | undefined;
+  const bygningSource = map.getSource(bygningExtrusionSourceId) as maplibregl.GeoJSONSource | undefined;
+  const bygningOmradeSource = map.getSource(bygningOmradeExtrusionSourceId) as maplibregl.GeoJSONSource | undefined;
 
-  const platformData = elevatedLineSegments(platformEdges);
-  const trackData = elevatedLineSegments(trackCentres);
+  const heightSamples = [
+    ...(visibility.platformEdges ? [lowestPositiveLineHeight([platformEdges])] : []),
+    ...(visibility.trackCentres ? [lowestPositiveLineHeight([trackCentres])] : []),
+    ...(visibility.bygning ? [lowestPositiveLineHeight([bygning])] : []),
+    ...(visibility.bygningOmrade ? [lowestPositiveBygningOmradeHeight(bygningOmrade)] : [])
+  ].filter(height => height > 0);
+
+  const heightOffset = adjustHeights && heightSamples.length > 0 ? Math.min(...heightSamples) : 0;
+
+  const platformData = elevatedLineSegments(platformEdges, undefined, undefined, heightOffset);
+  const trackData = elevatedLineSegments(trackCentres, undefined, undefined, heightOffset);
+  const bygningData = elevatedLineSegments(
+    bygning,
+    BYGNING_ELEVATED_LINE_WIDTH_M,
+    undefined,
+    heightOffset
+  );
+  const bygningOmradeData = bygningOmradeExtrusionFeatureCollection(bygningOmrade, heightOffset);
 
   if (platformSource) {
     platformSource.setData(platformData);
@@ -205,6 +269,24 @@ export function upsertElevatedLineSources(
       data: trackData
     });
   }
+
+  if (bygningSource) {
+    bygningSource.setData(bygningData);
+  } else {
+    map.addSource(bygningExtrusionSourceId, {
+      type: 'geojson',
+      data: bygningData
+    });
+  }
+
+  if (bygningOmradeSource) {
+    bygningOmradeSource.setData(bygningOmradeData);
+  } else {
+    map.addSource(bygningOmradeExtrusionSourceId, {
+      type: 'geojson',
+      data: bygningOmradeData
+    });
+  }
 }
 
 /** Apply 2D/3D layer set, gated by user layer toggles. */
@@ -219,6 +301,11 @@ export function applyMapLayerVisibility(map: maplibregl.Map, is3d: boolean, visi
 
   setLayersVisibility(map, trackCentresFlatLayerIds, visibility.trackCentres && !is3d);
   setLayersVisibility(map, trackCentres3dLayerIds, visibility.trackCentres && is3d);
+
+  setLayersVisibility(map, bygningFlatLayerIds, visibility.bygning && !is3d);
+  setLayersVisibility(map, bygning3dLayerIds, visibility.bygning && is3d);
+  setLayersVisibility(map, bygningOmradeLayerIds, visibility.bygningOmrade && !is3d);
+  setLayersVisibility(map, bygningOmrade3dLayerIds, visibility.bygningOmrade && is3d);
 }
 
 /** Switch camera + layer visibility for the global 2D/3D mode. */
@@ -232,6 +319,11 @@ export function applyMapDimensionMode(map: maplibregl.Map, is3d: boolean, visibi
     if (map.getPitch() < 20) {
       map.easeTo({ pitch: DEFAULT_3D_PITCH, duration: 700 });
     }
+    return;
+  }
+
+  if (map.getPitch() === 0) {
+    map.setMaxPitch(0);
     return;
   }
 

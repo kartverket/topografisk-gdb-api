@@ -21,6 +21,13 @@ def _bane_plan():
     return build_schema_plan(bane)
 
 
+def _bygning_plan():
+    bygning = next(
+        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bygning"
+    )
+    return build_schema_plan(bygning)
+
+
 def test_dataset_maps_to_schema_and_collections_to_tables():
     plan = _cadastre_plan()
     assert plan.schema_name == "cadastre"
@@ -109,9 +116,35 @@ def test_bane_geometry_columns_include_height():
     for collection_name in ("jernbaneplattformkant", "spormidt"):
         coll = next(c for c in plan.collections if c.collection_name == collection_name)
         assert coll.table.geometry.has_z
-        assert coll.table.geometry.postgis_type == "LineStringZ"
+        assert coll.table.geometry.postgis_type == "MultiLineStringZ"
     ddl = "\n".join(postgis.table_statements(plan))
-    assert '"geometry" geometry(LineStringZ, 5973)' in ddl
+    assert '"geometry" geometry(MultiLineStringZ, 5973)' in ddl
+
+
+def test_bygning_geometry_and_business_key_are_built_correctly():
+    plan = _bygning_plan()
+    coll = next(c for c in plan.collections if c.collection_name == "bygning")
+    assert coll.table.geometry.has_z
+    assert coll.table.geometry.postgis_type == "MultiLineStringZ"
+    ddl = "\n".join(postgis.table_statements(plan))
+    assert '"geometry" geometry(MultiLineStringZ, 5972)' in ddl
+    assert (
+        'on bygning.bygning ("lokalid", "identifikasjon_navnerom") '
+        "nulls not distinct"
+    ) in ddl
+
+
+def test_bygning_omrade_geometry_and_business_key_are_built_correctly():
+    plan = _bygning_plan()
+    coll = next(c for c in plan.collections if c.collection_name == "bygning_omrade")
+    assert coll.table.geometry.has_z
+    assert coll.table.geometry.postgis_type == "MultiPolygonZ"
+    ddl = "\n".join(postgis.table_statements(plan))
+    assert '"geometry" geometry(MultiPolygonZ, 5972)' in ddl
+    assert (
+        'on bygning.bygning_omrade ("lokalid", "identifikasjon_navnerom") '
+        "nulls not distinct"
+    ) in ddl
 
 
 # --------------------------------------------------------------------------

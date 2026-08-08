@@ -1,23 +1,19 @@
-name: bane
-title: Bane
-description: Jernbaneobjekter fra FKB-Bane.
+name: bygning
+title: Bygning
+description: Bygningsobjekter fra FKB-Bygning.
 
 collections:
-  - name: jernbaneplattformkant
-    title: Jernbaneplattformkant
-    description: Avgrensning av en jernbaneplattform.
+  - name: bygning
+    title: Bygning
+    description: Bygningsgrenser og annet bygningslinjeverk.
     geometry:
       type: MultiLineString
-      srid: 5973
+      srid: 5972
       has_z: true
     upsert_key:
       - lokalid
       - identifikasjon_navnerom
     fields:
-      - name: objid
-        type: integer
-        required: true
-        auto_increment: true
       - name: objtype
         type: string
       - name: lokalid
@@ -25,6 +21,7 @@ collections:
         required: true
       - name: identifikasjon_navnerom
         type: string
+        required: true
       - name: identifikasjon_versjonid
         type: string
       - name: oppdateringsdato
@@ -51,68 +48,72 @@ collections:
         type: string
       - name: kvalitet_noyaktighethoyde
         type: integer
-      - name: medium
-        type: string
-        required: true
-      - name: eksternpeker
-        type: string
-
-  - name: spormidt
-    title: Spormidt
-    description: Senterlinje for jernbanespor.
-    geometry:
-      type: MultiLineString
-      srid: 5973
-      has_z: true
-    upsert_key:
-      - lokalid
-      - identifikasjon_navnerom
-    fields:
-      - name: objid
-        type: integer
-        required: true
-        auto_increment: true
-      - name: objtype
-        type: string
-      - name: lokalid
-        type: string
-        required: true
-      - name: identifikasjon_navnerom
-        type: string
-      - name: identifikasjon_versjonid
-        type: string
-      - name: oppdateringsdato
-        type: timestamp
-        required: true
-      - name: sluttdato
-        type: timestamp
-      - name: datafangstdato
-        type: timestamp
-        required: true
-      - name: verifiseringsdato
-        type: timestamp
-      - name: registreringsversjon
-        type: string
-      - name: informasjon
-        type: string
-      - name: kvalitet_datafangstmetode
-        type: string
-      - name: kvalitet_noyaktighet
-        type: integer
-      - name: kvalitet_synbarhet
-        type: string
-      - name: kvalitet_datafangstmetodehoyde
-        type: string
-      - name: kvalitet_noyaktighethoyde
-        type: integer
-      - name: jernbanetype
-        type: string
-        required: true
       - name: hoydereferanse
         type: string
-        required: true
       - name: medium
         type: string
+      - name: tredniva
+        type: string
+      - name: skalavgrensebygning
+        type: string
+      - name: takskjegg
+        type: string
+      - name: lavestegulv
+        type: string
+  - name: bygning_omrade
+    title: Bygning område
+    description: Bygningsområder fra FKB-Bygning.
+    geometry:
+      type: MultiPolygon
+      srid: 5972
+      has_z: true
+    upsert_key:
+      - lokalid
+      - identifikasjon_navnerom
+    fields:
+      - name: objtype
+        type: string
+      - name: lokalid
+        type: string
         required: true
-      - name: eksternpeker
+      - name: identifikasjon_navnerom
+        type: string
+        required: true
+      - name: identifikasjon_versjonid
+        type: string
+      - name: oppdateringsdato
+        type: timestamp
+        required: true
+      - name: sluttdato
+        type: timestamp
+      - name: datafangstdato
+        type: timestamp
+        required: true
+      - name: verifiseringsdato
+        type: timestamp
+      - name: registreringsversjon
+        type: string
+      - name: informasjon
+        type: string
+      - name: kvalitet_datafangstmetode
+        type: string
+      - name: kvalitet_noyaktighet
+        type: integer
+      - name: kvalitet_synbarhet
+        type: string
+      - name: kvalitet_datafangstmetodehoyde
+        type: string
+      - name: kvalitet_noyaktighethoyde
+        type: integer
+      - name: hoydereferanse
+        type: string
+      - name: medium
+        type: string
+      - name: bygningsnummer
+        type: string
+      - name: bygningstype
+        type: string
+      - name: bygningsstatus
+        type: string
+      - name: kommunenummer
         type: string

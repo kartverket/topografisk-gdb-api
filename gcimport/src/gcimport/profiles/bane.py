@@ -17,7 +17,7 @@ BANE_PROFILE = ImportProfile(
     title="Bane",
     default_api_url="http://localhost:8000/datasets/bane/ogc_api",
     target_crs="EPSG:5973",
-    geometry_type="LineString",
+    geometry_type="MultiLineString",
     collections={
         "jernbaneplattformkant": "jernbaneplattformkant",
         "spormidt": "spormidt",

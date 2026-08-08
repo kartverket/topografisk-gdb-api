@@ -16,8 +16,10 @@ from gcimport.profiles.base import ImportProfile
 
 FALLBACK_GEOMETRY_CRS = "EPSG:4326"
 MIN_LINESTRING_POSITIONS = 2
+MIN_LINEAR_RING_POSITIONS = 4
 MIN_POSITION_DIMENSIONS = 2
 MAX_POSITION_DIMENSIONS = 3
+_DUPLICATE_MERGE_IGNORED_PROPERTIES = frozenset({"OBJECTID", "SHAPE_Length"})
 
 
 class DocumentValidationError(ValueError):
@@ -85,7 +87,7 @@ def prepare_document(
     inherited_crs = document.get("coordRefSys")
     errors: list[str] = []
     prepared: list[PreparedFeature] = []
-    identities: set[tuple[str, ...]] = set()
+    identity_indexes: dict[tuple[str, ...], int] = {}
 
     for index, feature in enumerate(features):
         try:
@@ -94,20 +96,88 @@ def prepare_document(
                 str(item.geojson["properties"][name])
                 for name in profile.identity_fields
             )
-            if identity in identities:
+            existing_index = identity_indexes.get(identity)
+            if existing_index is None:
+                identity_indexes[identity] = len(prepared)
+                prepared.append(item)
+                continue
+
+            merged = _merge_duplicate_feature(
+                prepared[existing_index], item, profile=profile
+            )
+            if merged is None:
                 errors.append(
                     f"features[{index}]: duplicate "
                     f"({', '.join(profile.identity_fields)})"
                 )
-            else:
-                identities.add(identity)
-            prepared.append(item)
+                continue
+
+            prepared[existing_index] = merged
         except DocumentValidationError as err:
             errors.extend(f"features[{index}]: {message}" for message in err.errors)
 
     if errors:
         raise DocumentValidationError(errors)
     return prepared
+
+
+def _merge_duplicate_feature(
+    existing: PreparedFeature,
+    incoming: PreparedFeature,
+    *,
+    profile: ImportProfile,
+) -> PreparedFeature | None:
+    if not profile.merge_duplicate_multilinestrings:
+        return None
+
+    existing_properties = existing.geojson.get("properties")
+    incoming_properties = incoming.geojson.get("properties")
+    existing_geometry = existing.geojson.get("geometry")
+    incoming_geometry = incoming.geojson.get("geometry")
+
+    if (
+        existing.collection != incoming.collection
+        or existing.feature_id != incoming.feature_id
+        or not isinstance(existing_properties, dict)
+        or not isinstance(incoming_properties, dict)
+        or not isinstance(existing_geometry, dict)
+        or not isinstance(incoming_geometry, dict)
+        or existing_geometry.get("type") != "MultiLineString"
+        or incoming_geometry.get("type") != "MultiLineString"
+    ):
+        return None
+
+    if _comparable_properties(existing_properties) != _comparable_properties(
+        incoming_properties
+    ):
+        return None
+
+    existing_coordinates = existing_geometry.get("coordinates")
+    incoming_coordinates = incoming_geometry.get("coordinates")
+    if not isinstance(existing_coordinates, list) or not isinstance(
+        incoming_coordinates, list
+    ):
+        return None
+
+    return PreparedFeature(
+        collection=existing.collection,
+        feature_id=existing.feature_id,
+        geojson={
+            **existing.geojson,
+            "geometry": {
+                "type": "MultiLineString",
+                "coordinates": [*existing_coordinates, *incoming_coordinates],
+            },
+        },
+    )
+
+
+def _comparable_properties(properties: dict[str, Any]) -> dict[str, Any]:
+    return {
+        name: value
+        for name, value in properties.items()
+        if name not in _DUPLICATE_MERGE_IGNORED_PROPERTIES
+    }
 
 
 def _prepare_feature(
@@ -122,38 +192,41 @@ def _prepare_feature(
         errors.append("type must be 'Feature'")
 
     raw_feature_type = feature.get("featureType")
-    if not isinstance(raw_feature_type, str):
-        errors.append("featureType must be a string")
-        collection = ""
-    else:
-        collection = profile.collection_for(raw_feature_type) or ""
-        if not collection:
-            errors.append(f"featureType must be {profile.supported_feature_types}")
+    collection = ""
 
     properties = feature.get("properties")
     if not isinstance(properties, dict):
         errors.append("properties must be an object")
         properties = {}
 
-    if collection:
-        missing = sorted(
-            name
-            for name in profile.required_fields[collection]
-            if name not in properties or properties[name] is None
-        )
-        if missing:
-            errors.append(f"missing required properties: {', '.join(missing)}")
-
     identity_values, identity_errors = _identity_values(properties, profile)
     errors.extend(identity_errors)
 
     try:
         geometry, source_crs = _select_geometry(feature, inherited_crs)
-        transformed_geometry = _transform_geometry(
-            geometry,
-            source_crs,
-            profile,
-        )
+        geometry_type = geometry.get("type") if isinstance(geometry, dict) else None
+        if not isinstance(raw_feature_type, str):
+            errors.append("featureType must be a string")
+        else:
+            collection = profile.collection_for(raw_feature_type, geometry_type) or ""
+            if not collection:
+                errors.append(f"featureType must be {profile.supported_feature_types}")
+        if collection:
+            missing = sorted(
+                name
+                for name in profile.required_fields[collection]
+                if name not in properties or properties[name] is None
+            )
+            if missing:
+                errors.append(f"missing required properties: {', '.join(missing)}")
+            transformed_geometry = _transform_geometry(
+                geometry,
+                source_crs,
+                profile,
+                collection,
+            )
+        else:
+            transformed_geometry = {}
     except DocumentValidationError as err:
         errors.extend(err.errors)
         transformed_geometry = {}
@@ -206,38 +279,18 @@ def _transform_geometry(
     geometry: dict[str, Any],
     source_crs: str,
     profile: ImportProfile,
+    collection: str,
 ) -> dict[str, Any]:
-    if geometry.get("type") != profile.geometry_type:
-        raise DocumentValidationError([f"geometry must be a {profile.geometry_type}"])
-    if profile.geometry_type != "LineString":
-        raise DocumentValidationError(
-            [f"geometry type {profile.geometry_type} is not implemented"]
-        )
+    geometry_type = geometry.get("type")
     coordinates = geometry.get("coordinates")
-    if not isinstance(coordinates, list) or len(coordinates) < MIN_LINESTRING_POSITIONS:
-        raise DocumentValidationError(
-            ["LineString coordinates must contain at least two positions"]
-        )
+    target_geometry_type = profile.geometry_type_for_collection(collection)
 
-    positions: list[tuple[float, ...]] = []
-    for position_index, position in enumerate(coordinates):
-        if (
-            not isinstance(position, list)
-            or not MIN_POSITION_DIMENSIONS <= len(position) <= MAX_POSITION_DIMENSIONS
-            or any(
-                isinstance(value, bool)
-                or not isinstance(value, int | float)
-                or not math.isfinite(value)
-                for value in position
-            )
-        ):
-            raise DocumentValidationError(
-                [
-                    "LineString position "
-                    f"{position_index} must contain two or three finite numbers"
-                ]
-            )
-        positions.append(tuple(position))
+    if geometry_type == "LineString" and target_geometry_type == "MultiLineString":
+        geometry_type = "MultiLineString"
+        coordinates = [coordinates]
+
+    if geometry_type != target_geometry_type:
+        raise DocumentValidationError([f"geometry must be a {target_geometry_type}"])
 
     try:
         transformer = Transformer.from_crs(
@@ -245,17 +298,199 @@ def _transform_geometry(
             CRS.from_user_input(profile.target_crs),
             always_xy=True,
         )
-        transformed = [list(transformer.transform(*position)) for position in positions]
+        transformed = _transform_coordinates(
+            geometry_type,
+            coordinates,
+            transformer,
+        )
     except (CRSError, ProjError) as err:
         raise DocumentValidationError(
             [f"cannot transform coordRefSys '{source_crs}' to {profile.target_crs}"]
         ) from err
 
-    if any(not math.isfinite(value) for position in transformed for value in position):
+    if any(
+        not math.isfinite(value)
+        for position in _iter_positions(transformed)
+        for value in position
+    ):
         raise DocumentValidationError(
             [f"coordinate transform from '{source_crs}' produced invalid values"]
         )
-    return {"type": "LineString", "coordinates": transformed}
+    return {"type": geometry_type, "coordinates": transformed}
+
+
+def _transform_coordinates(
+    geometry_type: Any,
+    coordinates: Any,
+    transformer: Transformer,
+) -> list[Any]:
+    if geometry_type == "LineString":
+        return _transform_linestring_coordinates(coordinates, transformer)
+    if geometry_type == "MultiLineString":
+        return _transform_multilinestring_coordinates(coordinates, transformer)
+    if geometry_type == "Polygon":
+        return _transform_polygon_coordinates(coordinates, transformer)
+    if geometry_type == "MultiPolygon":
+        return _transform_multipolygon_coordinates(coordinates, transformer)
+    raise DocumentValidationError([f"geometry type {geometry_type} is not implemented"])
+
+
+def _transform_linestring_coordinates(
+    coordinates: Any,
+    transformer: Transformer,
+) -> list[list[float]]:
+    if not isinstance(coordinates, list) or len(coordinates) < MIN_LINESTRING_POSITIONS:
+        raise DocumentValidationError(
+            ["LineString coordinates must contain at least two positions"]
+        )
+    return [
+        _transform_position(
+            position,
+            transformer,
+            geometry_type="LineString",
+            path=f"position {position_index}",
+        )
+        for position_index, position in enumerate(coordinates)
+    ]
+
+
+def _transform_polygon_coordinates(
+    coordinates: Any,
+    transformer: Transformer,
+) -> list[list[list[float]]]:
+    if not isinstance(coordinates, list) or not coordinates:
+        raise DocumentValidationError(
+            ["Polygon coordinates must contain at least one ring"]
+        )
+    return [
+        _transform_ring(
+            ring,
+            transformer,
+            geometry_type="Polygon",
+            path=f"ring {ring_index}",
+        )
+        for ring_index, ring in enumerate(coordinates)
+    ]
+
+
+def _transform_multilinestring_coordinates(
+    coordinates: Any,
+    transformer: Transformer,
+) -> list[list[list[float]]]:
+    if not isinstance(coordinates, list) or not coordinates:
+        raise DocumentValidationError(
+            ["MultiLineString coordinates must contain at least one line"]
+        )
+    transformed: list[list[list[float]]] = []
+    for line_index, line in enumerate(coordinates):
+        if not isinstance(line, list) or len(line) < MIN_LINESTRING_POSITIONS:
+            raise DocumentValidationError(
+                [
+                    "MultiLineString line "
+                    f"{line_index} must contain at least two positions"
+                ]
+            )
+        transformed.append(
+            [
+                _transform_position(
+                    position,
+                    transformer,
+                    geometry_type="MultiLineString",
+                    path=f"line {line_index} position {position_index}",
+                )
+                for position_index, position in enumerate(line)
+            ]
+        )
+    return transformed
+
+
+def _transform_multipolygon_coordinates(
+    coordinates: Any,
+    transformer: Transformer,
+) -> list[list[list[list[float]]]]:
+    if not isinstance(coordinates, list) or not coordinates:
+        raise DocumentValidationError(
+            ["MultiPolygon coordinates must contain at least one polygon"]
+        )
+
+    transformed: list[list[list[list[float]]]] = []
+    for polygon_index, polygon in enumerate(coordinates):
+        if not isinstance(polygon, list) or not polygon:
+            raise DocumentValidationError(
+                [
+                    "MultiPolygon polygon "
+                    f"{polygon_index} must contain at least one ring"
+                ]
+            )
+        transformed.append(
+            [
+                _transform_ring(
+                    ring,
+                    transformer,
+                    geometry_type="MultiPolygon",
+                    path=f"polygon {polygon_index} ring {ring_index}",
+                )
+                for ring_index, ring in enumerate(polygon)
+            ]
+        )
+    return transformed
+
+
+def _transform_ring(
+    ring: Any,
+    transformer: Transformer,
+    *,
+    geometry_type: str,
+    path: str,
+) -> list[list[float]]:
+    if not isinstance(ring, list) or len(ring) < MIN_LINEAR_RING_POSITIONS:
+        raise DocumentValidationError(
+            [f"{geometry_type} {path} must contain at least four positions"]
+        )
+    return [
+        _transform_position(
+            position,
+            transformer,
+            geometry_type=geometry_type,
+            path=f"{path} position {position_index}",
+        )
+        for position_index, position in enumerate(ring)
+    ]
+
+
+def _transform_position(
+    position: Any,
+    transformer: Transformer,
+    *,
+    geometry_type: str,
+    path: str,
+) -> list[float]:
+    if (
+        not isinstance(position, list)
+        or not MIN_POSITION_DIMENSIONS <= len(position) <= MAX_POSITION_DIMENSIONS
+        or any(
+            isinstance(value, bool)
+            or not isinstance(value, int | float)
+            or not math.isfinite(value)
+            for value in position
+        )
+    ):
+        raise DocumentValidationError(
+            [f"{geometry_type} {path} must contain two or three finite numbers"]
+        )
+    return list(transformer.transform(*position))
+
+
+def _iter_positions(coordinates: Any) -> list[list[float]]:
+    if not isinstance(coordinates, list):
+        return []
+    if coordinates and all(isinstance(value, int | float) for value in coordinates):
+        return [coordinates]
+
+    positions: list[list[float]] = []
+    for child in coordinates:
+        positions.extend(_iter_positions(child))
+    return positions
 
 
 async def import_features(

@@ -11,6 +11,10 @@ from gcimport.app import create_app
 from gcimport.config import Settings
 from gcimport.importer import prepare_document
 from gcimport.profiles import ImportProfile
+from gcimport.profiles.bygning import (
+    BYGNING_PROFILE,
+    _AREA_SOURCE_OBJTYPES as _BUILDING_AREA_SOURCE_OBJTYPES,
+)
 
 PLATFORM_UUID = "11111111-1111-4111-8111-111111111111"
 TRACK_UUID = "22222222-2222-4222-8222-222222222222"
@@ -37,8 +41,8 @@ def _feature(
         "type": "Feature",
         "featureType": feature_type,
         "place": {
-            "type": "LineString",
-            "coordinates": [[10.7, 59.9], [10.8, 60.0]],
+            "type": "MultiLineString",
+            "coordinates": [[[10.7, 59.9], [10.8, 60.0]]],
         },
         "properties": properties or _properties(),
     }
@@ -52,10 +56,216 @@ def _document(features: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _building_properties(**overrides: Any) -> dict[str, Any]:
+    values = {
+        "lokalid": "building-1",
+        "identifikasjon_navnerom": "http://data.geonorge.no/SFKB/FKB-Bygning/so",
+        "oppdateringsdato": "2026-01-01T00:00:00Z",
+        "datafangstdato": "2025-01-01T00:00:00Z",
+    }
+    values.update(overrides)
+    return values
+
+
+def _building_feature(
+    *,
+    feature_type: str = "bygning",
+    properties: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": "Feature",
+        "featureType": feature_type,
+        "place": {
+            "type": "MultiLineString",
+            "coordinates": [
+                [
+                    [522867.9097999996, 6857053.890000001, 302.19],
+                    [522874.4998000003, 6857056.890000001, 301.94],
+                    [522873.3398000002, 6857054.789999999, 301.81],
+                    [522868.7898000004, 6857052.760000002, 301.85],
+                    [522869.0697999997, 6857053.280000001, 301.85],
+                    [522867.9097999996, 6857053.890000001, 302.19],
+                ]
+            ],
+        },
+        "properties": properties or _building_properties(),
+    }
+
+
+def _building_geojson_feature() -> dict[str, Any]:
+    return {
+        "type": "Feature",
+        "properties": {
+            "OBJECTID": 1,
+            "objtype": "BygningBru",
+            "lokalid": "building-1",
+            "datafangstdato": "2025-01-01T00:00:00Z",
+            "oppdateringsdato": "2026-01-01T00:00:00Z",
+            "navnerom": "http://data.geonorge.no/SFKB/FKB-Bygning/so",
+        },
+        "geometry": {
+            "type": "MultiLineString",
+            "coordinates": [
+                [
+                    [522867.9097999996, 6857053.890000001, 302.19],
+                    [522874.4998000003, 6857056.890000001, 301.94],
+                    [522873.3398000002, 6857054.789999999, 301.81],
+                    [522868.7898000004, 6857052.760000002, 301.85],
+                    [522869.0697999997, 6857053.280000001, 301.85],
+                    [522867.9097999996, 6857053.890000001, 302.19],
+                ]
+            ],
+        },
+    }
+
+
+def _building_geojson_duplicate_segment() -> dict[str, Any]:
+    return {
+        "type": "Feature",
+        "properties": {
+            "OBJECTID": 2,
+            "objtype": "Takkant",
+            "lokalid": "building-duplicate-1",
+            "datafangstdato": "2025-01-01T00:00:00Z",
+            "oppdateringsdato": "2026-01-01T00:00:00Z",
+            "navnerom": "http://data.geonorge.no/SFKB/FKB-Bygning/so",
+            "versjonid": "2026-01-01 00:00:00.000000000",
+            "SHAPE_Length": 1.23,
+        },
+        "geometry": {
+            "type": "MultiLineString",
+            "coordinates": [
+                [
+                    [522867.9097999996, 6857053.890000001, 302.19],
+                    [522874.4998000003, 6857056.890000001, 301.94],
+                ]
+            ],
+        },
+    }
+
+
+def _building_geojson_duplicate_segment_2() -> dict[str, Any]:
+    return {
+        "type": "Feature",
+        "properties": {
+            "OBJECTID": 3,
+            "objtype": "Takkant",
+            "lokalid": "building-duplicate-1",
+            "datafangstdato": "2025-01-01T00:00:00Z",
+            "oppdateringsdato": "2026-01-01T00:00:00Z",
+            "navnerom": "http://data.geonorge.no/SFKB/FKB-Bygning/so",
+            "versjonid": "2026-01-01 00:00:00.000000000",
+            "SHAPE_Length": 4.56,
+        },
+        "geometry": {
+            "type": "MultiLineString",
+            "coordinates": [
+                [
+                    [522873.3398000002, 6857054.789999999, 301.81],
+                    [522868.7898000004, 6857052.760000002, 301.85],
+                    [522869.0697999997, 6857053.280000001, 301.85],
+                ]
+            ],
+        },
+    }
+
+
+def _building_geojson_document(
+    features: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": "FeatureCollection",
+        "crs": {
+            "type": "name",
+            "properties": {"name": "urn:ogc:def:crs:EPSG::5972"},
+        },
+        "features": features or [_building_geojson_feature()],
+    }
+
+
+def _building_area_feature(
+    *,
+    feature_type: str = "bygning_omrade",
+    properties: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": "Feature",
+        "featureType": feature_type,
+        "place": {
+            "type": "MultiPolygon",
+            "coordinates": [
+                [
+                    [
+                        [529540.2541, 6853079.3009, 495.652],
+                        [529544.7306, 6853080.6285, 495.652],
+                        [529546.4499, 6853074.8313, 495.652],
+                        [529541.9734, 6853073.5036, 495.652],
+                        [529540.2541, 6853079.3009, 495.652],
+                    ]
+                ]
+            ],
+        },
+        "properties": properties or _building_properties(),
+    }
+
+
+def _building_area_geojson_feature(*, objtype: str = "AnnenBygning") -> dict[str, Any]:
+    return {
+        "type": "Feature",
+        "properties": {
+            "OBJECTID": 1,
+            "objtype": objtype,
+            "lokalid": "building-area-1",
+            "datafangstdato": "2025-01-01T00:00:00Z",
+            "oppdateringsdato": "2026-01-01T00:00:00Z",
+            "navnerom": "http://data.geonorge.no/SFKB/FKB-Bygning/so",
+        },
+        "geometry": {
+            "type": "MultiPolygon",
+            "coordinates": [
+                [
+                    [
+                        [529540.2541, 6853079.3009, 495.652],
+                        [529544.7306, 6853080.6285, 495.652],
+                        [529546.4499, 6853074.8313, 495.652],
+                        [529541.9734, 6853073.5036, 495.652],
+                        [529540.2541, 6853079.3009, 495.652],
+                    ]
+                ]
+            ],
+        },
+    }
+
+
+def _building_area_geojson_document(
+    features: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": "FeatureCollection",
+        "crs": {
+            "type": "name",
+            "properties": {"name": "urn:ogc:def:crs:EPSG::5972"},
+        },
+        "features": features or [_building_area_geojson_feature()],
+    }
+
+
 def _post(client: TestClient, document: Any) -> httpx.Response:
     return client.post(
         "/imports",
         files={"file": ("bane.json", json.dumps(document), "application/json")},
+    )
+
+
+def _post_geojson(
+    client: TestClient,
+    document: Any,
+    *,
+    filename: str = "source.geojson",
+) -> httpx.Response:
+    return client.post(
+        "/imports",
+        files={"file": (filename, json.dumps(document), "application/geo+json")},
     )
 
 
@@ -122,8 +332,8 @@ def test_imports_place_and_fallback_geometry() -> None:
         assert request.headers["content-type"] == "application/geo+json"
         payload = json.loads(request.content)
         assert payload["type"] == "Feature"
-        assert payload["geometry"]["type"] == "LineString"
-        assert payload["geometry"]["coordinates"][0] != [10.7, 59.9]
+        assert payload["geometry"]["type"] == "MultiLineString"
+        assert payload["geometry"]["coordinates"][0][0] != [10.7, 59.9]
 
 
 def test_retry_returns_the_same_upstream_uuid() -> None:
@@ -142,6 +352,28 @@ def test_retry_returns_the_same_upstream_uuid() -> None:
     assert first.json() == retry.json()
     assert first.json()["features"][0]["id"] == PLATFORM_UUID
     assert calls == 2
+
+
+def test_imports_bane_linestring_place_for_compatibility() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": PLATFORM_UUID})
+
+    feature = _feature()
+    feature["place"] = {
+        "type": "LineString",
+        "coordinates": [[10.7, 59.9], [10.8, 60.0]],
+    }
+
+    with _test_client(httpx.MockTransport(handler)) as client:
+        response = _post(client, _document([feature]))
+
+    assert response.status_code == 200
+    payload = json.loads(requests[0].content)
+    assert payload["geometry"]["type"] == "MultiLineString"
+    assert payload["geometry"]["coordinates"][0][0][:2] != [10.7, 59.9]
 
 
 def test_dataset_rules_are_supplied_by_profile() -> None:
@@ -176,6 +408,375 @@ def test_dataset_rules_are_supplied_by_profile() -> None:
     assert prepared[0].feature_id == "r1"
 
 
+def test_imports_built_in_bygning_profile_with_multilinestring() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": PLATFORM_UUID})
+
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(
+        settings=Settings(api_url="https://bygning.example/api"),
+        client=upstream_client,
+        profile=BYGNING_PROFILE,
+    )
+
+    with TestClient(app) as client:
+        response = _post(
+            client,
+            {
+                "type": "FeatureCollection",
+                "coordRefSys": "EPSG:5972",
+                "features": [_building_feature()],
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "total": 1,
+        "features": [{"collection": "bygning", "id": PLATFORM_UUID}],
+    }
+    assert [request.url.path for request in requests] == [
+        "/api/collections/bygning/items:upsert"
+    ]
+    payload = json.loads(requests[0].content)
+    assert payload["geometry"]["type"] == "MultiLineString"
+
+
+def test_imports_built_in_bygning_omrade_profile_with_multipolygon() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": PLATFORM_UUID})
+
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(
+        settings=Settings(api_url="https://bygning.example/api"),
+        client=upstream_client,
+        profile=BYGNING_PROFILE,
+    )
+
+    with TestClient(app) as client:
+        response = _post(
+            client,
+            {
+                "type": "FeatureCollection",
+                "coordRefSys": "EPSG:5972",
+                "features": [_building_area_feature()],
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "total": 1,
+        "features": [{"collection": "bygning_omrade", "id": PLATFORM_UUID}],
+    }
+    assert [request.url.path for request in requests] == [
+        "/api/collections/bygning_omrade/items:upsert"
+    ]
+    payload = json.loads(requests[0].content)
+    assert payload["geometry"]["type"] == "MultiPolygon"
+
+
+def test_create_app_can_read_profile_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": PLATFORM_UUID})
+
+    monkeypatch.setenv("GCIMPORT_PROFILE", "bygning")
+
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(
+        settings=Settings(api_url="https://bygning.example/api"),
+        client=upstream_client,
+    )
+
+    with TestClient(app) as client:
+        response = _post(
+            client,
+            {
+                "type": "FeatureCollection",
+                "coordRefSys": "EPSG:5972",
+                "features": [_building_feature()],
+            },
+        )
+
+    assert response.status_code == 200
+    assert [request.url.path for request in requests] == [
+        "/api/collections/bygning/items:upsert"
+    ]
+
+
+def test_request_profile_can_override_default_profile() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": PLATFORM_UUID})
+
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(
+        settings=Settings(api_url="https://shared.example/datasets/bane/ogc_api"),
+        client=upstream_client,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/imports?profile=bygning",
+            files={
+                "file": (
+                    "source.geojson",
+                    json.dumps(_building_geojson_document()),
+                    "application/geo+json",
+                )
+            },
+        )
+
+    assert response.status_code == 200
+    assert [request.url.path for request in requests] == [
+        "/datasets/bygning/ogc_api/collections/bygning/items:upsert"
+    ]
+
+
+def test_request_profile_prefers_explicit_profile_api_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": PLATFORM_UUID})
+
+    monkeypatch.setenv(
+        "GCIMPORT_API_URL_BYGNING",
+        "https://override.example/datasets/bygning/ogc_api",
+    )
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(
+        settings=Settings(api_url="https://shared.example/datasets/bane/ogc_api"),
+        client=upstream_client,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/imports?profile=bygning",
+            files={
+                "file": (
+                    "source.geojson",
+                    json.dumps(_building_geojson_document()),
+                    "application/geo+json",
+                )
+            },
+        )
+
+    assert response.status_code == 200
+    assert [request.url.path for request in requests] == [
+        "/datasets/bygning/ogc_api/collections/bygning/items:upsert"
+    ]
+
+
+@pytest.mark.parametrize("objtype", ("AnnenBygning", "Bygning", "Takoverbygg"))
+def test_request_profile_can_import_bygning_area_geojson_through_bygning_profile(objtype: str) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": PLATFORM_UUID})
+
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(
+        settings=Settings(api_url="https://shared.example/datasets/bane/ogc_api"),
+        client=upstream_client,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/imports?profile=bygning",
+            files={
+                "file": (
+                    "source.geojson",
+                    json.dumps(
+                        _building_area_geojson_document([
+                            _building_area_geojson_feature(objtype=objtype)
+                        ])
+                    ),
+                    "application/geo+json",
+                )
+            },
+        )
+
+    assert response.status_code == 200
+    assert [request.url.path for request in requests] == [
+        "/datasets/bygning/ogc_api/collections/bygning_omrade/items:upsert"
+    ]
+
+
+def test_request_profile_can_import_mixed_bygning_geojson() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": PLATFORM_UUID})
+
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(
+        settings=Settings(api_url="https://shared.example/datasets/bane/ogc_api"),
+        client=upstream_client,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/imports?profile=bygning",
+            files={
+                "file": (
+                    "source.geojson",
+                    json.dumps(
+                        _building_area_geojson_document(
+                            [_building_geojson_feature(), _building_area_geojson_feature()]
+                        )
+                    ),
+                    "application/geo+json",
+                )
+            },
+        )
+
+    assert response.status_code == 200
+    assert [request.url.path for request in requests] == [
+        "/datasets/bygning/ogc_api/collections/bygning/items:upsert",
+        "/datasets/bygning/ogc_api/collections/bygning_omrade/items:upsert",
+    ]
+
+
+def test_rejects_unknown_request_profile() -> None:
+    with _test_client(
+        httpx.MockTransport(lambda _request: httpx.Response(204))
+    ) as client:
+        response = client.post(
+            "/imports?profile=unknown",
+            files={"file": ("bane.json", json.dumps(_document([_feature()])), "application/json")},
+        )
+
+    assert response.status_code == 400
+    assert "profile must be one of" in response.json()["detail"]
+
+
+def test_rejects_legacy_bygning_omrade_request_profile() -> None:
+    with _test_client(
+        httpx.MockTransport(lambda _request: httpx.Response(204))
+    ) as client:
+        response = client.post(
+            "/imports?profile=bygning_omrade",
+            files={
+                "file": (
+                    "source.geojson",
+                    json.dumps(_building_area_geojson_document()),
+                    "application/geo+json",
+                )
+            },
+        )
+
+    assert response.status_code == 400
+    assert "profile must be one of" in response.json()["detail"]
+
+
+def test_imports_bygning_geojson_without_falling_back_to_bane() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": PLATFORM_UUID})
+
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(
+        settings=Settings(api_url="https://bygning.example/api"),
+        client=upstream_client,
+        profile=BYGNING_PROFILE,
+    )
+
+    with TestClient(app) as client:
+        response = _post_geojson(client, _building_geojson_document())
+
+    assert response.status_code == 200
+    assert [request.url.path for request in requests] == [
+        "/api/collections/bygning/items:upsert"
+    ]
+    payload = json.loads(requests[0].content)
+    assert payload["geometry"]["type"] == "MultiLineString"
+
+
+def test_imports_bygning_omrade_geojson_without_falling_back_to_bane() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": PLATFORM_UUID})
+
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(
+        settings=Settings(api_url="https://bygning.example/api"),
+        client=upstream_client,
+        profile=BYGNING_PROFILE,
+    )
+
+    with TestClient(app) as client:
+        response = _post_geojson(client, _building_area_geojson_document())
+
+    assert response.status_code == 200
+    assert [request.url.path for request in requests] == [
+        "/api/collections/bygning_omrade/items:upsert"
+    ]
+    payload = json.loads(requests[0].content)
+    assert payload["geometry"]["type"] == "MultiPolygon"
+
+
+def test_bygning_profile_tracks_scanned_area_geojson_objtypes() -> None:
+    assert tuple(_BUILDING_AREA_SOURCE_OBJTYPES) == (
+        "annenbygning",
+        "bygning",
+        "takoverbygg",
+    )
+
+
+def test_merges_duplicate_bygning_segments_with_same_business_key() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": PLATFORM_UUID})
+
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(
+        settings=Settings(api_url="https://bygning.example/api"),
+        client=upstream_client,
+        profile=BYGNING_PROFILE,
+    )
+
+    with TestClient(app) as client:
+        response = _post_geojson(
+            client,
+            _building_geojson_document(
+                [
+                    _building_geojson_duplicate_segment(),
+                    _building_geojson_duplicate_segment_2(),
+                ]
+            ),
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "total": 1,
+        "features": [{"collection": "bygning", "id": PLATFORM_UUID}],
+    }
+    assert len(requests) == 1
+    payload = json.loads(requests[0].content)
+    assert payload["geometry"]["type"] == "MultiLineString"
+    assert len(payload["geometry"]["coordinates"]) == 2
+
+
 @pytest.mark.parametrize(
     ("mutate", "expected_error"),
     [
@@ -192,7 +793,7 @@ def test_dataset_rules_are_supplied_by_profile() -> None:
                 type="Polygon",
                 coordinates=[],
             ),
-            "geometry must be a LineString",
+            "geometry must be a MultiLineString",
         ),
     ],
 )
@@ -385,8 +986,8 @@ def test_imports_classic_geojson_when_filename_ends_with_geojson() -> None:
         "features": [{"collection": "spormidt", "id": TRACK_UUID}],
     }
     payload = json.loads(requests[0].content)
-    assert payload["geometry"]["type"] == "LineString"
-    assert payload["geometry"]["coordinates"][0][:2] == pytest.approx(
+    assert payload["geometry"]["type"] == "MultiLineString"
+    assert payload["geometry"]["coordinates"][0][0][:2] == pytest.approx(
         [279754.0614235144, 7041951.166005967]
     )
 
