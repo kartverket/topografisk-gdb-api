@@ -347,7 +347,8 @@ export function MapView() {
           bygningSenterlinje,
           bygningPosisjon,
           currentVisibility,
-          adjustElevatedHeightsRef.current
+          adjustElevatedHeightsRef.current,
+          is3dRef.current
         );
         await upsertGeoJsonSource(map, 'building-centroids', buildingCentroidsFeatureCollection(buildings));
         updateBuildingDebugMarkers(map, buildings);
@@ -392,7 +393,8 @@ export function MapView() {
         emptyFeatureCollection,
         emptyFeatureCollection,
         useLayerVisibilityStore.getState().visibility,
-        adjustElevatedHeightsRef.current
+        adjustElevatedHeightsRef.current,
+        false
       );
       updateBuildingDebugMarkers(map, emptyFeatureCollection);
       map.on('movestart', handleMoveStart);
@@ -480,7 +482,8 @@ export function MapView() {
         latest.bygningSenterlinje,
         latest.bygningOmrade,
         layerVisibility,
-        adjustElevatedHeights && is3d
+        adjustElevatedHeights && is3d,
+        is3d
       );
     }, DEFERRED_ELEVATED_SOURCE_DELAY_MS);
   }, [adjustElevatedHeights, layerVisibility, isMapReady, is3d]);
@@ -564,7 +567,8 @@ export function MapView() {
         bygningSenterlinje,
         bygningPosisjon,
         layerVisibility,
-        adjustElevatedHeights && is3d
+        adjustElevatedHeights && is3d,
+        is3d
       );
       await upsertGeoJsonSource(map, 'building-centroids', buildingCentroidsFeatureCollection(buildings));
       updateBuildingDebugMarkers(map, buildings);
@@ -649,7 +653,8 @@ export function MapView() {
         reloadedBygningSenterlinje,
         reloadedBygningPosisjon,
         layerVisibility,
-        adjustElevatedHeights && is3d
+        adjustElevatedHeights && is3d,
+        is3d
       );
       await upsertGeoJsonSource(map, 'building-centroids', buildingCentroidsFeatureCollection(reloadedBuildings));
       updateBuildingDebugMarkers(map, reloadedBuildings);

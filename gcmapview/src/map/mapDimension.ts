@@ -3,9 +3,6 @@ import type { ExpressionSpecification } from 'maplibre-gl';
 import type { FeatureCollection } from './geojson';
 import type { LayerVisibility } from '../store/layerVisibilityStore';
 import {
-  BYGNING_LINEWORK_ELEVATED_LINE_WIDTH_M,
-  BYGNING_ELEVATED_LINE_THICKNESS_M,
-  BYGNING_ELEVATED_LINE_WIDTH_M,
   buildingExtrusionHeightExpression,
   bygningExtrusionLayerId,
   bygningExtrusionSourceId,
@@ -13,13 +10,11 @@ import {
   bygningSenterlinjeExtrusionSourceId,
   buildingsExtrusionLayerId,
   DEFAULT_3D_PITCH,
-  elevatedLineSegments,
   extrusionShaftTopExpression,
   EXTRUSION_OPACITY_MAX,
   EXTRUSION_OPACITY_MIN,
   EXTRUSION_TOP_CAP_M,
   heightColorExpression,
-  lowestPositiveLineHeight,
   platformEdgesExtrusionLayerId,
   platformEdgesExtrusionSourceId,
   trackCentresExtrusionLayerId,
@@ -30,38 +25,31 @@ import { bygningLayerId } from './bygningLayers';
 import { bygningPosisjonLayerId } from './bygningPosisjonLayers';
 import { bygningSenterlinjeColor, bygningSenterlinjeLayerId } from './bygningSenterlinjeLayers';
 import {
-  bygningOmradeExtrusionFeatureCollection,
   bygningOmradeFillColor,
   bygningOmradeExtrusionLayerId,
   bygningOmradeExtrusionSourceId,
   bygningOmradeFillLayerId,
-  bygningOmradeOutlineLayerId,
-  lowestPositiveBygningOmradeHeight
+  bygningOmradeOutlineLayerId
 } from './bygningOmradeLayers';
+import {
+  terrainSampleKey,
+  terrainSamplePointsForFeatureCollections,
+  type ElevatedSourcesWorkerRequest,
+  type ElevatedSourcesWorkerResponse,
+  type ElevatedSourceVisibility,
+  type TerrainSampleMap
+} from './elevatedSourcesShared';
 
 export const terrainSourceId = 'terrain-dem';
 const TERRAIN_EXAGGERATION = 1;
 const BANE_TERRAIN_CLEARANCE_M = 2;
 const emptyFeatureCollection: FeatureCollection = { type: 'FeatureCollection', features: [] };
+let activeElevatedSourcesWorker: Worker | undefined;
+let latestElevatedSourcesRequestId = 0;
 
 function terrainElevationAt(map: maplibregl.Map, longitude: number, latitude: number): number | undefined {
   const terrainElevation = map.queryTerrainElevation([longitude, latitude]);
   return typeof terrainElevation === 'number' && Number.isFinite(terrainElevation) ? terrainElevation : undefined;
-}
-
-function createTerrainElevationLookup(map: maplibregl.Map) {
-  const cache = new Map<string, number | undefined>();
-
-  return (longitude: number, latitude: number): number | undefined => {
-    const cacheKey = `${longitude.toFixed(5)}:${latitude.toFixed(5)}`;
-    if (cache.has(cacheKey)) {
-      return cache.get(cacheKey);
-    }
-
-    const elevation = terrainElevationAt(map, longitude, latitude);
-    cache.set(cacheKey, elevation);
-    return elevation;
-  };
 }
 
 const buildingFlatLayerIds = ['building-centroids-circle', 'buildings-fill', 'buildings-outline'] as const;
@@ -116,6 +104,72 @@ function setLayersVisibility(map: maplibregl.Map, layerIds: readonly string[], v
   for (const layerId of layerIds) {
     setLayerVisibility(map, layerId, visible);
   }
+}
+
+function upsertGeoJsonSourceData(map: maplibregl.Map, sourceId: string, data: FeatureCollection) {
+  const source = map.getSource(sourceId) as maplibregl.GeoJSONSource | undefined;
+
+  if (source) {
+    source.setData(data);
+    return;
+  }
+
+  map.addSource(sourceId, {
+    type: 'geojson',
+    data
+  });
+}
+
+function setElevatedSourceData(
+  map: maplibregl.Map,
+  elevatedSources: Pick<
+    ElevatedSourcesWorkerResponse,
+    'platformData' | 'trackData' | 'bygningData' | 'bygningSenterlinjeData' | 'bygningOmradeData'
+  >
+) {
+  upsertGeoJsonSourceData(map, platformEdgesExtrusionSourceId, elevatedSources.platformData);
+  upsertGeoJsonSourceData(map, trackCentresExtrusionSourceId, elevatedSources.trackData);
+  upsertGeoJsonSourceData(map, bygningExtrusionSourceId, elevatedSources.bygningData);
+  upsertGeoJsonSourceData(map, bygningSenterlinjeExtrusionSourceId, elevatedSources.bygningSenterlinjeData);
+  upsertGeoJsonSourceData(map, bygningOmradeExtrusionSourceId, elevatedSources.bygningOmradeData);
+}
+
+function clearElevatedSourceData(map: maplibregl.Map) {
+  setElevatedSourceData(map, {
+    platformData: emptyFeatureCollection,
+    trackData: emptyFeatureCollection,
+    bygningData: emptyFeatureCollection,
+    bygningSenterlinjeData: emptyFeatureCollection,
+    bygningOmradeData: emptyFeatureCollection
+  });
+}
+
+function collectTerrainSamples(
+  map: maplibregl.Map,
+  platformEdges: FeatureCollection,
+  trackCentres: FeatureCollection,
+  bygning: FeatureCollection,
+  bygningSenterlinje: FeatureCollection,
+  bygningOmrade: FeatureCollection,
+  visibility: ElevatedSourceVisibility
+): TerrainSampleMap {
+  const terrainSamples: TerrainSampleMap = {};
+
+  for (const [longitude, latitude] of terrainSamplePointsForFeatureCollections(
+    platformEdges,
+    trackCentres,
+    bygning,
+    bygningSenterlinje,
+    bygningOmrade,
+    visibility
+  )) {
+    const terrainElevation = terrainElevationAt(map, longitude, latitude);
+    if (typeof terrainElevation === 'number') {
+      terrainSamples[terrainSampleKey(longitude, latitude)] = terrainElevation;
+    }
+  }
+
+  return terrainSamples;
 }
 
 function addExtrusionShaft(map: maplibregl.Map, options: OpacityBandedExtrusion) {
@@ -178,6 +232,8 @@ function addExtrusionCap(map: maplibregl.Map, options: OpacityBandedExtrusion) {
 
 const elevatedLineElevationExpression: ExpressionSpecification = [
   'case',
+  ['has', 'sourceHeight'],
+  ['to-number', ['get', 'sourceHeight']],
   ['has', 'elevation'],
   ['to-number', ['get', 'elevation']],
   0
@@ -320,109 +376,69 @@ export function upsertElevatedSources(
     LayerVisibility,
     'platformEdges' | 'trackCentres' | 'bygning' | 'bygningSenterlinje' | 'bygningOmrade'
   >,
-  adjustHeights: boolean
+  adjustHeights: boolean,
+  renderElevatedSources = true
 ) {
-  const platformSource = map.getSource(platformEdgesExtrusionSourceId) as maplibregl.GeoJSONSource | undefined;
-  const trackSource = map.getSource(trackCentresExtrusionSourceId) as maplibregl.GeoJSONSource | undefined;
-  const bygningSource = map.getSource(bygningExtrusionSourceId) as maplibregl.GeoJSONSource | undefined;
-  const bygningSenterlinjeSource = map.getSource(bygningSenterlinjeExtrusionSourceId) as
-    | maplibregl.GeoJSONSource
-    | undefined;
-  const bygningOmradeSource = map.getSource(bygningOmradeExtrusionSourceId) as maplibregl.GeoJSONSource | undefined;
+  latestElevatedSourcesRequestId += 1;
+  const requestId = latestElevatedSourcesRequestId;
 
-  const heightSamples = [
-    ...(visibility.platformEdges ? [lowestPositiveLineHeight([platformEdges])] : []),
-    ...(visibility.trackCentres ? [lowestPositiveLineHeight([trackCentres])] : []),
-    ...(visibility.bygning ? [lowestPositiveLineHeight([bygning])] : []),
-    ...(visibility.bygningSenterlinje ? [lowestPositiveLineHeight([bygningSenterlinje])] : []),
-    ...(visibility.bygningOmrade ? [lowestPositiveBygningOmradeHeight(bygningOmrade)] : [])
-  ].filter(height => height > 0);
+  if (activeElevatedSourcesWorker) {
+    activeElevatedSourcesWorker.terminate();
+    activeElevatedSourcesWorker = undefined;
+  }
 
-  const heightOffset = adjustHeights && heightSamples.length > 0 ? Math.min(...heightSamples) : 0;
+  clearElevatedSourceData(map);
+
+  if (!renderElevatedSources) {
+    return;
+  }
+
   const terrainEnabled = Boolean(map.getTerrain()) && !adjustHeights;
-  const hasVisibleElevatedTerrainLayers =
-    terrainEnabled &&
-    (visibility.platformEdges || visibility.trackCentres || visibility.bygning || visibility.bygningSenterlinje || visibility.bygningOmrade);
-  const terrainLookup = hasVisibleElevatedTerrainLayers ? createTerrainElevationLookup(map) : undefined;
-  const baneTerrainLookup = terrainLookup
-    ? (longitude: number, latitude: number) => {
-        const terrainElevation = terrainLookup(longitude, latitude);
-        return typeof terrainElevation === 'number' ? terrainElevation - BANE_TERRAIN_CLEARANCE_M : undefined;
+  const workerRequest: ElevatedSourcesWorkerRequest = {
+    requestId,
+    platformEdges,
+    trackCentres,
+    bygning,
+    bygningSenterlinje,
+    bygningOmrade,
+    visibility,
+    adjustHeights,
+    terrainEnabled,
+    baneTerrainClearanceMeters: BANE_TERRAIN_CLEARANCE_M,
+    terrainSamples: terrainEnabled
+      ? collectTerrainSamples(map, platformEdges, trackCentres, bygning, bygningSenterlinje, bygningOmrade, visibility)
+      : {}
+  };
+
+  const worker = new Worker(new URL('../workers/elevatedSourcesWorker.ts', import.meta.url), { type: 'module' });
+  activeElevatedSourcesWorker = worker;
+
+  worker.onmessage = event => {
+    const response = event.data as ElevatedSourcesWorkerResponse;
+    if (response.requestId !== latestElevatedSourcesRequestId) {
+      worker.terminate();
+      if (activeElevatedSourcesWorker === worker) {
+        activeElevatedSourcesWorker = undefined;
       }
-    : undefined;
+      return;
+    }
 
-  const platformData = visibility.platformEdges
-    ? elevatedLineSegments(platformEdges, undefined, undefined, heightOffset, baneTerrainLookup, terrainEnabled)
-    : emptyFeatureCollection;
-  const trackData = visibility.trackCentres
-    ? elevatedLineSegments(trackCentres, undefined, undefined, heightOffset, baneTerrainLookup, terrainEnabled)
-    : emptyFeatureCollection;
-  const bygningData = visibility.bygning
-    ? elevatedLineSegments(
-        bygning,
-        BYGNING_LINEWORK_ELEVATED_LINE_WIDTH_M,
-        BYGNING_ELEVATED_LINE_THICKNESS_M,
-        heightOffset,
-        terrainLookup
-      )
-    : emptyFeatureCollection;
-  const bygningSenterlinjeData = visibility.bygningSenterlinje
-    ? elevatedLineSegments(
-        bygningSenterlinje,
-        BYGNING_ELEVATED_LINE_WIDTH_M,
-        BYGNING_ELEVATED_LINE_THICKNESS_M,
-        heightOffset,
-        terrainLookup
-      )
-    : emptyFeatureCollection;
-  const bygningOmradeData = visibility.bygningOmrade
-    ? bygningOmradeExtrusionFeatureCollection(bygningOmrade, heightOffset, terrainLookup)
-    : emptyFeatureCollection;
+    setElevatedSourceData(map, response);
+    worker.terminate();
+    if (activeElevatedSourcesWorker === worker) {
+      activeElevatedSourcesWorker = undefined;
+    }
+  };
 
-  if (platformSource) {
-    platformSource.setData(platformData);
-  } else {
-    map.addSource(platformEdgesExtrusionSourceId, {
-      type: 'geojson',
-      data: platformData
-    });
-  }
+  worker.onerror = error => {
+    console.error('[gcmapview] elevated sources worker failed', error);
+    worker.terminate();
+    if (activeElevatedSourcesWorker === worker) {
+      activeElevatedSourcesWorker = undefined;
+    }
+  };
 
-  if (trackSource) {
-    trackSource.setData(trackData);
-  } else {
-    map.addSource(trackCentresExtrusionSourceId, {
-      type: 'geojson',
-      data: trackData
-    });
-  }
-
-  if (bygningSource) {
-    bygningSource.setData(bygningData);
-  } else {
-    map.addSource(bygningExtrusionSourceId, {
-      type: 'geojson',
-      data: bygningData
-    });
-  }
-
-  if (bygningSenterlinjeSource) {
-    bygningSenterlinjeSource.setData(bygningSenterlinjeData);
-  } else {
-    map.addSource(bygningSenterlinjeExtrusionSourceId, {
-      type: 'geojson',
-      data: bygningSenterlinjeData
-    });
-  }
-
-  if (bygningOmradeSource) {
-    bygningOmradeSource.setData(bygningOmradeData);
-  } else {
-    map.addSource(bygningOmradeExtrusionSourceId, {
-      type: 'geojson',
-      data: bygningOmradeData
-    });
-  }
+  worker.postMessage(workerRequest);
 }
 
 /** Apply 2D/3D layer set, gated by user layer toggles. */

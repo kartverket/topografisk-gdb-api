@@ -194,7 +194,8 @@ export function addNativeFeatureSourcesAndLayers(
   bygningSenterlinje: FeatureCollection,
   bygningPosisjon: FeatureCollection,
   visibility: LayerVisibility,
-  adjustElevatedHeights: boolean
+  adjustElevatedHeights: boolean,
+  renderElevatedSources: boolean
 ) {
   const {
     normalizedParcels,
@@ -303,7 +304,8 @@ export function addNativeFeatureSourcesAndLayers(
     normalizedBygningSenterlinje,
     normalizedBygningOmrade,
     visibility,
-    adjustElevatedHeights
+    adjustElevatedHeights,
+    renderElevatedSources
   );
 }
 
@@ -430,7 +432,8 @@ export async function setNativeFeatureSources(
   bygningSenterlinje: FeatureCollection,
   bygningPosisjon: FeatureCollection,
   visibility: LayerVisibility,
-  adjustElevatedHeights: boolean
+  adjustElevatedHeights: boolean,
+  renderElevatedSources: boolean
 ) {
   const {
     normalizedParcels,
@@ -471,7 +474,8 @@ export async function setNativeFeatureSources(
     bygningSenterlinje,
     bygningOmrade,
     visibility,
-    adjustElevatedHeights
+    adjustElevatedHeights,
+    renderElevatedSources
   );
 }
 
@@ -483,7 +487,8 @@ export function updateElevatedFeatureSources(
   bygningSenterlinje: FeatureCollection,
   bygningOmrade: FeatureCollection,
   visibility: LayerVisibility,
-  adjustElevatedHeights: boolean
+  adjustElevatedHeights: boolean,
+  renderElevatedSources: boolean
 ) {
   const inspectablePlatformEdges = registerInspectableSourceData(platformEdgesSourceId, platformEdges);
   const inspectableTrackCentres = registerInspectableSourceData(trackCentresSourceId, trackCentres);
@@ -499,7 +504,8 @@ export function updateElevatedFeatureSources(
     normalizeBygningSenterlinjeFeatureCollection(inspectableBygningSenterlinje),
     normalizePolygonFeatureCollection(inspectableBygningOmrade),
     visibility,
-    adjustElevatedHeights
+    adjustElevatedHeights,
+    renderElevatedSources
   );
 }
 
@@ -515,6 +521,7 @@ export async function clearVectorSources(map: maplibregl.Map) {
     emptyFeatureCollection,
     emptyFeatureCollection,
     useLayerVisibilityStore.getState().visibility,
+    false,
     false
   );
   await upsertGeoJsonSource(map, 'building-centroids', emptyFeatureCollection);

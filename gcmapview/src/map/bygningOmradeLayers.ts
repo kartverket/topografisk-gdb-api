@@ -1,4 +1,4 @@
-import * as maplibregl from 'maplibre-gl';
+import type * as maplibregl from 'maplibre-gl';
 import type { Feature, FeatureCollection, Position } from './geojson';
 
 export const bygningOmradeSourceId = 'bygning-omrade';

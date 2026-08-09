@@ -27,6 +27,11 @@ type HeightRange = {
   maximum: number;
 };
 
+function numericProperty(properties: Feature['properties'], propertyName: string): number | undefined {
+  const value = properties?.[propertyName];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
 function lineCoordinateSets(feature: Feature): Position[][] {
   if (!feature.geometry?.coordinates || !Array.isArray(feature.geometry.coordinates)) {
     return [];
@@ -162,6 +167,7 @@ export function elevatedLineSegments(
         const rawMidZ = (rawZ1 + rawZ2) / 2;
         const clampedMidZ = Math.max(0, rawMidZ);
         const isGroundLevel = rawMidZ <= 0;
+        const sourceHeight = numericProperty(feature.properties, 'height');
         const base = clampToGround ? clampedMidZ : isGroundLevel ? 0 : Math.max(0, rawMidZ - halfThickness);
         const height = clampToGround
           ? Math.max(base + MIN_EXTRUSION_HEIGHT_M, clampedMidZ + extrusionThickness)
@@ -174,6 +180,7 @@ export function elevatedLineSegments(
           id: feature.id,
           properties: {
             ...(feature.properties ?? {}),
+            ...(sourceHeight !== undefined ? { sourceHeight } : {}),
             elevation: rawMidZ,
             base,
             height,
