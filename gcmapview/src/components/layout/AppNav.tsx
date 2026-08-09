@@ -15,6 +15,7 @@ export function AppNav() {
         <Button
           variant={location.pathname === '/' ? 'default' : 'outline'}
           size="sm"
+          nativeButton={false}
           render={
             <NavLink
               to="/"
@@ -27,6 +28,7 @@ export function AppNav() {
         <Button
           variant={location.pathname === '/import' ? 'default' : 'outline'}
           size="sm"
+          nativeButton={false}
           render={<NavLink to="/import" />}>
           <Upload data-icon="inline-start" />
           Import

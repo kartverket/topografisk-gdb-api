@@ -4,6 +4,7 @@ import type { FeatureCollection } from './geojson';
 import type { LayerVisibility } from '../store/layerVisibilityStore';
 import {
   BYGNING_LINEWORK_ELEVATED_LINE_WIDTH_M,
+  BYGNING_ELEVATED_LINE_THICKNESS_M,
   BYGNING_ELEVATED_LINE_WIDTH_M,
   buildingExtrusionHeightExpression,
   bygningExtrusionLayerId,
@@ -248,7 +249,7 @@ export function addExtrusionLayers(map: maplibregl.Map) {
     baseLayerId: buildingsExtrusionLayerId,
     source: 'buildings',
     heightExpression: buildingHeight,
-    filter: ['==', '$type', 'Polygon'],
+    filter: ['==', ['geometry-type'], 'Polygon'],
     color: '#000000'
   };
 
@@ -268,7 +269,7 @@ export function addExtrusionLayers(map: maplibregl.Map) {
       bygningOmradeRawHeightExpression,
       bygningOmradeZOffsetExpression
     ),
-    filter: ['==', '$type', 'Polygon'],
+    filter: ['==', ['geometry-type'], 'Polygon'],
     color: bygningOmradeFillColor
   };
 
@@ -332,13 +333,13 @@ export function upsertElevatedSources(
   const bygningData = elevatedLineSegments(
     bygning,
     BYGNING_LINEWORK_ELEVATED_LINE_WIDTH_M,
-    undefined,
+    BYGNING_ELEVATED_LINE_THICKNESS_M,
     heightOffset
   );
   const bygningSenterlinjeData = elevatedLineSegments(
     bygningSenterlinje,
     BYGNING_ELEVATED_LINE_WIDTH_M,
-    undefined,
+    BYGNING_ELEVATED_LINE_THICKNESS_M,
     heightOffset
   );
   const bygningOmradeData = bygningOmradeExtrusionFeatureCollection(bygningOmrade, heightOffset);

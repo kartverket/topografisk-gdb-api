@@ -14,10 +14,11 @@ export const buildingsExtrusionLayerId = 'buildings-extrusion';
 export const DEFAULT_3D_PITCH = 60;
 export const FLOOR_HEIGHT_M = 3;
 export const ELEVATED_LINE_WIDTH_M = 3;
-export const BYGNING_LINEWORK_ELEVATED_LINE_WIDTH_M = 1;
-export const BYGNING_ELEVATED_LINE_WIDTH_M = 1.5;
+export const BYGNING_LINEWORK_ELEVATED_LINE_WIDTH_M = 0.25;
+export const BYGNING_ELEVATED_LINE_WIDTH_M = 0.25;
 /** Vertical thickness of elevated line beams (meters). */
 export const ELEVATED_LINE_THICKNESS_M = 2;
+export const BYGNING_ELEVATED_LINE_THICKNESS_M = 1;
 const MIN_EXTRUSION_HEIGHT_M = 0.5;
 const MAX_LINE_HEIGHT_RANGE_M = 50;
 

@@ -110,6 +110,7 @@ export type InspectedFeature = {
   featureId?: string | number;
   properties: Record<string, unknown>;
   positions: Position[];
+  mapPositions: Position[];
   positionsCoordinateSystem?: string;
   positionsLoading?: boolean;
 };
@@ -215,6 +216,7 @@ export function inspectFeaturesAtPoint(map: maplibregl.Map, point: maplibregl.Po
     feature.id ??
     (typeof properties.id === 'string' || typeof properties.id === 'number' ? properties.id : undefined);
   const collectionId = LAYER_COLLECTION_IDS[feature.layer.id];
+  const mapPositions = originalFeature ? featurePositions(originalFeature) : featurePositions(feature);
 
   return {
     layerId: feature.layer.id,
@@ -222,7 +224,8 @@ export function inspectFeaturesAtPoint(map: maplibregl.Map, point: maplibregl.Po
     collectionId,
     featureId,
     properties,
-    positions: originalFeature ? featurePositions(originalFeature) : featurePositions(feature),
+    positions: mapPositions,
+    mapPositions,
     positionsLoading: Boolean(collectionId && featureId !== undefined)
   };
 }

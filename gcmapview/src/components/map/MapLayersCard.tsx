@@ -100,7 +100,6 @@ type MapLayersCardProps = {
   favoriteViews: FavoriteMapView[];
   activeFavoriteName?: string;
   onSaveFavoriteView: () => void;
-  onGoToFavoriteView: () => void;
   onClearFavoriteView: () => void;
   onSelectFavoriteView: (name: string) => void;
 };
@@ -111,7 +110,6 @@ export function MapLayersCard({
   favoriteViews,
   activeFavoriteName,
   onSaveFavoriteView,
-  onGoToFavoriteView,
   onClearFavoriteView,
   onSelectFavoriteView
 }: MapLayersCardProps) {
@@ -206,14 +204,6 @@ export function MapLayersCard({
               size="xs"
               onClick={onSaveFavoriteView}>
               Save current
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              disabled={!activeFavoriteView}
-              onClick={onGoToFavoriteView}>
-              Go to selected
             </Button>
             <Button
               type="button"

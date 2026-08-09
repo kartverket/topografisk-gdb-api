@@ -7,134 +7,48 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   buildingItemUrl,
-  bygningItemsInBboxUrl,
-  collectionItemUrl,
-  collectionMetadataUrl,
-  type CollectionId,
-  type CollectionMetadata,
-  bygningOmradeItemsInBboxUrl,
-  bygningPosisjonItemsInBboxUrl,
-  bygningSenterlinjeItemsInBboxUrl,
   buildingsCreateUrl,
-  buildingsItemsInBboxUrl,
   buildingsItemsUrl,
-  type OgcBbox,
   parcelItemUrl,
-  parcelsCreateUrl,
   parcelsItemsInBboxUrl,
-  parcelsItemsUrl,
-  platformEdgesItemsInBboxUrl,
-  trackCentresItemsInBboxUrl
+  parcelsCreateUrl,
+  parcelsItemsUrl
 } from '../../api/geocomponentsApi';
-import { addBaneSourcesAndLayers, normalizeBaneFeatureCollection } from '../../map/baneLayers';
-import { platformEdgesSourceId, trackCentresSourceId } from '../../map/baneLayers';
-import {
-  addBygningSourcesAndLayers,
-  bygningSourceId,
-  normalizeBygningFeatureCollection
-} from '../../map/bygningLayers';
-import {
-  addBygningPosisjonSourceAndLayer,
-  bygningPosisjonSourceId,
-  normalizeBygningPosisjonFeatureCollection
-} from '../../map/bygningPosisjonLayers';
-import {
-  addBygningSenterlinjeSourceAndLayer,
-  bygningSenterlinjeSourceId,
-  normalizeBygningSenterlinjeFeatureCollection
-} from '../../map/bygningSenterlinjeLayers';
-import { addBygningOmradeSourceAndLayers, bygningOmradeSourceId } from '../../map/bygningOmradeLayers';
-import {
-  addExtrusionLayers,
-  applyMapDimensionMode,
-  applyMapLayerVisibility,
-  configureInitialMapInteraction,
-  upsertElevatedSources
-} from '../../map/mapDimension';
+import { applyMapDimensionMode, applyMapLayerVisibility, configureInitialMapInteraction } from '../../map/mapDimension';
 import { useMapDimension } from './MapDimensionContext';
 import { FeaturePropertiesCard } from './FeaturePropertiesCard';
 import { MapLayersCard } from './MapLayersCard';
-import { type LayerVisibility, useLayerVisibilityStore } from '../../store/layerVisibilityStore';
+import { useLayerVisibilityStore } from '../../store/layerVisibilityStore';
 import { useMapViewStore } from '../../store/mapViewStore';
+import { hasInspectableFeatureAtPoint, inspectFeaturesAtPoint } from '../../map/featureInspect';
+import type { FeatureCollection } from '../../map/geojson';
+import { buildingCentroidsFeatureCollection, featureCentroid, logLoadedCoordinates } from './mapViewGeometry';
+import { randomNonOverlappingBuildingAndParcel } from './mapViewRandomFeatures';
 import {
-  hasInspectableFeatureAtPoint,
-  inspectFeaturesAtPoint,
-  registerInspectableSourceData,
-  type InspectedFeature
-} from '../../map/featureInspect';
-import type { Coordinates, Feature, FeatureCollection, Position } from '../../map/geojson';
-
-const emptyFeatureCollection: FeatureCollection = {
-  type: 'FeatureCollection',
-  features: []
-};
-
-type VisibleFeatureCollections = {
-  parcels: FeatureCollection;
-  buildings: FeatureCollection;
-  platformEdges: FeatureCollection;
-  trackCentres: FeatureCollection;
-  bygning: FeatureCollection;
-  bygningOmrade: FeatureCollection;
-  bygningSenterlinje: FeatureCollection;
-  bygningPosisjon: FeatureCollection;
-};
-
-const emptyVisibleFeatureCollections: VisibleFeatureCollections = {
-  parcels: emptyFeatureCollection,
-  buildings: emptyFeatureCollection,
-  platformEdges: emptyFeatureCollection,
-  trackCentres: emptyFeatureCollection,
-  bygning: emptyFeatureCollection,
-  bygningOmrade: emptyFeatureCollection,
-  bygningSenterlinje: emptyFeatureCollection,
-  bygningPosisjon: emptyFeatureCollection
-};
-
-/** Vector features are fetched only when the map zoom is strictly above this. */
-const MIN_VECTOR_ZOOM = 10;
-const MIN_BUILDING_ZOOM = 15;
+  addNativeFeatureSourcesAndLayers,
+  clearVectorSources,
+  createFeature,
+  deleteFeature,
+  emptyFeatureCollection,
+  emptyVisibleFeatureCollections,
+  getFeatureCollection,
+  getVisibleFeatureCollections,
+  isBuildingZoom,
+  isVectorZoom,
+  layerVisibilityChanged,
+  logNativeRenderingState,
+  MIN_BUILDING_ZOOM,
+  MIN_VECTOR_ZOOM,
+  setNativeFeatureSources,
+  type VisibleFeatureCollections,
+  upsertGeoJsonSource,
+  visibleOgcBbox
+} from './mapViewData';
+import { useSelectedFeature } from './useSelectedFeature';
 
 /** Default initial view when no local favorite view has been saved. */
 const OTTA_CENTER: [number, number] = [9.54, 61.77];
 const OTTA_ZOOM = 15;
-const BUILDING_COLOR = '#000000';
-const BUILDING_FILL_COLOR = '#a541c3';
-const MISSING_HEIGHT_Z = -99_999;
-
-function isVectorZoom(map: maplibregl.Map) {
-  return map.getZoom() > MIN_VECTOR_ZOOM;
-}
-
-function isBuildingZoom(map: maplibregl.Map) {
-  return map.getZoom() >= MIN_BUILDING_ZOOM;
-}
-
-type BuildingFeature = {
-  type: 'Feature';
-  geometry: {
-    type: 'MultiPolygon';
-    coordinates: number[][][][];
-  };
-  properties: {
-    use: string;
-    floors: number;
-    parcel_id?: string;
-  };
-};
-
-type ParcelFeature = {
-  type: 'Feature';
-  geometry: {
-    type: 'MultiPolygon';
-    coordinates: number[][][][];
-  };
-  properties: {
-    label: string;
-    source: string;
-    area_m2: number;
-  };
-};
 
 const mapStyle: maplibregl.StyleSpecification = {
   version: 8,
@@ -156,801 +70,13 @@ const mapStyle: maplibregl.StyleSpecification = {
   ]
 };
 
-function collectPositions(coordinates: Coordinates, positions: Position[]) {
-  if (typeof coordinates[0] === 'number') {
-    positions.push(coordinates as Position);
-    return;
-  }
-
-  for (const child of coordinates as Coordinates[]) {
-    collectPositions(child, positions);
-  }
-}
-
-function featureCentroid(feature: Feature): Position | undefined {
-  const positions: Position[] = [];
-  const coordinates = feature.geometry?.coordinates;
-  if (!coordinates) {
-    return undefined;
-  }
-
-  collectPositions(coordinates, positions);
-  if (positions.length === 0) {
-    return undefined;
-  }
-
-  const [lngSum, latSum] = positions.reduce(
-    ([lng, lat], [positionLng, positionLat]) => [lng + positionLng, lat + positionLat],
-    [0, 0]
-  );
-
-  return [lngSum / positions.length, latSum / positions.length];
-}
-
-function buildingCentroidsFeatureCollection(buildings: FeatureCollection): FeatureCollection {
-  return {
-    type: 'FeatureCollection',
-    features: buildings.features.flatMap(building => {
-      const centroid = featureCentroid(building);
-      if (!centroid) {
-        return [];
-      }
-
-      return [
-        {
-          type: 'Feature',
-          geometry: {
-            type: 'Point',
-            coordinates: centroid
-          },
-          properties: building.properties
-        }
-      ];
-    })
-  };
-}
-
-function coordinateDebugSummary(featureCollection: FeatureCollection) {
-  const positions: Position[] = [];
-  const geometryTypes: Record<string, number> = {};
-
-  for (const feature of featureCollection.features) {
-    const geometry = feature.geometry;
-    if (!geometry) {
-      geometryTypes.null = (geometryTypes.null ?? 0) + 1;
-      continue;
-    }
-
-    geometryTypes[geometry.type] = (geometryTypes[geometry.type] ?? 0) + 1;
-    if (geometry.coordinates) {
-      collectPositions(geometry.coordinates, positions);
-    }
-  }
-
-  const lngs = positions.map(([lng]) => lng);
-  const lats = positions.map(([, lat]) => lat);
-
-  return {
-    featureCount: featureCollection.features.length,
-    geometryTypes,
-    coordinateCount: positions.length,
-    lngRange: lngs.length > 0 ? [Math.min(...lngs), Math.max(...lngs)] : undefined,
-    latRange: lats.length > 0 ? [Math.min(...lats), Math.max(...lats)] : undefined,
-    firstFeatureCoordinates: featureCollection.features[0]?.geometry?.coordinates ?? undefined
-  };
-}
-
-function logLoadedCoordinates(label: string, featureCollection: FeatureCollection) {
-  console.info(`[gcmapview] loaded ${label} coordinates`, coordinateDebugSummary(featureCollection));
-}
-
-function signedRingArea(ring: Position[]) {
-  return ring.reduce((sum, [x1, y1], index) => {
-    const [x2, y2] = ring[(index + 1) % ring.length];
-    return sum + x1 * y2 - x2 * y1;
-  }, 0);
-}
-
-function normalizeRings(rings: Position[][]) {
-  return rings.map((ring, index) => {
-    const shouldBeCounterClockwise = index === 0;
-    const isCounterClockwise = signedRingArea(ring) > 0;
-    return shouldBeCounterClockwise === isCounterClockwise ? ring : [...ring].reverse();
-  });
-}
-
-function normalizePolygonFeatureCollection(featureCollection: FeatureCollection): FeatureCollection {
-  return {
-    type: 'FeatureCollection',
-    features: featureCollection.features.map(feature => {
-      const geometry = feature.geometry;
-      if (!geometry?.coordinates) {
-        return feature;
-      }
-
-      if (geometry.type === 'Polygon') {
-        return {
-          ...feature,
-          geometry: {
-            type: 'Polygon',
-            coordinates: normalizeRings(geometry.coordinates as Position[][])
-          }
-        };
-      }
-
-      if (geometry.type === 'MultiPolygon') {
-        const polygons = geometry.coordinates as Position[][][];
-        if (polygons.length === 1) {
-          return {
-            ...feature,
-            geometry: {
-              type: 'Polygon',
-              coordinates: normalizeRings(polygons[0])
-            }
-          };
-        }
-
-        return {
-          ...feature,
-          geometry: {
-            type: 'MultiPolygon',
-            coordinates: polygons.map(normalizeRings)
-          }
-        };
-      }
-
-      return feature;
-    })
-  };
-}
-
-function addNativeFeatureSourcesAndLayers(
-  map: maplibregl.Map,
-  parcels: FeatureCollection,
-  buildings: FeatureCollection,
-  platformEdges: FeatureCollection,
-  trackCentres: FeatureCollection,
-  bygning: FeatureCollection,
-  bygningOmrade: FeatureCollection,
-  bygningSenterlinje: FeatureCollection,
-  bygningPosisjon: FeatureCollection,
-  visibility: LayerVisibility,
-  adjustElevatedHeights: boolean
-) {
-  const inspectableParcels = registerInspectableSourceData('parcels', parcels);
-  const inspectableBuildings = registerInspectableSourceData('buildings', buildings);
-  const inspectablePlatformEdges = registerInspectableSourceData(platformEdgesSourceId, platformEdges);
-  const inspectableTrackCentres = registerInspectableSourceData(trackCentresSourceId, trackCentres);
-  const inspectableBygning = registerInspectableSourceData(bygningSourceId, bygning);
-  const inspectableBygningOmrade = registerInspectableSourceData(bygningOmradeSourceId, bygningOmrade);
-  const inspectableBygningSenterlinje = registerInspectableSourceData(bygningSenterlinjeSourceId, bygningSenterlinje);
-  const inspectableBygningPosisjon = registerInspectableSourceData(bygningPosisjonSourceId, bygningPosisjon);
-  const normalizedParcels = normalizePolygonFeatureCollection(inspectableParcels);
-  const normalizedBuildings = normalizePolygonFeatureCollection(inspectableBuildings);
-  const normalizedPlatformEdges = normalizeBaneFeatureCollection(inspectablePlatformEdges);
-  const normalizedTrackCentres = normalizeBaneFeatureCollection(inspectableTrackCentres);
-  const normalizedBygning = normalizeBygningFeatureCollection(inspectableBygning);
-  const normalizedBygningOmrade = normalizePolygonFeatureCollection(inspectableBygningOmrade);
-  const normalizedBygningSenterlinje = normalizeBygningSenterlinjeFeatureCollection(inspectableBygningSenterlinje);
-  const normalizedBygningPosisjon = normalizeBygningPosisjonFeatureCollection(inspectableBygningPosisjon);
-
-  map.addSource('parcels', {
-    type: 'geojson',
-    data: normalizedParcels
-  });
-  map.addSource('buildings', {
-    type: 'geojson',
-    data: normalizedBuildings
-  });
-  map.addSource('building-centroids', {
-    type: 'geojson',
-    data: buildingCentroidsFeatureCollection(normalizedBuildings)
-  });
-
-  map.addLayer({
-    id: 'building-centroids-circle',
-    type: 'circle',
-    source: 'building-centroids',
-    paint: {
-      'circle-color': BUILDING_COLOR,
-      'circle-opacity': 0.8,
-      'circle-radius': 3,
-      'circle-stroke-color': '#ffffff',
-      'circle-stroke-width': 1
-    }
-  });
-  map.addLayer({
-    id: 'parcels-fill',
-    type: 'fill',
-    source: 'parcels',
-    filter: ['==', '$type', 'Polygon'],
-    paint: {
-      'fill-color': '#ffc040',
-      'fill-opacity': 0.32,
-      'fill-outline-color': '#005cff'
-    }
-  });
-  map.addLayer({
-    id: 'parcels-outline',
-    type: 'line',
-    source: 'parcels',
-    filter: ['==', '$type', 'Polygon'],
-    paint: {
-      'line-color': '#ffc040',
-      'line-opacity': 1,
-      'line-width': ['interpolate', ['linear'], ['zoom'], 5, 2, 14, 4]
-    }
-  });
-  map.addLayer({
-    id: 'buildings-fill',
-    type: 'fill',
-    source: 'buildings',
-    filter: ['==', '$type', 'Polygon'],
-    paint: {
-      'fill-color': BUILDING_FILL_COLOR,
-      'fill-opacity': 0.55,
-      'fill-outline-color': BUILDING_COLOR
-    }
-  });
-  map.addLayer({
-    id: 'buildings-outline',
-    type: 'line',
-    source: 'buildings',
-    filter: ['==', '$type', 'Polygon'],
-    paint: {
-      'line-color': BUILDING_COLOR,
-      'line-opacity': 1,
-      'line-width': ['interpolate', ['linear'], ['zoom'], 5, 2, 14, 4]
-    }
-  });
-  // Bane lines are read-only and drawn above cadastre fills.
-  addBaneSourcesAndLayers(map, inspectablePlatformEdges, inspectableTrackCentres);
-  addBygningSourcesAndLayers(map, inspectableBygning);
-  addBygningOmradeSourceAndLayers(map, normalizedBygningOmrade);
-  addBygningSenterlinjeSourceAndLayer(map, normalizedBygningSenterlinje);
-  addBygningPosisjonSourceAndLayer(map, normalizedBygningPosisjon);
-  addExtrusionLayers(map);
-  upsertElevatedSources(
-    map,
-    normalizedPlatformEdges,
-    normalizedTrackCentres,
-    normalizedBygning,
-    normalizedBygningSenterlinje,
-    normalizedBygningOmrade,
-    visibility,
-    adjustElevatedHeights
-  );
-}
-
-function sanitizeMissingHeightPosition(position: Position): Position {
-  return position[2] === MISSING_HEIGHT_Z ? ([position[0], position[1]] as Position) : position;
-}
-
-function sanitizeMissingHeightCoordinates(coordinates: Coordinates): Coordinates {
-  if (typeof coordinates[0] === 'number') {
-    return sanitizeMissingHeightPosition(coordinates as Position);
-  }
-
-  return (coordinates as Coordinates[]).map(child => sanitizeMissingHeightCoordinates(child));
-}
-
-function sanitizeMissingHeightFeature(feature: Feature): Feature {
-  const geometry = feature.geometry;
-  if (!geometry?.coordinates) {
-    return feature;
-  }
-
-  return {
-    ...feature,
-    geometry: {
-      ...geometry,
-      coordinates: sanitizeMissingHeightCoordinates(geometry.coordinates)
-    }
-  };
-}
-
-function sanitizeMissingHeights(featureCollection: FeatureCollection): FeatureCollection {
-  return {
-    ...featureCollection,
-    features: featureCollection.features.map(sanitizeMissingHeightFeature)
-  };
-}
-
-function sourcePositions(feature: Feature): Position[] {
-  const coordinates = feature.geometry?.coordinates;
-  if (!coordinates) {
-    return [];
-  }
-
-  const positions: Position[] = [];
-  collectPositions(coordinates, positions);
-  return positions;
-}
-
-function featureSelectionKey(feature: Pick<InspectedFeature, 'collectionId' | 'featureId' | 'layerId'>) {
-  return `${feature.collectionId ?? 'unknown'}:${String(feature.featureId ?? 'missing')}:${feature.layerId}`;
-}
-
-function displayCoordinateSystemName(crs: string) {
-  const epsgMatch = crs.match(/\/EPSG\/0\/(\d+)$/i);
-  if (epsgMatch) {
-    return `EPSG:${epsgMatch[1]}`;
-  }
-
-  const crs84Match = crs.match(/\/OGC\/1\.3\/(CRS84)$/i);
-  if (crs84Match) {
-    return crs84Match[1];
-  }
-
-  return crs;
-}
-
-async function getFeatureCollection(url: string) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Request failed with ${response.status}`);
-  }
-
-  return sanitizeMissingHeights((await response.json()) as FeatureCollection);
-}
-
-async function getFeature(url: string) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Request failed with ${response.status}`);
-  }
-
-  return sanitizeMissingHeightFeature((await response.json()) as Feature);
-}
-
-function visibleCollectionPromise(visible: boolean, url: string) {
-  return visible ? getFeatureCollection(url) : Promise.resolve(emptyFeatureCollection);
-}
-
-function visibleOgcBbox(map: maplibregl.Map): OgcBbox {
-  const container = map.getContainer();
-  const width = container.clientWidth;
-  const height = container.clientHeight;
-  const screenPoints: Array<[number, number]> = [
-    [0, 0],
-    [width / 2, 0],
-    [width, 0],
-    [width, height / 2],
-    [width, height],
-    [width / 2, height],
-    [0, height],
-    [0, height / 2]
-  ];
-  const coordinates = screenPoints.map(([x, y]) => map.unproject([x, y]));
-  const longitudes = coordinates.map(({ lng }) => lng);
-  const latitudes = coordinates.map(({ lat }) => lat);
-
-  return [
-    Math.min(...longitudes),
-    Math.max(-90, Math.min(...latitudes)),
-    Math.max(...longitudes),
-    Math.min(90, Math.max(...latitudes))
-  ];
-}
-
-async function getVisibleFeatureCollections(map: maplibregl.Map, visibility: LayerVisibility) {
-  const bbox = visibleOgcBbox(map);
-  const buildingZoomActive = isBuildingZoom(map);
-  const [parcels, buildings, platformEdges, trackCentres, bygning, bygningOmrade, bygningSenterlinje, bygningPosisjon] = await Promise.all([
-    visibleCollectionPromise(visibility.parcels, parcelsItemsInBboxUrl(bbox)),
-    visibleCollectionPromise(visibility.buildings && buildingZoomActive, buildingsItemsInBboxUrl(bbox)),
-    visibleCollectionPromise(visibility.platformEdges, platformEdgesItemsInBboxUrl(bbox)),
-    visibleCollectionPromise(visibility.trackCentres, trackCentresItemsInBboxUrl(bbox)),
-    visibleCollectionPromise(visibility.bygning && buildingZoomActive, bygningItemsInBboxUrl(bbox)),
-    visibleCollectionPromise(visibility.bygningOmrade && buildingZoomActive, bygningOmradeItemsInBboxUrl(bbox)),
-    visibleCollectionPromise(visibility.bygningSenterlinje && buildingZoomActive, bygningSenterlinjeItemsInBboxUrl(bbox)),
-    visibleCollectionPromise(visibility.bygningPosisjon && buildingZoomActive, bygningPosisjonItemsInBboxUrl(bbox))
-  ]);
-  return { bbox, parcels, buildings, platformEdges, trackCentres, bygning, bygningOmrade, bygningSenterlinje, bygningPosisjon };
-}
-
-function layerVisibilityChanged(previous: LayerVisibility, current: LayerVisibility) {
-  return (
-    previous.parcels !== current.parcels ||
-    previous.buildings !== current.buildings ||
-    previous.platformEdges !== current.platformEdges ||
-    previous.trackCentres !== current.trackCentres ||
-    previous.bygning !== current.bygning ||
-    previous.bygningOmrade !== current.bygningOmrade ||
-    previous.bygningSenterlinje !== current.bygningSenterlinje ||
-    previous.bygningPosisjon !== current.bygningPosisjon
-  );
-}
-
-function idFromLocation(location: string | null) {
-  if (!location) {
-    return undefined;
-  }
-
-  return decodeURIComponent(location.split('/').filter(Boolean).at(-1) ?? '');
-}
-
-async function createFeature(url: string, feature: BuildingFeature | ParcelFeature) {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/geo+json'
-    },
-    body: JSON.stringify(feature)
-  });
-
-  if (!response.ok) {
-    throw new Error(`Create failed with ${response.status}`);
-  }
-
-  const locationId = idFromLocation(response.headers.get('location'));
-  if (locationId) {
-    return locationId;
-  }
-
-  const body = (await response.text()).trim();
-  if (!body) {
-    return undefined;
-  }
-
-  try {
-    const parsed = JSON.parse(body) as unknown;
-    if (typeof parsed === 'string') {
-      return parsed;
-    }
-    if (parsed && typeof parsed === 'object' && 'id' in parsed) {
-      return String((parsed as { id: unknown }).id);
-    }
-  } catch {
-    return body.replace(/^"|"$/g, '');
-  }
-
-  return undefined;
-}
-
-async function deleteFeature(url: string) {
-  const response = await fetch(url, { method: 'DELETE' });
-  if (!response.ok && response.status !== 404) {
-    throw new Error(`Delete failed with ${response.status}`);
-  }
-}
-
-function randomBetween(min: number, max: number) {
-  return min + Math.random() * (max - min);
-}
-
-function randomInt(min: number, max: number) {
-  return Math.floor(randomBetween(min, max + 1));
-}
-
-type Offset = [number, number];
-
-function offsetPolygonArea(offsets: Offset[]) {
-  const doubledArea = offsets.reduce((sum, [x1, y1], index) => {
-    const [x2, y2] = offsets[(index + 1) % offsets.length];
-    return sum + x1 * y2 - x2 * y1;
-  }, 0);
-
-  return Math.abs(doubledArea) / 2;
-}
-
-function scaleOffsetsToArea(offsets: Offset[], targetAreaM2: number) {
-  const currentArea = offsetPolygonArea(offsets);
-  const scale = currentArea > 0 ? Math.sqrt(targetAreaM2 / currentArea) : 1;
-  return offsets.map(([x, y]): Offset => [x * scale, y * scale]);
-}
-
-function rotateOffsets(offsets: Offset[], angle: number) {
-  const cosine = Math.cos(angle);
-  const sine = Math.sin(angle);
-  return offsets.map(([x, y]): Offset => [x * cosine - y * sine, x * sine + y * cosine]);
-}
-
-function parcelOffsets(targetAreaM2: number) {
-  const minPoints = 7;
-  const maxPoints = 16;
-  const pointCount = randomInt(minPoints, maxPoints);
-  const baseRadius = Math.sqrt(targetAreaM2 / Math.PI);
-  const aspectRatio = randomBetween(0.7, 1.5);
-  const offsets = Array.from({ length: pointCount }, (_, index): Offset => {
-    const angle =
-      (index / pointCount) * Math.PI * 2 + randomBetween(-Math.PI / pointCount / 3, Math.PI / pointCount / 3);
-    const radius = baseRadius * randomBetween(0.82, 1.18);
-    return [Math.cos(angle) * radius * aspectRatio, Math.sin(angle) * radius];
-  }).sort(([xA, yA], [xB, yB]) => Math.atan2(yA, xA) - Math.atan2(yB, xB));
-
-  return rotateOffsets(scaleOffsetsToArea(offsets, targetAreaM2), randomBetween(0, Math.PI));
-}
-
-function buildingOffsets(targetAreaM2: number) {
-  const aspectRatio = randomBetween(1.2, 2.4);
-  const width = Math.sqrt(targetAreaM2 * aspectRatio);
-  const height = targetAreaM2 / width;
-  let offsets: Offset[];
-
-  if (Math.random() < 0.45) {
-    offsets = [
-      [-width / 2, -height / 2],
-      [width / 2, -height / 2],
-      [width / 2, -height * 0.05],
-      [width * 0.15, -height * 0.05],
-      [width * 0.15, height / 2],
-      [-width / 2, height / 2]
-    ];
-  } else {
-    const chamfer = Math.min(width, height) * randomBetween(0.12, 0.24);
-    offsets = [
-      [-width / 2 + chamfer, -height / 2],
-      [width / 2 - chamfer, -height / 2],
-      [width / 2, -height / 2 + chamfer],
-      [width / 2, height / 2 - chamfer],
-      [width / 2 - chamfer, height / 2],
-      [-width / 2 + chamfer, height / 2],
-      [-width / 2, height / 2 - chamfer],
-      [-width / 2, -height / 2 + chamfer]
-    ];
-  }
-
-  return rotateOffsets(scaleOffsetsToArea(offsets, targetAreaM2), randomBetween(0, Math.PI));
-}
-
-function offsetsToRing(
-  offsets: Offset[],
-  lng: number,
-  lat: number,
-  metersPerDegreeLng: number,
-  metersPerDegreeLat: number
-) {
-  const ring = offsets.map(([x, y]) => [lng + x / metersPerDegreeLng, lat + y / metersPerDegreeLat]);
-
-  return [...ring, ring[0]];
-}
-
-function randomBuildingAndParcelInView(map: maplibregl.Map): {
-  area: number;
-  building: BuildingFeature;
-  secondaryBuilding?: {
-    area: number;
-    feature: BuildingFeature;
-  };
-  parcel: ParcelFeature;
-} {
-  const bounds = map.getBounds();
-  const west = bounds.getWest();
-  const east = bounds.getEast();
-  const south = bounds.getSouth();
-  const north = bounds.getNorth();
-  const lng = randomBetween(west, east);
-  const lat = randomBetween(south, north);
-  const area = Math.round(randomBetween(20, 200));
-  const parcelArea = area * 15;
-  const metersPerDegreeLat = 111_320;
-  const metersPerDegreeLng = Math.max(metersPerDegreeLat * Math.cos((lat * Math.PI) / 180), 1);
-  const buildingRing = offsetsToRing(buildingOffsets(area), lng, lat, metersPerDegreeLng, metersPerDegreeLat);
-  const parcelRing = offsetsToRing(parcelOffsets(parcelArea), lng, lat, metersPerDegreeLng, metersPerDegreeLat);
-  const shouldAddSecondaryBuilding = Math.random() < 0.55;
-  const secondaryArea = Math.max(10, Math.round(area * randomBetween(0.2, 0.5)));
-  const parcelRadius = Math.sqrt(parcelArea / Math.PI);
-  const secondaryAngle = randomBetween(0, Math.PI * 2);
-  const secondaryDistance = parcelRadius * randomBetween(0.3, 0.48);
-  const secondaryLng = lng + (Math.cos(secondaryAngle) * secondaryDistance) / metersPerDegreeLng;
-  const secondaryLat = lat + (Math.sin(secondaryAngle) * secondaryDistance) / metersPerDegreeLat;
-  const secondaryRing = offsetsToRing(
-    buildingOffsets(secondaryArea),
-    secondaryLng,
-    secondaryLat,
-    metersPerDegreeLng,
-    metersPerDegreeLat
-  );
-
-  return {
-    area,
-    building: {
-      type: 'Feature',
-      geometry: {
-        type: 'MultiPolygon',
-        coordinates: [[buildingRing]]
-      },
-      properties: {
-        use: 'random',
-        floors: Math.floor(randomBetween(1, 5))
-      }
-    },
-    secondaryBuilding: shouldAddSecondaryBuilding
-      ? {
-          area: secondaryArea,
-          feature: {
-            type: 'Feature',
-            geometry: {
-              type: 'MultiPolygon',
-              coordinates: [[secondaryRing]]
-            },
-            properties: {
-              use: 'outbuilding',
-              floors: 1
-            }
-          }
-        }
-      : undefined,
-    parcel: {
-      type: 'Feature',
-      geometry: {
-        type: 'MultiPolygon',
-        coordinates: [[parcelRing]]
-      },
-      properties: {
-        label: `Parcel ${Date.now()}`,
-        source: 'gcmapview',
-        area_m2: parcelArea
-      }
-    }
-  };
-}
-
-type FeatureRectangle = {
-  west: number;
-  south: number;
-  east: number;
-  north: number;
-};
-
-function featureRectangle(feature: Feature | ParcelFeature): FeatureRectangle | undefined {
-  const coordinates = feature.geometry?.coordinates;
-  if (!coordinates) {
-    return undefined;
-  }
-
-  const positions: Position[] = [];
-  collectPositions(coordinates as Coordinates, positions);
-  if (positions.length === 0) {
-    return undefined;
-  }
-
-  const longitudes = positions.map(([longitude]) => longitude);
-  const latitudes = positions.map(([, latitude]) => latitude);
-  return {
-    west: Math.min(...longitudes),
-    south: Math.min(...latitudes),
-    east: Math.max(...longitudes),
-    north: Math.max(...latitudes)
-  };
-}
-
-function rectanglesOverlap(first: FeatureRectangle, second: FeatureRectangle) {
-  return !(
-    first.east <= second.west ||
-    first.west >= second.east ||
-    first.north <= second.south ||
-    first.south >= second.north
-  );
-}
-
-function randomNonOverlappingBuildingAndParcel(map: maplibregl.Map, existingParcels: FeatureCollection) {
-  const existingRectangles = existingParcels.features
-    .map(featureRectangle)
-    .filter((rectangle): rectangle is FeatureRectangle => Boolean(rectangle));
-
-  for (let attempt = 1; attempt <= 80; attempt += 1) {
-    const candidate = randomBuildingAndParcelInView(map);
-    const candidateRectangle = featureRectangle(candidate.parcel);
-    if (
-      candidateRectangle &&
-      existingRectangles.every(existingRectangle => !rectanglesOverlap(candidateRectangle, existingRectangle))
-    ) {
-      return { ...candidate, placementAttempts: attempt };
-    }
-  }
-
-  throw new Error('No non-overlapping parcel placement found in the current map view');
-}
-
-async function upsertGeoJsonSource(map: maplibregl.Map, sourceId: string, data: FeatureCollection) {
-  const source = map.getSource(sourceId) as maplibregl.GeoJSONSource | undefined;
-
-  if (source) {
-    source.setData(data);
-    return;
-  }
-
-  map.addSource(sourceId, {
-    type: 'geojson',
-    data
-  });
-}
-
-async function setNativeFeatureSources(
-  map: maplibregl.Map,
-  parcels: FeatureCollection,
-  buildings: FeatureCollection,
-  platformEdges: FeatureCollection,
-  trackCentres: FeatureCollection,
-  bygning: FeatureCollection,
-  bygningOmrade: FeatureCollection,
-  bygningSenterlinje: FeatureCollection,
-  bygningPosisjon: FeatureCollection,
-  visibility: LayerVisibility,
-  adjustElevatedHeights: boolean
-) {
-  const inspectableParcels = registerInspectableSourceData('parcels', parcels);
-  const inspectableBuildings = registerInspectableSourceData('buildings', buildings);
-  const inspectablePlatformEdges = registerInspectableSourceData(platformEdgesSourceId, platformEdges);
-  const inspectableTrackCentres = registerInspectableSourceData(trackCentresSourceId, trackCentres);
-  const inspectableBygning = registerInspectableSourceData(bygningSourceId, bygning);
-  const inspectableBygningOmrade = registerInspectableSourceData(bygningOmradeSourceId, bygningOmrade);
-  const inspectableBygningSenterlinje = registerInspectableSourceData(bygningSenterlinjeSourceId, bygningSenterlinje);
-  const inspectableBygningPosisjon = registerInspectableSourceData(bygningPosisjonSourceId, bygningPosisjon);
-  const normalizedParcels = normalizePolygonFeatureCollection(inspectableParcels);
-  const normalizedBuildings = normalizePolygonFeatureCollection(inspectableBuildings);
-  const normalizedPlatformEdges = normalizeBaneFeatureCollection(inspectablePlatformEdges);
-  const normalizedTrackCentres = normalizeBaneFeatureCollection(inspectableTrackCentres);
-  const normalizedBygning = normalizeBygningFeatureCollection(inspectableBygning);
-  const normalizedBygningOmrade = normalizePolygonFeatureCollection(inspectableBygningOmrade);
-  const normalizedBygningSenterlinje = normalizeBygningSenterlinjeFeatureCollection(inspectableBygningSenterlinje);
-  const normalizedBygningPosisjon = normalizeBygningPosisjonFeatureCollection(inspectableBygningPosisjon);
-  await Promise.all([
-    upsertGeoJsonSource(map, 'parcels', normalizedParcels),
-    upsertGeoJsonSource(map, 'buildings', normalizedBuildings),
-    upsertGeoJsonSource(map, 'bane-platform-edges', normalizedPlatformEdges),
-    upsertGeoJsonSource(map, 'bane-track-centres', normalizedTrackCentres),
-    upsertGeoJsonSource(map, 'bygning-linework', normalizedBygning),
-    upsertGeoJsonSource(map, bygningOmradeSourceId, normalizedBygningOmrade),
-    upsertGeoJsonSource(map, bygningSenterlinjeSourceId, normalizedBygningSenterlinje),
-    upsertGeoJsonSource(map, bygningPosisjonSourceId, normalizedBygningPosisjon)
-  ]);
-  upsertElevatedSources(
-    map,
-    normalizedPlatformEdges,
-    normalizedTrackCentres,
-    normalizedBygning,
-    normalizedBygningSenterlinje,
-    normalizedBygningOmrade,
-    visibility,
-    adjustElevatedHeights
-  );
-}
-
-async function clearVectorSources(map: maplibregl.Map) {
-  await setNativeFeatureSources(
-    map,
-    emptyFeatureCollection,
-    emptyFeatureCollection,
-    emptyFeatureCollection,
-    emptyFeatureCollection,
-    emptyFeatureCollection,
-    emptyFeatureCollection,
-    emptyFeatureCollection,
-    emptyFeatureCollection,
-    useLayerVisibilityStore.getState().visibility,
-    false
-  );
-  await upsertGeoJsonSource(map, 'building-centroids', emptyFeatureCollection);
-}
-
-function logNativeRenderingState(map: maplibregl.Map) {
-  const state = {
-    parcelsSourceLoaded: map.isSourceLoaded('parcels'),
-    buildingsSourceLoaded: map.isSourceLoaded('buildings'),
-    parcelSourceFeatures: map.querySourceFeatures('parcels').length,
-    buildingSourceFeatures: map.querySourceFeatures('buildings').length,
-    parcelRenderedFeatures: map.queryRenderedFeatures({
-      layers: ['parcels-fill', 'parcels-outline']
-    }).length,
-    buildingRenderedFeatures: map.queryRenderedFeatures({
-      layers: ['buildings-fill', 'buildings-outline']
-    }).length
-  };
-
-  console.info('[gcmapview] native MapLibre rendering state', JSON.stringify(state));
-  return state;
-}
-
 export function MapView() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map>(null);
   const buildingMarkerRefs = useRef<maplibregl.Marker[]>([]);
   const pendingReloadTimeoutRef = useRef<number | undefined>(undefined);
   const reloadVisibleDataRef = useRef<(() => Promise<void>) | undefined>(undefined);
-  const { is3d, adjustElevatedHeights } = useMapDimension();
+  const { is3d, adjustElevatedHeights, setIs3d, setAdjustElevatedHeights } = useMapDimension();
   const is3dRef = useRef(is3d);
   is3dRef.current = is3d;
   const adjustElevatedHeightsRef = useRef(adjustElevatedHeights);
@@ -971,88 +97,44 @@ export function MapView() {
   const [isVectorZoomActive, setIsVectorZoomActive] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
-  const [selectedFeature, setSelectedFeature] = useState<InspectedFeature>();
-  const setSelectedFeatureRef = useRef(setSelectedFeature);
-  setSelectedFeatureRef.current = setSelectedFeature;
-  const collectionStorageCrsRef = useRef(new Map<CollectionId, string>());
+  const { selectedFeature, setHoveredPositionIndex, setSelectedFeature } = useSelectedFeature({ mapRef, is3d });
 
   useEffect(() => {
-    if (!activeFavoriteView?.visibility) {
+    if (!activeFavoriteView) {
       return;
     }
 
-    setLayerVisibility(activeFavoriteView.visibility);
-  }, [activeFavoriteView, setLayerVisibility]);
+    if (activeFavoriteView.visibility) {
+      setLayerVisibility(activeFavoriteView.visibility);
+    }
 
-  useEffect(() => {
-    if (!selectedFeature?.positionsLoading || !selectedFeature.collectionId || selectedFeature.featureId === undefined) {
+    if (activeFavoriteView.is3d !== undefined) {
+      setIs3d(activeFavoriteView.is3d);
+    }
+
+    if (activeFavoriteView.adjustElevatedHeights !== undefined) {
+      setAdjustElevatedHeights(activeFavoriteView.adjustElevatedHeights);
+    }
+
+  }, [activeFavoriteView, setAdjustElevatedHeights, setIs3d, setLayerVisibility]);
+
+  function applyFavoriteViewSettings(favoriteView: typeof activeFavoriteView) {
+    if (!favoriteView) {
       return;
     }
 
-    let cancelled = false;
-    const selectionKey = featureSelectionKey(selectedFeature);
-    const { collectionId, featureId } = selectedFeature;
-
-    async function loadStoredPositions() {
-      try {
-        let storageCrs = collectionStorageCrsRef.current.get(collectionId);
-        if (!storageCrs) {
-          const response = await fetch(collectionMetadataUrl(collectionId));
-          if (!response.ok) {
-            throw new Error(`Request failed with ${response.status}`);
-          }
-
-          const metadata = (await response.json()) as CollectionMetadata;
-          storageCrs = metadata.storageCrs;
-          if (storageCrs) {
-            collectionStorageCrsRef.current.set(collectionId, storageCrs);
-          }
-        }
-
-        if (!storageCrs) {
-          if (!cancelled) {
-            setSelectedFeature(current =>
-              current && featureSelectionKey(current) === selectionKey
-                ? { ...current, positionsLoading: false }
-                : current
-            );
-          }
-          return;
-        }
-
-        const storedFeature = await getFeature(collectionItemUrl(collectionId, featureId, storageCrs));
-        if (cancelled) {
-          return;
-        }
-
-        setSelectedFeature(current =>
-          current && featureSelectionKey(current) === selectionKey
-            ? {
-                ...current,
-                positions: sourcePositions(storedFeature),
-                positionsCoordinateSystem: displayCoordinateSystemName(storageCrs),
-                positionsLoading: false
-              }
-            : current
-        );
-      } catch (cause) {
-        console.error('[gcmapview] failed to load stored coordinate positions', cause);
-        if (!cancelled) {
-          setSelectedFeature(current =>
-            current && featureSelectionKey(current) === selectionKey
-              ? { ...current, positionsLoading: false }
-              : current
-          );
-        }
-      }
+    if (favoriteView.visibility) {
+      setLayerVisibility(favoriteView.visibility);
     }
 
-    void loadStoredPositions();
+    if (favoriteView.is3d !== undefined) {
+      setIs3d(favoriteView.is3d);
+    }
 
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedFeature]);
+    if (favoriteView.adjustElevatedHeights !== undefined) {
+      setAdjustElevatedHeights(favoriteView.adjustElevatedHeights);
+    }
+  }
 
   function applyBuildingMarkerVisibility(visible: boolean) {
     for (const marker of buildingMarkerRefs.current) {
@@ -1112,23 +194,17 @@ export function MapView() {
     const savedCenter: [number, number] = [Number(center.lng.toFixed(6)), Number(center.lat.toFixed(6))];
     const savedZoom = Number(map.getZoom().toFixed(2));
     const existed = favoriteViews.some(favoriteView => favoriteView.name === favoriteName);
-    saveFavoriteView({ name: favoriteName, center: savedCenter, zoom: savedZoom, visibility: layerVisibility });
+    saveFavoriteView({
+      name: favoriteName,
+      center: savedCenter,
+      zoom: savedZoom,
+      visibility: layerVisibility,
+      is3d,
+      adjustElevatedHeights
+    });
     setStatus(
       `${existed ? 'Updated' : 'Saved'} favorite "${favoriteName}" at ${savedCenter[0].toFixed(5)}, ${savedCenter[1].toFixed(5)} (z=${savedZoom.toFixed(2)}) with current layers.`
     );
-  }
-
-  function goToFavoriteView() {
-    const map = mapRef.current;
-    if (!map || !activeFavoriteView) {
-      return;
-    }
-
-    setError(undefined);
-    if (activeFavoriteView.visibility) {
-      setLayerVisibility(activeFavoriteView.visibility);
-    }
-    map.easeTo({ center: activeFavoriteView.center, zoom: activeFavoriteView.zoom, duration: 700 });
   }
 
   function clearStoredFavoriteView() {
@@ -1148,9 +224,7 @@ export function MapView() {
 
     if (map && selectedFavoriteView) {
       setError(undefined);
-      if (selectedFavoriteView.visibility) {
-        setLayerVisibility(selectedFavoriteView.visibility);
-      }
+      applyFavoriteViewSettings(selectedFavoriteView);
       map.easeTo({ center: selectedFavoriteView.center, zoom: selectedFavoriteView.zoom, duration: 700 });
       setStatus(`Selected favorite "${name}", restored its layers, and moved to it.`);
       return;
@@ -1198,7 +272,7 @@ export function MapView() {
         updateBuildingDebugMarkers(map, emptyFeatureCollection);
         if (!cancelled && requestId === visibleRequestId) {
           setError(undefined);
-          setSelectedFeatureRef.current(undefined);
+          setSelectedFeature(undefined);
           setStatus(
             `Zoom in above level ${MIN_VECTOR_ZOOM} to load vector data (current z=${map.getZoom().toFixed(1)}).`
           );
@@ -1284,7 +358,7 @@ export function MapView() {
       map.on('moveend', scheduleVisibleDataReload);
 
       map.on('click', event => {
-        setSelectedFeatureRef.current(inspectFeaturesAtPoint(map, event.point));
+        setSelectedFeature(inspectFeaturesAtPoint(map, event.point));
       });
       map.on('mousemove', event => {
         map.getCanvas().style.cursor = hasInspectableFeatureAtPoint(map, event.point) ? 'pointer' : '';
@@ -1575,13 +649,13 @@ export function MapView() {
         favoriteViews={favoriteViews}
         activeFavoriteName={activeFavoriteView?.name}
         onSaveFavoriteView={saveCurrentFavoriteView}
-        onGoToFavoriteView={goToFavoriteView}
         onClearFavoriteView={clearStoredFavoriteView}
         onSelectFavoriteView={selectStoredFavoriteView}
       />
       {selectedFeature ? (
         <FeaturePropertiesCard
           feature={selectedFeature}
+          onHoverPositionIndex={setHoveredPositionIndex}
           onClose={() => setSelectedFeature(undefined)}
         />
       ) : null}

@@ -8,15 +8,16 @@ import { formatPropertyValue, type InspectedFeature } from '../../map/featureIns
 type FeaturePropertiesCardProps = {
   feature: InspectedFeature;
   onClose: () => void;
+  onHoverPositionIndex?: (index: number | undefined) => void;
 };
 
-export function FeaturePropertiesCard({ feature, onClose }: FeaturePropertiesCardProps) {
+export function FeaturePropertiesCard({ feature, onClose, onHoverPositionIndex }: FeaturePropertiesCardProps) {
   const entries = Object.entries(feature.properties).sort(([a], [b]) => a.localeCompare(b));
 
   return (
     <Card
       size="sm"
-      className="absolute top-4 right-4 z-[3] max-h-[min(70vh,28rem)] w-[min(350px,calc(100%-2rem))] overflow-hidden bg-card/95 shadow-md max-sm:top-auto max-sm:right-4 max-sm:bottom-[88px] max-sm:left-4 max-sm:w-auto"
+      className="absolute top-4 right-4 z-[3] max-h-[min(70vh,28rem)] w-[min(400px,calc(100%-2rem))] overflow-hidden bg-card/95 shadow-md max-sm:top-auto max-sm:right-4 max-sm:bottom-[88px] max-sm:left-4 max-sm:w-auto"
       aria-label="Selected feature properties">
       <CardHeader className="pb-0">
         <CardTitle className="truncate pr-8 text-base">{feature.layerLabel}</CardTitle>
@@ -86,7 +87,11 @@ export function FeaturePropertiesCard({ feature, onClose }: FeaturePropertiesCar
                   </thead>
                   <tbody>
                     {feature.positions.map(([x, y, z], index) => (
-                      <tr key={`${x}-${y}-${z ?? 'na'}-${index}`}>
+                      <tr
+                        key={`${x}-${y}-${z ?? 'na'}-${index}`}
+                        className="transition-colors hover:bg-accent/40"
+                        onMouseEnter={() => onHoverPositionIndex?.(index)}
+                        onMouseLeave={() => onHoverPositionIndex?.(undefined)}>
                         <td className="pr-3 text-foreground">{formatPropertyValue(x)}</td>
                         <td className="pr-3 text-foreground">{formatPropertyValue(y)}</td>
                         <td className="text-foreground">{z === undefined ? '—' : formatPropertyValue(z)}</td>

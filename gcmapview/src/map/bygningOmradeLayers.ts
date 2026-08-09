@@ -234,7 +234,7 @@ export function addBygningOmradeSourceAndLayers(map: maplibregl.Map, bygningOmra
     id: bygningOmradeFillLayerId,
     type: 'fill',
     source: bygningOmradeSourceId,
-    filter: ['==', '$type', 'Polygon'],
+    filter: ['==', ['geometry-type'], 'Polygon'],
     paint: {
       'fill-color': bygningOmradeFillColor,
       'fill-opacity': 0.18,
@@ -246,7 +246,7 @@ export function addBygningOmradeSourceAndLayers(map: maplibregl.Map, bygningOmra
     id: bygningOmradeOutlineLayerId,
     type: 'line',
     source: bygningOmradeSourceId,
-    filter: ['==', '$type', 'Polygon'],
+    filter: ['==', ['geometry-type'], 'Polygon'],
     paint: {
       'line-color': bygningOmradeOutlineColor,
       'line-opacity': 1,

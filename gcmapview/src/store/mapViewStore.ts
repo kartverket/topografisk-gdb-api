@@ -7,6 +7,8 @@ export type FavoriteMapView = {
   center: [number, number];
   zoom: number;
   visibility?: LayerVisibility;
+  is3d?: boolean;
+  adjustElevatedHeights?: boolean;
 };
 
 type LegacyFavoriteMapView = {
@@ -70,7 +72,7 @@ export const useMapViewStore = create<MapViewState>()(
     }),
     {
       name: 'gcmapview-favorite-view',
-      version: 3,
+      version: 4,
       migrate: persistedState => {
         const state = (persistedState ?? {}) as PersistedMapViewState;
 
