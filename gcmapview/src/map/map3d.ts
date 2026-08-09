@@ -111,6 +111,23 @@ function segmentFootprint(lon1: number, lat1: number, lon2: number, lat2: number
   ];
 }
 
+function terrainAdjustedElevation(
+  terrainElevationMeters: number | undefined,
+  z: number | undefined,
+  heightOffset: number
+): number {
+  const absoluteElevation = adjustedHeight(z, heightOffset);
+  if (absoluteElevation <= 0) {
+    return 0;
+  }
+
+  if (typeof terrainElevationMeters !== 'number' || !Number.isFinite(terrainElevationMeters)) {
+    return absoluteElevation;
+  }
+
+  return Math.max(0, absoluteElevation - terrainElevationMeters);
+}
+
 /**
  * Approximate elevated LineStrings and MultiLineStrings as thin fill-extrusion beams.
  *
@@ -123,10 +140,13 @@ export function elevatedLineSegments(
   featureCollection: FeatureCollection,
   widthMeters = ELEVATED_LINE_WIDTH_M,
   thicknessMeters = ELEVATED_LINE_THICKNESS_M,
-  heightOffset = 0
+  heightOffset = 0,
+  terrainElevationAt?: (longitude: number, latitude: number) => number | undefined,
+  clampToGround = false
 ): FeatureCollection {
   const features: Feature[] = [];
-  const halfThickness = Math.max(thicknessMeters, MIN_EXTRUSION_HEIGHT_M) / 2;
+  const extrusionThickness = Math.max(thicknessMeters, MIN_EXTRUSION_HEIGHT_M);
+  const halfThickness = extrusionThickness / 2;
 
   for (const feature of featureCollection.features) {
     for (const coordinates of lineCoordinateSets(feature)) {
@@ -135,21 +155,29 @@ export function elevatedLineSegments(
         const end = coordinates[index + 1];
         if (!start || !end) continue;
 
-        const rawZ1 = adjustedHeight(start[2], 0);
-        const rawZ2 = adjustedHeight(end[2], 0);
+        const startTerrainElevation = terrainElevationAt?.(start[0], start[1]);
+        const endTerrainElevation = terrainElevationAt?.(end[0], end[1]);
+        const rawZ1 = terrainAdjustedElevation(startTerrainElevation, start[2], heightOffset);
+        const rawZ2 = terrainAdjustedElevation(endTerrainElevation, end[2], heightOffset);
         const rawMidZ = (rawZ1 + rawZ2) / 2;
+        const clampedMidZ = Math.max(0, rawMidZ);
         const isGroundLevel = rawMidZ <= 0;
-        const base = isGroundLevel ? 0 : Math.max(0, rawMidZ - halfThickness);
-        const height = isGroundLevel ? 0 : Math.max(base + MIN_EXTRUSION_HEIGHT_M, rawMidZ + halfThickness);
+        const base = clampToGround ? clampedMidZ : isGroundLevel ? 0 : Math.max(0, rawMidZ - halfThickness);
+        const height = clampToGround
+          ? Math.max(base + MIN_EXTRUSION_HEIGHT_M, clampedMidZ + extrusionThickness)
+          : isGroundLevel
+            ? 0
+            : Math.max(base + MIN_EXTRUSION_HEIGHT_M, rawMidZ + halfThickness);
 
         features.push({
           type: 'Feature',
+          id: feature.id,
           properties: {
             ...(feature.properties ?? {}),
             elevation: rawMidZ,
             base,
             height,
-            zOffset: heightOffset
+            zOffset: 0
           },
           geometry: {
             type: 'Polygon',

@@ -63,6 +63,12 @@ function numericFeatureProperty(properties: Record<string, unknown>, propertyNam
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function publicFeatureProperties(feature: Feature): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(feature.properties ?? {}).filter(([key]) => !key.startsWith('__gcmapview'))
+  );
+}
+
 function adjustedHoverAltitude(height: number | undefined, zOffset = 0): number {
   if (typeof height !== 'number' || !Number.isFinite(height) || height <= 0) {
     return 0;
@@ -176,6 +182,7 @@ export function useSelectedFeature({ mapRef, is3d }: UseSelectedFeatureOptions) 
           current && featureSelectionKey(current) === selectionKey
             ? {
                 ...current,
+                properties: publicFeatureProperties(storedFeature),
                 positions: sourcePositions(storedFeature),
                 positionsCoordinateSystem: displayCoordinateSystemName(storageCrs),
                 positionsLoading: false

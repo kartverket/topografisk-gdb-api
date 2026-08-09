@@ -13,6 +13,7 @@ type FeaturePropertiesCardProps = {
 
 export function FeaturePropertiesCard({ feature, onClose, onHoverPositionIndex }: FeaturePropertiesCardProps) {
   const entries = Object.entries(feature.properties).sort(([a], [b]) => a.localeCompare(b));
+  const isSourceLoading = Boolean(feature.positionsLoading);
 
   return (
     <Card
@@ -46,12 +47,12 @@ export function FeaturePropertiesCard({ feature, onClose, onHoverPositionIndex }
       </CardHeader>
       <CardContent className="space-y-2 overflow-y-auto pt-2">
         <Separator />
-        {feature.positions.length > 0 || feature.positionsLoading ? (
+        {feature.positions.length > 0 || isSourceLoading ? (
           <details className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
             <summary className="cursor-pointer text-sm font-medium text-foreground">
               <span className="inline-flex items-center gap-2">
                 Positions
-                {feature.positionsLoading ? (
+                {isSourceLoading ? (
                   <Badge
                     variant="outline"
                     className="font-mono text-[11px]">
@@ -73,8 +74,8 @@ export function FeaturePropertiesCard({ feature, onClose, onHoverPositionIndex }
                 ) : null}
               </span>
             </summary>
-            {feature.positionsLoading ? (
-              <p className="mt-2 text-xs text-muted-foreground">Loading stored coordinates…</p>
+            {isSourceLoading ? (
+              <p className="mt-2 text-xs text-muted-foreground">Loading source coordinates…</p>
             ) : (
               <div className="mt-2 overflow-x-auto">
                 <table className="min-w-full border-separate border-spacing-y-1 text-left text-[12px] font-mono">
@@ -103,7 +104,9 @@ export function FeaturePropertiesCard({ feature, onClose, onHoverPositionIndex }
             )}
           </details>
         ) : null}
-        {entries.length === 0 ? (
+        {isSourceLoading ? (
+          <p className="text-sm text-muted-foreground">Loading source properties…</p>
+        ) : entries.length === 0 ? (
           <p className="text-sm text-muted-foreground">No properties</p>
         ) : (
           <dl className="m-0 grid gap-2 text-sm">

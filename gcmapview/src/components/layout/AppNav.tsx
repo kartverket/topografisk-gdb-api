@@ -48,10 +48,10 @@ export function AppNav() {
           <input
             type="checkbox"
             className="size-4 accent-foreground"
-            checked={adjustElevatedHeights}
-            onChange={event => setAdjustElevatedHeights(event.target.checked)}
+            checked={!adjustElevatedHeights}
+            onChange={event => setAdjustElevatedHeights(!event.target.checked)}
           />
-          <span>Z-Zero</span>
+          <span>Terrain</span>
         </label>
       ) : null}
     </div>

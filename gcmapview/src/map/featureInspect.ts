@@ -207,15 +207,20 @@ export function inspectFeaturesAtPoint(map: maplibregl.Map, point: maplibregl.Po
     return undefined;
   }
 
-  const properties = stripInternalProperties({ ...(feature.properties ?? {}) } as Record<string, unknown>);
   const originalFeature = renderedFeatureSourceId(feature)
     ? matchingSourceFeature(renderedFeatureSourceId(feature) as string, feature)
     : undefined;
+  const fallbackProperties = stripInternalProperties(
+    { ...((originalFeature?.properties ?? feature.properties ?? {}) as Record<string, unknown>) }
+  );
   const featureId =
     originalFeature?.id ??
     feature.id ??
-    (typeof properties.id === 'string' || typeof properties.id === 'number' ? properties.id : undefined);
+    (typeof fallbackProperties.id === 'string' || typeof fallbackProperties.id === 'number'
+      ? fallbackProperties.id
+      : undefined);
   const collectionId = LAYER_COLLECTION_IDS[feature.layer.id];
+  const shouldLoadSourceData = Boolean(collectionId && featureId !== undefined);
   const mapPositions = originalFeature ? featurePositions(originalFeature) : featurePositions(feature);
 
   return {
@@ -223,10 +228,10 @@ export function inspectFeaturesAtPoint(map: maplibregl.Map, point: maplibregl.Po
     layerLabel: LAYER_LABELS[feature.layer.id] ?? feature.layer.id,
     collectionId,
     featureId,
-    properties,
-    positions: mapPositions,
+    properties: shouldLoadSourceData ? {} : fallbackProperties,
+    positions: shouldLoadSourceData ? [] : mapPositions,
     mapPositions,
-    positionsLoading: Boolean(collectionId && featureId !== undefined)
+    positionsLoading: shouldLoadSourceData
   };
 }
 

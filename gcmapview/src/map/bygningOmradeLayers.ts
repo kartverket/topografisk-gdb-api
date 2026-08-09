@@ -164,20 +164,33 @@ function nearestFeatureHeightRange(contexts: FeatureHeightContext[], targetIndex
   return nearestRange ?? contexts.find(context => context.range)?.range;
 }
 
-function baseHeight(height: number | undefined): number {
-  if (typeof height !== 'number' || !Number.isFinite(height) || height <= 0) {
-    return 0;
-  }
-
-  return height;
-}
-
 function topHeight(height: number | undefined, currentBaseHeight: number): number {
   if (typeof height !== 'number' || !Number.isFinite(height) || height <= 0) {
     return 0;
   }
 
   return Math.max(currentBaseHeight + MIN_BYGNING_OMRADE_EXTRUSION_HEIGHT_M, height);
+}
+
+function terrainAdjustedHeight(
+  absoluteHeight: number | undefined,
+  terrainElevationMeters: number | undefined,
+  heightOffset: number
+): number {
+  if (typeof absoluteHeight !== 'number' || !Number.isFinite(absoluteHeight) || absoluteHeight <= 0) {
+    return 0;
+  }
+
+  const adjustedHeight = Math.max(0, absoluteHeight - heightOffset);
+  if (adjustedHeight <= 0) {
+    return 0;
+  }
+
+  if (typeof terrainElevationMeters !== 'number' || !Number.isFinite(terrainElevationMeters)) {
+    return adjustedHeight;
+  }
+
+  return Math.max(0, adjustedHeight - terrainElevationMeters);
 }
 
 export function lowestPositiveBygningOmradeHeight(featureCollection: FeatureCollection): number {
@@ -195,7 +208,8 @@ export function lowestPositiveBygningOmradeHeight(featureCollection: FeatureColl
 
 export function bygningOmradeExtrusionFeatureCollection(
   featureCollection: FeatureCollection,
-  heightOffset = 0
+  heightOffset = 0,
+  terrainElevationAt?: (longitude: number, latitude: number) => number | undefined
 ): FeatureCollection {
   const contexts: FeatureHeightContext[] = featureCollection.features.map(feature => ({
     center: featureCenter(feature),
@@ -206,9 +220,11 @@ export function bygningOmradeExtrusionFeatureCollection(
     type: 'FeatureCollection',
     features: featureCollection.features.map((feature, index) => {
       const range = contexts[index]?.range ?? nearestFeatureHeightRange(contexts, index);
-      const elevation = range?.maximum ?? 0;
-      const base = baseHeight(range?.minimum);
-      const height = topHeight(range?.maximum, base);
+      const center = contexts[index]?.center;
+      const terrainElevation = center ? terrainElevationAt?.(center[0], center[1]) : undefined;
+      const base = terrainAdjustedHeight(range?.minimum, terrainElevation, heightOffset);
+      const height = topHeight(terrainAdjustedHeight(range?.maximum, terrainElevation, heightOffset), base);
+      const elevation = height;
 
       return {
         ...feature,
@@ -217,7 +233,7 @@ export function bygningOmradeExtrusionFeatureCollection(
           elevation,
           base,
           height,
-          zOffset: heightOffset
+          zOffset: 0
         }
       };
     })

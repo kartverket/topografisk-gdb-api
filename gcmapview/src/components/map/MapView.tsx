@@ -14,7 +14,12 @@ import {
   parcelsCreateUrl,
   parcelsItemsUrl
 } from '../../api/geocomponentsApi';
-import { applyMapDimensionMode, applyMapLayerVisibility, configureInitialMapInteraction } from '../../map/mapDimension';
+import {
+  applyMapDimensionMode,
+  applyMapLayerVisibility,
+  configureInitialMapInteraction,
+  terrainSourceId
+} from '../../map/mapDimension';
 import { useMapDimension } from './MapDimensionContext';
 import { FeaturePropertiesCard } from './FeaturePropertiesCard';
 import { MapLayersCard } from './MapLayersCard';
@@ -41,6 +46,7 @@ import {
   MIN_VECTOR_ZOOM,
   setNativeFeatureSources,
   type VisibleFeatureCollections,
+  updateElevatedFeatureSources,
   upsertGeoJsonSource,
   visibleOgcBbox
 } from './mapViewData';
@@ -49,6 +55,7 @@ import { useSelectedFeature } from './useSelectedFeature';
 /** Default initial view when no local favorite view has been saved. */
 const OTTA_CENTER: [number, number] = [9.54, 61.77];
 const OTTA_ZOOM = 15;
+const DEFERRED_ELEVATED_SOURCE_DELAY_MS = 120;
 
 const mapStyle: maplibregl.StyleSpecification = {
   version: 8,
@@ -59,6 +66,14 @@ const mapStyle: maplibregl.StyleSpecification = {
       tileSize: 256,
       maxzoom: 17,
       attribution: '&copy; OpenStreetMap contributors'
+    },
+    [terrainSourceId]: {
+      type: 'raster-dem',
+      tiles: ['https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png'],
+      tileSize: 256,
+      maxzoom: 15,
+      encoding: 'terrarium',
+      attribution: 'Elevation tiles by AWS Terrain Tiles'
     }
   },
   layers: [
@@ -70,11 +85,16 @@ const mapStyle: maplibregl.StyleSpecification = {
   ]
 };
 
+function isTerrainEnabled(is3d: boolean, adjustElevatedHeights: boolean) {
+  return is3d && !adjustElevatedHeights;
+}
+
 export function MapView() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map>(null);
   const buildingMarkerRefs = useRef<maplibregl.Marker[]>([]);
   const pendingReloadTimeoutRef = useRef<number | undefined>(undefined);
+  const pendingElevatedRefreshTimeoutRef = useRef<number | undefined>(undefined);
   const reloadVisibleDataRef = useRef<(() => Promise<void>) | undefined>(undefined);
   const { is3d, adjustElevatedHeights, setIs3d, setAdjustElevatedHeights } = useMapDimension();
   const is3dRef = useRef(is3d);
@@ -98,6 +118,17 @@ export function MapView() {
   const [isCreating, setIsCreating] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const { selectedFeature, setHoveredPositionIndex, setSelectedFeature } = useSelectedFeature({ mapRef, is3d });
+
+  function cancelPendingMapWork() {
+    if (pendingReloadTimeoutRef.current !== undefined) {
+      window.clearTimeout(pendingReloadTimeoutRef.current);
+      pendingReloadTimeoutRef.current = undefined;
+    }
+    if (pendingElevatedRefreshTimeoutRef.current !== undefined) {
+      window.clearTimeout(pendingElevatedRefreshTimeoutRef.current);
+      pendingElevatedRefreshTimeoutRef.current = undefined;
+    }
+  }
 
   useEffect(() => {
     if (!activeFavoriteView) {
@@ -262,6 +293,11 @@ export function MapView() {
 
     let visibleRequestId = 0;
     async function reloadVisibleData() {
+      if (pendingElevatedRefreshTimeoutRef.current !== undefined) {
+        window.clearTimeout(pendingElevatedRefreshTimeoutRef.current);
+        pendingElevatedRefreshTimeoutRef.current = undefined;
+      }
+
       const requestId = ++visibleRequestId;
       const vectorZoomActive = isVectorZoom(map);
       setIsVectorZoomActive(vectorZoomActive);
@@ -340,6 +376,10 @@ export function MapView() {
       }, 120);
     }
 
+    function handleMoveStart() {
+      cancelPendingMapWork();
+    }
+
     map.once('load', () => {
       addNativeFeatureSourcesAndLayers(
         map,
@@ -355,6 +395,7 @@ export function MapView() {
         adjustElevatedHeightsRef.current
       );
       updateBuildingDebugMarkers(map, emptyFeatureCollection);
+      map.on('movestart', handleMoveStart);
       map.on('moveend', scheduleVisibleDataReload);
 
       map.on('click', event => {
@@ -374,10 +415,8 @@ export function MapView() {
       cancelled = true;
       visibleRequestId += 1;
       reloadVisibleDataRef.current = undefined;
-      if (pendingReloadTimeoutRef.current !== undefined) {
-        window.clearTimeout(pendingReloadTimeoutRef.current);
-        pendingReloadTimeoutRef.current = undefined;
-      }
+      cancelPendingMapWork();
+      map.off('movestart', handleMoveStart);
       map.off('moveend', scheduleVisibleDataReload);
       mapRef.current = null;
       for (const marker of buildingMarkerRefs.current) {
@@ -395,9 +434,14 @@ export function MapView() {
       return;
     }
 
-    applyMapDimensionMode(map, is3d, useLayerVisibilityStore.getState().visibility);
+    applyMapDimensionMode(
+      map,
+      is3d,
+      useLayerVisibilityStore.getState().visibility,
+      isTerrainEnabled(is3d, adjustElevatedHeights)
+    );
     applyBuildingMarkerVisibility(useLayerVisibilityStore.getState().visibility.buildings && !is3d);
-  }, [is3d, isMapReady]);
+  }, [adjustElevatedHeights, is3d, isMapReady]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -405,31 +449,40 @@ export function MapView() {
       return;
     }
 
-    applyMapLayerVisibility(map, is3d, layerVisibility);
+    applyMapLayerVisibility(map, is3d, layerVisibility, isTerrainEnabled(is3d, adjustElevatedHeights));
     applyBuildingMarkerVisibility(layerVisibility.buildings && !is3d);
 
     const visibilityChanged = layerVisibilityChanged(previousLayerVisibilityRef.current, layerVisibility);
     previousLayerVisibilityRef.current = layerVisibility;
+
+    if (pendingElevatedRefreshTimeoutRef.current !== undefined) {
+      window.clearTimeout(pendingElevatedRefreshTimeoutRef.current);
+      pendingElevatedRefreshTimeoutRef.current = undefined;
+    }
 
     if (visibilityChanged && isVectorZoom(map)) {
       void reloadVisibleDataRef.current?.();
       return;
     }
 
+    if (!is3d) {
+      return;
+    }
+
     const latest = latestVectorDataRef.current;
-    void setNativeFeatureSources(
-      map,
-      latest.parcels,
-      latest.buildings,
-      latest.platformEdges,
-      latest.trackCentres,
-      latest.bygning,
-      latest.bygningOmrade,
-      latest.bygningSenterlinje,
-      latest.bygningPosisjon,
-      layerVisibility,
-      adjustElevatedHeights && is3d
-    );
+    pendingElevatedRefreshTimeoutRef.current = window.setTimeout(() => {
+      pendingElevatedRefreshTimeoutRef.current = undefined;
+      updateElevatedFeatureSources(
+        map,
+        latest.platformEdges,
+        latest.trackCentres,
+        latest.bygning,
+        latest.bygningSenterlinje,
+        latest.bygningOmrade,
+        layerVisibility,
+        adjustElevatedHeights && is3d
+      );
+    }, DEFERRED_ELEVATED_SOURCE_DELAY_MS);
   }, [adjustElevatedHeights, layerVisibility, isMapReady, is3d]);
 
   async function createRandomBuilding() {

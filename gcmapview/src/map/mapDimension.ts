@@ -39,29 +39,41 @@ import {
   lowestPositiveBygningOmradeHeight
 } from './bygningOmradeLayers';
 
+export const terrainSourceId = 'terrain-dem';
+const TERRAIN_EXAGGERATION = 1;
+const BANE_TERRAIN_CLEARANCE_M = 2;
+const emptyFeatureCollection: FeatureCollection = { type: 'FeatureCollection', features: [] };
+
+function terrainElevationAt(map: maplibregl.Map, longitude: number, latitude: number): number | undefined {
+  const terrainElevation = map.queryTerrainElevation([longitude, latitude]);
+  return typeof terrainElevation === 'number' && Number.isFinite(terrainElevation) ? terrainElevation : undefined;
+}
+
+function createTerrainElevationLookup(map: maplibregl.Map) {
+  const cache = new Map<string, number | undefined>();
+
+  return (longitude: number, latitude: number): number | undefined => {
+    const cacheKey = `${longitude.toFixed(5)}:${latitude.toFixed(5)}`;
+    if (cache.has(cacheKey)) {
+      return cache.get(cacheKey);
+    }
+
+    const elevation = terrainElevationAt(map, longitude, latitude);
+    cache.set(cacheKey, elevation);
+    return elevation;
+  };
+}
+
 const buildingFlatLayerIds = ['building-centroids-circle', 'buildings-fill', 'buildings-outline'] as const;
 
 const buildingExtrusionLayerIds = [`${buildingsExtrusionLayerId}-shaft`, `${buildingsExtrusionLayerId}-cap`] as const;
 
 const platformEdgesFlatLayerIds = [platformEdgesLayerId] as const;
-const platformEdges3dLayerIds = [
-  `${platformEdgesExtrusionLayerId}-shadow`,
-  `${platformEdgesExtrusionLayerId}-solid`
-] as const;
 
 const trackCentresFlatLayerIds = [trackCentresLayerId] as const;
-const trackCentres3dLayerIds = [
-  `${trackCentresExtrusionLayerId}-shadow`,
-  `${trackCentresExtrusionLayerId}-solid`
-] as const;
 
 const bygningFlatLayerIds = [bygningLayerId] as const;
-const bygning3dLayerIds = [`${bygningExtrusionLayerId}-shadow`, `${bygningExtrusionLayerId}-solid`] as const;
 const bygningSenterlinjeFlatLayerIds = [bygningSenterlinjeLayerId] as const;
-const bygningSenterlinje3dLayerIds = [
-  `${bygningSenterlinjeExtrusionLayerId}-shadow`,
-  `${bygningSenterlinjeExtrusionLayerId}-solid`
-] as const;
 const bygningOmradeLayerIds = [bygningOmradeFillLayerId, bygningOmradeOutlineLayerId] as const;
 const bygningOmrade3dLayerIds = [`${bygningOmradeExtrusionLayerId}-shaft`, `${bygningOmradeExtrusionLayerId}-cap`] as const;
 const bygningPosisjonLayerIds = [bygningPosisjonLayerId] as const;
@@ -327,22 +339,45 @@ export function upsertElevatedSources(
   ].filter(height => height > 0);
 
   const heightOffset = adjustHeights && heightSamples.length > 0 ? Math.min(...heightSamples) : 0;
+  const terrainEnabled = Boolean(map.getTerrain()) && !adjustHeights;
+  const hasVisibleElevatedTerrainLayers =
+    terrainEnabled &&
+    (visibility.platformEdges || visibility.trackCentres || visibility.bygning || visibility.bygningSenterlinje || visibility.bygningOmrade);
+  const terrainLookup = hasVisibleElevatedTerrainLayers ? createTerrainElevationLookup(map) : undefined;
+  const baneTerrainLookup = terrainLookup
+    ? (longitude: number, latitude: number) => {
+        const terrainElevation = terrainLookup(longitude, latitude);
+        return typeof terrainElevation === 'number' ? terrainElevation - BANE_TERRAIN_CLEARANCE_M : undefined;
+      }
+    : undefined;
 
-  const platformData = elevatedLineSegments(platformEdges, undefined, undefined, heightOffset);
-  const trackData = elevatedLineSegments(trackCentres, undefined, undefined, heightOffset);
-  const bygningData = elevatedLineSegments(
-    bygning,
-    BYGNING_LINEWORK_ELEVATED_LINE_WIDTH_M,
-    BYGNING_ELEVATED_LINE_THICKNESS_M,
-    heightOffset
-  );
-  const bygningSenterlinjeData = elevatedLineSegments(
-    bygningSenterlinje,
-    BYGNING_ELEVATED_LINE_WIDTH_M,
-    BYGNING_ELEVATED_LINE_THICKNESS_M,
-    heightOffset
-  );
-  const bygningOmradeData = bygningOmradeExtrusionFeatureCollection(bygningOmrade, heightOffset);
+  const platformData = visibility.platformEdges
+    ? elevatedLineSegments(platformEdges, undefined, undefined, heightOffset, baneTerrainLookup, terrainEnabled)
+    : emptyFeatureCollection;
+  const trackData = visibility.trackCentres
+    ? elevatedLineSegments(trackCentres, undefined, undefined, heightOffset, baneTerrainLookup, terrainEnabled)
+    : emptyFeatureCollection;
+  const bygningData = visibility.bygning
+    ? elevatedLineSegments(
+        bygning,
+        BYGNING_LINEWORK_ELEVATED_LINE_WIDTH_M,
+        BYGNING_ELEVATED_LINE_THICKNESS_M,
+        heightOffset,
+        terrainLookup
+      )
+    : emptyFeatureCollection;
+  const bygningSenterlinjeData = visibility.bygningSenterlinje
+    ? elevatedLineSegments(
+        bygningSenterlinje,
+        BYGNING_ELEVATED_LINE_WIDTH_M,
+        BYGNING_ELEVATED_LINE_THICKNESS_M,
+        heightOffset,
+        terrainLookup
+      )
+    : emptyFeatureCollection;
+  const bygningOmradeData = visibility.bygningOmrade
+    ? bygningOmradeExtrusionFeatureCollection(bygningOmrade, heightOffset, terrainLookup)
+    : emptyFeatureCollection;
 
   if (platformSource) {
     platformSource.setData(platformData);
@@ -391,32 +426,52 @@ export function upsertElevatedSources(
 }
 
 /** Apply 2D/3D layer set, gated by user layer toggles. */
-export function applyMapLayerVisibility(map: maplibregl.Map, is3d: boolean, visibility: LayerVisibility) {
+export function applyMapLayerVisibility(
+  map: maplibregl.Map,
+  is3d: boolean,
+  visibility: LayerVisibility,
+  enableTerrain = false
+) {
+  const showElevatedLineShadows = is3d && !enableTerrain;
+
   setLayersVisibility(map, ['parcels-fill', 'parcels-outline'], visibility.parcels);
 
   setLayersVisibility(map, buildingFlatLayerIds, visibility.buildings && !is3d);
   setLayersVisibility(map, buildingExtrusionLayerIds, visibility.buildings && is3d);
 
   setLayersVisibility(map, platformEdgesFlatLayerIds, visibility.platformEdges && !is3d);
-  setLayersVisibility(map, platformEdges3dLayerIds, visibility.platformEdges && is3d);
+  setLayerVisibility(map, `${platformEdgesExtrusionLayerId}-shadow`, visibility.platformEdges && showElevatedLineShadows);
+  setLayerVisibility(map, `${platformEdgesExtrusionLayerId}-solid`, visibility.platformEdges && is3d);
 
   setLayersVisibility(map, trackCentresFlatLayerIds, visibility.trackCentres && !is3d);
-  setLayersVisibility(map, trackCentres3dLayerIds, visibility.trackCentres && is3d);
+  setLayerVisibility(map, `${trackCentresExtrusionLayerId}-shadow`, visibility.trackCentres && showElevatedLineShadows);
+  setLayerVisibility(map, `${trackCentresExtrusionLayerId}-solid`, visibility.trackCentres && is3d);
 
   setLayersVisibility(map, bygningFlatLayerIds, visibility.bygning && !is3d);
-  setLayersVisibility(map, bygning3dLayerIds, visibility.bygning && is3d);
+  setLayerVisibility(map, `${bygningExtrusionLayerId}-shadow`, visibility.bygning && showElevatedLineShadows);
+  setLayerVisibility(map, `${bygningExtrusionLayerId}-solid`, visibility.bygning && is3d);
   setLayersVisibility(map, bygningSenterlinjeFlatLayerIds, visibility.bygningSenterlinje && !is3d);
-  setLayersVisibility(map, bygningSenterlinje3dLayerIds, visibility.bygningSenterlinje && is3d);
+  setLayerVisibility(
+    map,
+    `${bygningSenterlinjeExtrusionLayerId}-shadow`,
+    visibility.bygningSenterlinje && showElevatedLineShadows
+  );
+  setLayerVisibility(map, `${bygningSenterlinjeExtrusionLayerId}-solid`, visibility.bygningSenterlinje && is3d);
   setLayersVisibility(map, bygningOmradeLayerIds, visibility.bygningOmrade && !is3d);
   setLayersVisibility(map, bygningOmrade3dLayerIds, visibility.bygningOmrade && is3d);
   setLayersVisibility(map, bygningPosisjonLayerIds, visibility.bygningPosisjon);
 }
 
 /** Switch camera + layer visibility for the global 2D/3D mode. */
-export function applyMapDimensionMode(map: maplibregl.Map, is3d: boolean, visibility: LayerVisibility) {
-  applyMapLayerVisibility(map, is3d, visibility);
+export function applyMapDimensionMode(map: maplibregl.Map, is3d: boolean, visibility: LayerVisibility, enableTerrain: boolean) {
+  applyMapLayerVisibility(map, is3d, visibility, enableTerrain);
 
   if (is3d) {
+    if (enableTerrain && map.getSource(terrainSourceId)) {
+      map.setTerrain({ source: terrainSourceId, exaggeration: TERRAIN_EXAGGERATION });
+    } else {
+      map.setTerrain(null);
+    }
     map.setMaxPitch(85);
     map.dragRotate.enable();
     map.touchPitch.enable();
@@ -427,10 +482,12 @@ export function applyMapDimensionMode(map: maplibregl.Map, is3d: boolean, visibi
   }
 
   if (map.getPitch() === 0) {
+    map.setTerrain(null);
     map.setMaxPitch(0);
     return;
   }
 
+  map.setTerrain(null);
   map.easeTo({ pitch: 0, duration: 500 });
   map.once('moveend', () => {
     if (map.getPitch() === 0) {

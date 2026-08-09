@@ -463,13 +463,41 @@ export async function setNativeFeatureSources(
     upsertGeoJsonSource(map, bygningPosisjonSourceId, normalizedBygningPosisjon)
   ]);
 
+  updateElevatedFeatureSources(
+    map,
+    platformEdges,
+    trackCentres,
+    bygning,
+    bygningSenterlinje,
+    bygningOmrade,
+    visibility,
+    adjustElevatedHeights
+  );
+}
+
+export function updateElevatedFeatureSources(
+  map: maplibregl.Map,
+  platformEdges: FeatureCollection,
+  trackCentres: FeatureCollection,
+  bygning: FeatureCollection,
+  bygningSenterlinje: FeatureCollection,
+  bygningOmrade: FeatureCollection,
+  visibility: LayerVisibility,
+  adjustElevatedHeights: boolean
+) {
+  const inspectablePlatformEdges = registerInspectableSourceData(platformEdgesSourceId, platformEdges);
+  const inspectableTrackCentres = registerInspectableSourceData(trackCentresSourceId, trackCentres);
+  const inspectableBygning = registerInspectableSourceData(bygningSourceId, bygning);
+  const inspectableBygningOmrade = registerInspectableSourceData(bygningOmradeSourceId, bygningOmrade);
+  const inspectableBygningSenterlinje = registerInspectableSourceData(bygningSenterlinjeSourceId, bygningSenterlinje);
+
   upsertElevatedSources(
     map,
-    normalizedPlatformEdges,
-    normalizedTrackCentres,
-    normalizedBygning,
-    normalizedBygningSenterlinje,
-    normalizedBygningOmrade,
+    normalizeBaneFeatureCollection(inspectablePlatformEdges),
+    normalizeBaneFeatureCollection(inspectableTrackCentres),
+    normalizeBygningFeatureCollection(inspectableBygning),
+    normalizeBygningSenterlinjeFeatureCollection(inspectableBygningSenterlinje),
+    normalizePolygonFeatureCollection(inspectableBygningOmrade),
     visibility,
     adjustElevatedHeights
   );
