@@ -66,10 +66,9 @@ def test_relationship_becomes_fk_column():
     assert ("parcel_id", "cadastre.parcels") in fks
 
 
-def test_relationship_fk_ddl_is_guarded_for_reapply():
+def test_relationship_fk_ddl_is_rendered_with_stable_constraint_name():
     ddl = "\n".join(postgis.table_statements(_cadastre_plan()))
-    assert "conrelid = 'cadastre.buildings'::regclass" in ddl
-    assert "and conname = 'buildings_parcel_id_fkey'" in ddl
+    assert "alter table cadastre.buildings" in ddl
     assert 'add constraint "buildings_parcel_id_fkey"' in ddl
 
 

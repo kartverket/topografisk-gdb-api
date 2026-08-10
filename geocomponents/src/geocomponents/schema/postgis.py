@@ -62,16 +62,11 @@ def _fk_ddl(table: TablePlan) -> list[str]:
     for fk in table.foreign_keys:
         cname = _fk_constraint_name(table.name, fk.column)
         stmts.append(
-            "do $$ begin "
-            f"if not exists (select 1 from pg_constraint where conrelid = '{table.qualified}'::regclass "
-            f"and conname = '{cname}') then "
             f"alter table {table.qualified} "
             f'add constraint "{cname}" '
             f'foreign key ("{fk.column}") '
             f'references {fk.ref_table} ("{fk.ref_column}") '
-            f"on delete set null; "
-            "end if; "
-            "end $$"
+            "on delete set null"
         )
     return stmts
 
