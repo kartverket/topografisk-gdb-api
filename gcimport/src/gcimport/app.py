@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-import os
 from pathlib import PurePosixPath
 from typing import Annotated, Any
 from urllib.parse import urlsplit, urlunsplit
@@ -39,7 +39,9 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app_instance: FastAPI) -> AsyncIterator[None]:
-        runtime_settings = settings or Settings.from_env(resolved_profile.default_api_url)
+        runtime_settings = settings or Settings.from_env(
+            resolved_profile.default_api_url
+        )
         app_instance.state.settings = runtime_settings
         if client is not None:
             app_instance.state.http_client = client
@@ -141,9 +143,7 @@ def _profile_from_env() -> ImportProfile:
         return get_profile(profile_name)
     except ValueError as err:
         supported = ", ".join(sorted(BUILTIN_PROFILES))
-        raise ValueError(
-            f"{PROFILE_ENV_NAME} must be one of: {supported}"
-        ) from err
+        raise ValueError(f"{PROFILE_ENV_NAME} must be one of: {supported}") from err
 
 
 def _request_profile(

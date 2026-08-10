@@ -12,8 +12,10 @@ from gcimport.config import Settings
 from gcimport.importer import prepare_document
 from gcimport.profiles import ImportProfile
 from gcimport.profiles.bygning import (
-    BYGNING_PROFILE,
     _AREA_SOURCE_OBJTYPES as _BUILDING_AREA_SOURCE_OBJTYPES,
+)
+from gcimport.profiles.bygning import (
+    BYGNING_PROFILE,
 )
 
 PLATFORM_UUID = "11111111-1111-4111-8111-111111111111"
@@ -275,7 +277,9 @@ def _building_centerline_feature(
     }
 
 
-def _building_centerline_geojson_feature(*, objtype: str = "Hjelpelinje3D") -> dict[str, Any]:
+def _building_centerline_geojson_feature(
+    *, objtype: str = "Hjelpelinje3D"
+) -> dict[str, Any]:
     return {
         "type": "Feature",
         "properties": {
@@ -774,7 +778,9 @@ def test_request_profile_prefers_explicit_profile_api_override(
 
 
 @pytest.mark.parametrize("objtype", ("AnnenBygning", "Bygning", "Takoverbygg"))
-def test_request_profile_can_import_bygning_area_geojson_through_bygning_profile(objtype: str) -> None:
+def test_request_profile_can_import_bygning_area_geojson_through_bygning_profile(
+    objtype: str,
+) -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -794,9 +800,9 @@ def test_request_profile_can_import_bygning_area_geojson_through_bygning_profile
                 "file": (
                     "source.geojson",
                     json.dumps(
-                        _building_area_geojson_document([
-                            _building_area_geojson_feature(objtype=objtype)
-                        ])
+                        _building_area_geojson_document(
+                            [_building_area_geojson_feature(objtype=objtype)]
+                        )
                     ),
                     "application/geo+json",
                 )
@@ -809,7 +815,9 @@ def test_request_profile_can_import_bygning_area_geojson_through_bygning_profile
     ]
 
 
-def test_request_profile_can_import_bygning_position_geojson_through_bygning_profile() -> None:
+def test_request_profile_can_import_bygning_position_geojson_through_bygning_profile() -> (
+    None
+):
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -840,7 +848,9 @@ def test_request_profile_can_import_bygning_position_geojson_through_bygning_pro
     ]
 
 
-def test_request_profile_can_import_bygning_senterlinje_geojson_through_bygning_profile() -> None:
+def test_request_profile_can_import_bygning_senterlinje_geojson_through_bygning_profile() -> (
+    None
+):
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -892,7 +902,10 @@ def test_request_profile_can_import_mixed_bygning_geojson() -> None:
                     "source.geojson",
                     json.dumps(
                         _building_area_geojson_document(
-                            [_building_geojson_feature(), _building_area_geojson_feature()]
+                            [
+                                _building_geojson_feature(),
+                                _building_area_geojson_feature(),
+                            ]
                         )
                     ),
                     "application/geo+json",
@@ -913,7 +926,13 @@ def test_rejects_unknown_request_profile() -> None:
     ) as client:
         response = client.post(
             "/imports?profile=unknown",
-            files={"file": ("bane.json", json.dumps(_document([_feature()])), "application/json")},
+            files={
+                "file": (
+                    "bane.json",
+                    json.dumps(_document([_feature()])),
+                    "application/json",
+                )
+            },
         )
 
     assert response.status_code == 400

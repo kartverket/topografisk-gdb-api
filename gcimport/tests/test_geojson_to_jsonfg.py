@@ -11,13 +11,15 @@ from gcimport.geojson_to_jsonfg import (
     convert_file,
     normalize_crs,
 )
-from gcimport.profiles.bygning import (
-    BYGNING_PROFILE,
-    _AREA_SOURCE_OBJTYPES as _BUILDING_AREA_SOURCE_OBJTYPES,
-    _SOURCE_OBJTYPES,
-)
 from gcimport.importer import prepare_document
 from gcimport.profiles.bane import BANE_PROFILE
+from gcimport.profiles.bygning import (
+    _AREA_SOURCE_OBJTYPES as _BUILDING_AREA_SOURCE_OBJTYPES,
+)
+from gcimport.profiles.bygning import (
+    _SOURCE_OBJTYPES,
+    BYGNING_PROFILE,
+)
 
 
 def _source_feature(
@@ -156,7 +158,9 @@ def _building_area_source_document(features: list[dict] | None = None) -> dict:
             "type": "name",
             "properties": {"name": "urn:ogc:def:crs:EPSG::5972"},
         },
-        "features": features if features is not None else [_building_area_source_feature()],
+        "features": features
+        if features is not None
+        else [_building_area_source_feature()],
     }
 
 
@@ -197,7 +201,9 @@ def _building_centerline_source_document(features: list[dict] | None = None) -> 
             "type": "name",
             "properties": {"name": "urn:ogc:def:crs:EPSG::5972"},
         },
-        "features": features if features is not None else [_building_centerline_source_feature()],
+        "features": features
+        if features is not None
+        else [_building_centerline_source_feature()],
     }
 
 
@@ -236,7 +242,9 @@ def _building_position_source_document(features: list[dict] | None = None) -> di
             "type": "name",
             "properties": {"name": "urn:ogc:def:crs:EPSG::5972"},
         },
-        "features": features if features is not None else [_building_position_source_feature()],
+        "features": features
+        if features is not None
+        else [_building_position_source_feature()],
     }
 
 
@@ -416,7 +424,9 @@ def test_convert_document_is_accepted_by_bygning_omrade_importer() -> None:
 @pytest.mark.parametrize("objtype", ("AnnenBygning", "Bygning", "Takoverbygg"))
 def test_convert_document_supports_all_bygning_omrade_objtypes(objtype: str) -> None:
     converted = convert_document(
-        _building_area_source_document([_building_area_source_feature(objtype=objtype)]),
+        _building_area_source_document(
+            [_building_area_source_feature(objtype=objtype)]
+        ),
         profile=BYGNING_PROFILE,
     )
 
@@ -425,7 +435,9 @@ def test_convert_document_supports_all_bygning_omrade_objtypes(objtype: str) -> 
 
 def test_convert_document_routes_overlapping_bygning_objtype_by_geometry() -> None:
     converted = convert_document(
-        _building_area_source_document([_building_area_source_feature(objtype="Bygning")]),
+        _building_area_source_document(
+            [_building_area_source_feature(objtype="Bygning")]
+        ),
         profile=BYGNING_PROFILE,
     )
 
@@ -489,7 +501,9 @@ def test_bygning_omrade_profile_tracks_scanned_objtypes() -> None:
 
 @pytest.mark.parametrize(
     "objtype",
-    tuple(name for name in _SOURCE_OBJTYPES if name not in {"bygning", "hjelpelinje3d"}),
+    tuple(
+        name for name in _SOURCE_OBJTYPES if name not in {"bygning", "hjelpelinje3d"}
+    ),
 )
 def test_convert_document_supports_all_bygning_objtypes(objtype: str) -> None:
     converted = convert_document(

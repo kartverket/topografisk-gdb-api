@@ -6,6 +6,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
+EXACT_GEOMETRY_MATCH = 2
+COMPATIBLE_GEOMETRY_MATCH = 1
+
 
 @dataclass(frozen=True)
 class ImportProfile:
@@ -56,7 +59,9 @@ class ImportProfile:
             MappingProxyType(normalized_geometry_types),
         )
 
-    def collection_for(self, feature_type: str, geometry_type: str | None = None) -> str | None:
+    def collection_for(
+        self, feature_type: str, geometry_type: str | None = None
+    ) -> str | None:
         token = feature_type.casefold()
         if token in self.required_fields:
             return token
@@ -76,7 +81,8 @@ class ImportProfile:
         exact_matches = [
             collection
             for collection in candidates
-            if self.geometry_match_kind(geometry_type, collection) == 2
+            if self.geometry_match_kind(geometry_type, collection)
+            == EXACT_GEOMETRY_MATCH
         ]
         if len(exact_matches) == 1:
             return exact_matches[0]
@@ -86,7 +92,8 @@ class ImportProfile:
         compatible_matches = [
             collection
             for collection in candidates
-            if self.geometry_match_kind(geometry_type, collection) == 1
+            if self.geometry_match_kind(geometry_type, collection)
+            == COMPATIBLE_GEOMETRY_MATCH
         ]
         if len(compatible_matches) == 1:
             return compatible_matches[0]
@@ -101,17 +108,17 @@ class ImportProfile:
     def geometry_match_kind(self, source_geometry_type: str, collection: str) -> int:
         target_geometry_type = self.geometry_type_for_collection(collection)
         if source_geometry_type == target_geometry_type:
-            return 2
+            return EXACT_GEOMETRY_MATCH
         if (
             source_geometry_type == "LineString"
             and target_geometry_type == "MultiLineString"
         ):
-            return 1
+            return COMPATIBLE_GEOMETRY_MATCH
         if (
             source_geometry_type == "MultiLineString"
             and target_geometry_type == "MultiPolygon"
         ):
-            return 1
+            return COMPATIBLE_GEOMETRY_MATCH
         return 0
 
     @property

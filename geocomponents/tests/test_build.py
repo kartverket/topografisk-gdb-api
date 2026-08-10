@@ -129,8 +129,7 @@ def test_bygning_geometry_and_business_key_are_built_correctly():
     ddl = "\n".join(postgis.table_statements(plan))
     assert '"geometry" geometry(MultiLineStringZ, 5972)' in ddl
     assert (
-        'on bygning.bygning ("lokalid", "identifikasjon_navnerom") '
-        "nulls not distinct"
+        'on bygning.bygning ("lokalid", "identifikasjon_navnerom") nulls not distinct'
     ) in ddl
 
 
@@ -149,7 +148,9 @@ def test_bygning_omrade_geometry_and_business_key_are_built_correctly():
 
 def test_bygning_senterlinje_geometry_and_business_key_are_built_correctly():
     plan = _bygning_plan()
-    coll = next(c for c in plan.collections if c.collection_name == "bygning_senterlinje")
+    coll = next(
+        c for c in plan.collections if c.collection_name == "bygning_senterlinje"
+    )
     assert coll.table.geometry.has_z
     assert coll.table.geometry.postgis_type == "MultiLineStringZ"
     ddl = "\n".join(postgis.table_statements(plan))

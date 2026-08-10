@@ -92,7 +92,12 @@ def _unsupported_objtype_message(
     candidates = profile.collections_for_objtype(objtype)
     if candidates:
         supported_geometry_types = " or ".join(
-            sorted({profile.geometry_type_for_collection(collection) for collection in candidates})
+            sorted(
+                {
+                    profile.geometry_type_for_collection(collection)
+                    for collection in candidates
+                }
+            )
         )
         return (
             f"properties.objtype '{objtype}' requires geometry.type "
@@ -106,9 +111,7 @@ def _unsupported_objtype_message(
         if candidate.name != profile.name and candidate.collections_for_objtype(objtype)
     ]
     if len(matching_profiles) == 1:
-        return (
-            f"{message}; '{objtype}' belongs to the {matching_profiles[0]} profile"
-        )
+        return f"{message}; '{objtype}' belongs to the {matching_profiles[0]} profile"
     return message
 
 
@@ -168,10 +171,7 @@ def normalize_geometry_for_profile(
             "coordinates": part,
         }
 
-    if (
-        geometry_type == "MultiLineString"
-        and target_geometry_type == "MultiPolygon"
-    ):
+    if geometry_type == "MultiLineString" and target_geometry_type == "MultiPolygon":
         coordinates = geometry.get("coordinates")
         if not isinstance(coordinates, list):
             raise ConversionError(
@@ -216,7 +216,9 @@ def convert_feature(
     try:
         feature_type = feature_type_from_objtype(
             properties.get("objtype"),
-            feature.get("geometry", {}).get("type") if isinstance(feature.get("geometry"), dict) else None,
+            feature.get("geometry", {}).get("type")
+            if isinstance(feature.get("geometry"), dict)
+            else None,
             profile,
         )
     except ConversionError as err:

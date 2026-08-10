@@ -431,10 +431,7 @@ def _transform_multipolygon_coordinates(
     for polygon_index, polygon in enumerate(coordinates):
         if not isinstance(polygon, list) or not polygon:
             raise DocumentValidationError(
-                [
-                    "MultiPolygon polygon "
-                    f"{polygon_index} must contain at least one ring"
-                ]
+                [f"MultiPolygon polygon {polygon_index} must contain at least one ring"]
             )
         transformed.append(
             [

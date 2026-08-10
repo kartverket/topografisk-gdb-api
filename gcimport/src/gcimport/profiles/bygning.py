@@ -44,10 +44,10 @@ _COMMON_REQUIRED_FIELDS = frozenset(
 )
 
 _COLLECTIONS: dict[str, str | tuple[str, ...]] = {
-    **{objtype: "bygning" for objtype in _LINE_SOURCE_OBJTYPES},
-    **{objtype: "bygning_senterlinje" for objtype in _CENTERLINE_SOURCE_OBJTYPES},
-    **{objtype: "bygning_omrade" for objtype in _AREA_SOURCE_OBJTYPES},
-    **{objtype: "bygning_posisjon" for objtype in _POINT_SOURCE_OBJTYPES},
+    **dict.fromkeys(_LINE_SOURCE_OBJTYPES, "bygning"),
+    **dict.fromkeys(_CENTERLINE_SOURCE_OBJTYPES, "bygning_senterlinje"),
+    **dict.fromkeys(_AREA_SOURCE_OBJTYPES, "bygning_omrade"),
+    **dict.fromkeys(_POINT_SOURCE_OBJTYPES, "bygning_posisjon"),
     "bygning": ("bygning", "bygning_omrade", "bygning_posisjon"),
 }
 

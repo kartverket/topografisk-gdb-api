@@ -42,10 +42,11 @@ from geocomponents.processes.registry import PROCESS_REGISTRY
 
 PROVIDER_PATH = "geocomponents.api.db_function_provider.DbFunctionProvider"
 CRS84 = "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
+WGS84_SRID = 4326
 
 
 def _storage_crs_uri(coll: ResolvedCollection) -> str | None:
-    if coll.srid == 4326:
+    if coll.srid == WGS84_SRID:
         return None
     return f"http://www.opengis.net/def/crs/EPSG/0/{coll.srid}"
 

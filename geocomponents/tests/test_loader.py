@@ -112,14 +112,18 @@ def test_bygning_dataset_resolves_expected_geometry_and_upsert_key():
     assert area.upsert_key == ("lokalid", "identifikasjon_navnerom")
     assert area.supports_upsert
 
-    centerline = next(coll for coll in bygning.collections if coll.name == "bygning_senterlinje")
+    centerline = next(
+        coll for coll in bygning.collections if coll.name == "bygning_senterlinje"
+    )
     assert centerline.geometry_type == "MultiLineString"
     assert centerline.srid == 5972
     assert centerline.has_z is True
     assert centerline.upsert_key == ("lokalid", "identifikasjon_navnerom")
     assert centerline.supports_upsert
 
-    position = next(coll for coll in bygning.collections if coll.name == "bygning_posisjon")
+    position = next(
+        coll for coll in bygning.collections if coll.name == "bygning_posisjon"
+    )
     assert position.geometry_type == "Point"
     assert position.srid == 5972
     assert position.has_z is True

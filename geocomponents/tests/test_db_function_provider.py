@@ -78,14 +78,18 @@ def test_query_transforms_projected_storage_crs_to_default_crs84(monkeypatch):
         "numberReturned": 1,
         "numberMatched": 1,
     }
-    monkeypatch.setattr(provider, "_connect", lambda: _FakeConnection(feature_collection))
+    monkeypatch.setattr(
+        provider, "_connect", lambda: _FakeConnection(feature_collection)
+    )
 
-    transformed = provider.query(crs_transform_spec=create_crs_transform_spec(provider_def=provider_def))
+    transformed = provider.query(
+        crs_transform_spec=create_crs_transform_spec(provider_def=provider_def)
+    )
 
     coordinates = transformed["features"][0]["geometry"]["coordinates"][0][0]
-    expected_lon, expected_lat = pyproj.Transformer.from_crs(5972, 4326, always_xy=True).transform(
-        526131.4498, 6849490.719999999
-    )
+    expected_lon, expected_lat = pyproj.Transformer.from_crs(
+        5972, 4326, always_xy=True
+    ).transform(526131.4498, 6849490.719999999)
     assert isclose(coordinates[0], expected_lon, rel_tol=0, abs_tol=1e-6)
     assert isclose(coordinates[1], expected_lat, rel_tol=0, abs_tol=1e-6)
     assert coordinates[2] == 402.2
