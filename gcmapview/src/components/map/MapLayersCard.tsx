@@ -71,7 +71,7 @@ function LayerToggleRow({
           />
         )}
         <span className="min-w-0 flex-1 text-sm leading-snug">{MAP_LAYER_LABELS[layerId]}</span>
-        {readOnly ?? isReadOnly ? (
+        {(readOnly ?? isReadOnly) ? (
           <Badge
             variant="outline"
             className="shrink-0">
@@ -114,7 +114,8 @@ export function MapLayersCard({
   onSelectFavoriteView
 }: MapLayersCardProps) {
   const toggleLayer = useLayerVisibilityStore(state => state.toggleLayer);
-  const activeFavoriteView = favoriteViews.find(favoriteView => favoriteView.name === activeFavoriteName) ?? favoriteViews[0];
+  const activeFavoriteView =
+    favoriteViews.find(favoriteView => favoriteView.name === activeFavoriteName) ?? favoriteViews[0];
 
   return (
     <Card

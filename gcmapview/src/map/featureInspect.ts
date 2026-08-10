@@ -94,6 +94,7 @@ const LAYER_COLLECTION_IDS: Record<string, CollectionId> = {
 
 const INTERNAL_PROPERTY_PREFIX = '__gcmapview';
 const INSPECTABLE_FEATURE_KEY = `${INTERNAL_PROPERTY_PREFIX}InspectKey`;
+export const FILTERABLE_FEATURE_PROPERTY_KEYS = ['lokalid', 'bygningsnummer'] as const;
 const SOURCE_ID_ALIASES: Record<string, string> = {
   [platformEdgesExtrusionSourceId]: platformEdgesSourceId,
   [trackCentresExtrusionSourceId]: trackCentresSourceId,
@@ -115,15 +116,40 @@ export type InspectedFeature = {
   positionsLoading?: boolean;
 };
 
+export type ActiveFeatureFilter = {
+  propertyKey: string;
+  value: string;
+};
+
 function stripInternalProperties(properties: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(properties).filter(([key]) => !key.startsWith(INTERNAL_PROPERTY_PREFIX)));
+}
+
+export function filterableFeaturePropertyValue(
+  properties: Record<string, unknown>,
+  propertyKey: string
+): string | undefined {
+  const value = properties[propertyKey];
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  return undefined;
 }
 
 function inspectableFeatureKey(sourceId: string, index: number) {
   return `${sourceId}:${index}`;
 }
 
-export function registerInspectableSourceData(sourceId: string, featureCollection: FeatureCollection): FeatureCollection {
+export function registerInspectableSourceData(
+  sourceId: string,
+  featureCollection: FeatureCollection
+): FeatureCollection {
   const registered: FeatureCollection = {
     type: 'FeatureCollection',
     features: featureCollection.features.map((feature, index) => ({
@@ -182,7 +208,9 @@ function matchingSourceFeature(sourceId: string, renderedFeature: maplibregl.Map
   const renderedProperties = (renderedFeature.properties ?? {}) as Record<string, unknown>;
   const renderedKey = renderedProperties[INSPECTABLE_FEATURE_KEY];
   if (typeof renderedKey === 'string') {
-    return sourceFeatureCollection.features.find(sourceFeature => sourceFeature.properties?.[INSPECTABLE_FEATURE_KEY] === renderedKey);
+    return sourceFeatureCollection.features.find(
+      sourceFeature => sourceFeature.properties?.[INSPECTABLE_FEATURE_KEY] === renderedKey
+    );
   }
 
   if (renderedFeature.id !== undefined) {
@@ -210,9 +238,9 @@ export function inspectFeaturesAtPoint(map: maplibregl.Map, point: maplibregl.Po
   const originalFeature = renderedFeatureSourceId(feature)
     ? matchingSourceFeature(renderedFeatureSourceId(feature) as string, feature)
     : undefined;
-  const fallbackProperties = stripInternalProperties(
-    { ...((originalFeature?.properties ?? feature.properties ?? {}) as Record<string, unknown>) }
-  );
+  const fallbackProperties = stripInternalProperties({
+    ...((originalFeature?.properties ?? feature.properties ?? {}) as Record<string, unknown>)
+  });
   const featureId =
     originalFeature?.id ??
     feature.id ??

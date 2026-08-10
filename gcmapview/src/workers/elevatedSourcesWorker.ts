@@ -5,10 +5,7 @@ import {
   elevatedLineSegments,
   lowestPositiveLineHeight
 } from '../map/map3d';
-import {
-  bygningOmradeExtrusionFeatureCollection,
-  lowestPositiveBygningOmradeHeight
-} from '../map/bygningOmradeLayers';
+import { bygningOmradeExtrusionFeatureCollection, lowestPositiveBygningOmradeHeight } from '../map/bygningOmradeLayers';
 import {
   terrainSampleKey,
   type ElevatedSourcesWorkerRequest,

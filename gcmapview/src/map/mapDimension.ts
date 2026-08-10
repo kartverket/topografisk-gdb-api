@@ -63,7 +63,10 @@ const trackCentresFlatLayerIds = [trackCentresLayerId] as const;
 const bygningFlatLayerIds = [bygningLayerId] as const;
 const bygningSenterlinjeFlatLayerIds = [bygningSenterlinjeLayerId] as const;
 const bygningOmradeLayerIds = [bygningOmradeFillLayerId, bygningOmradeOutlineLayerId] as const;
-const bygningOmrade3dLayerIds = [`${bygningOmradeExtrusionLayerId}-shaft`, `${bygningOmradeExtrusionLayerId}-cap`] as const;
+const bygningOmrade3dLayerIds = [
+  `${bygningOmradeExtrusionLayerId}-shaft`,
+  `${bygningOmradeExtrusionLayerId}-cap`
+] as const;
 const bygningPosisjonLayerIds = [bygningPosisjonLayerId] as const;
 
 type OpacityBandedExtrusion = {
@@ -92,7 +95,12 @@ function offsetHeightExpression(
   zOffsetExpression: ExpressionSpecification
 ): ExpressionSpecification {
   const adjustedBase = offsetBaseExpression(baseExpression, zOffsetExpression);
-  return ['case', ['<=', topExpression, zOffsetExpression], 0, ['max', adjustedBase, ['-', topExpression, zOffsetExpression]]];
+  return [
+    'case',
+    ['<=', topExpression, zOffsetExpression],
+    0,
+    ['max', adjustedBase, ['-', topExpression, zOffsetExpression]]
+  ];
 }
 
 function setLayerVisibility(map: maplibregl.Map, layerId: string, visible: boolean) {
@@ -456,7 +464,11 @@ export function applyMapLayerVisibility(
   setLayersVisibility(map, buildingExtrusionLayerIds, visibility.buildings && is3d);
 
   setLayersVisibility(map, platformEdgesFlatLayerIds, visibility.platformEdges && !is3d);
-  setLayerVisibility(map, `${platformEdgesExtrusionLayerId}-shadow`, visibility.platformEdges && showElevatedLineShadows);
+  setLayerVisibility(
+    map,
+    `${platformEdgesExtrusionLayerId}-shadow`,
+    visibility.platformEdges && showElevatedLineShadows
+  );
   setLayerVisibility(map, `${platformEdgesExtrusionLayerId}-solid`, visibility.platformEdges && is3d);
 
   setLayersVisibility(map, trackCentresFlatLayerIds, visibility.trackCentres && !is3d);
@@ -479,7 +491,12 @@ export function applyMapLayerVisibility(
 }
 
 /** Switch camera + layer visibility for the global 2D/3D mode. */
-export function applyMapDimensionMode(map: maplibregl.Map, is3d: boolean, visibility: LayerVisibility, enableTerrain: boolean) {
+export function applyMapDimensionMode(
+  map: maplibregl.Map,
+  is3d: boolean,
+  visibility: LayerVisibility,
+  enableTerrain: boolean
+) {
   applyMapLayerVisibility(map, is3d, visibility, enableTerrain);
 
   if (is3d) {

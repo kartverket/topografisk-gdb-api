@@ -10,8 +10,17 @@ import {
   trackCentresItemsInBboxUrl,
   type OgcBbox
 } from '../../api/geocomponentsApi';
-import { addBaneSourcesAndLayers, normalizeBaneFeatureCollection, platformEdgesSourceId, trackCentresSourceId } from '../../map/baneLayers';
-import { addBygningSourcesAndLayers, bygningSourceId, normalizeBygningFeatureCollection } from '../../map/bygningLayers';
+import {
+  addBaneSourcesAndLayers,
+  normalizeBaneFeatureCollection,
+  platformEdgesSourceId,
+  trackCentresSourceId
+} from '../../map/baneLayers';
+import {
+  addBygningSourcesAndLayers,
+  bygningSourceId,
+  normalizeBygningFeatureCollection
+} from '../../map/bygningLayers';
 import {
   addBygningPosisjonSourceAndLayer,
   bygningPosisjonSourceId,
@@ -23,17 +32,15 @@ import {
   normalizeBygningSenterlinjeFeatureCollection
 } from '../../map/bygningSenterlinjeLayers';
 import { addBygningOmradeSourceAndLayers, bygningOmradeSourceId } from '../../map/bygningOmradeLayers';
+import { addExtrusionLayers, upsertElevatedSources } from '../../map/mapDimension';
 import {
-  addExtrusionLayers,
-  upsertElevatedSources
-} from '../../map/mapDimension';
-import { registerInspectableSourceData } from '../../map/featureInspect';
+  filterableFeaturePropertyValue,
+  registerInspectableSourceData,
+  type ActiveFeatureFilter
+} from '../../map/featureInspect';
 import type { Coordinates, Feature, FeatureCollection, Position } from '../../map/geojson';
 import { type LayerVisibility, useLayerVisibilityStore } from '../../store/layerVisibilityStore';
-import {
-  buildingCentroidsFeatureCollection,
-  normalizePolygonFeatureCollection
-} from './mapViewGeometry';
+import { buildingCentroidsFeatureCollection, normalizePolygonFeatureCollection } from './mapViewGeometry';
 
 export const emptyFeatureCollection: FeatureCollection = {
   type: 'FeatureCollection',
@@ -113,6 +120,59 @@ function sanitizeMissingHeights(featureCollection: FeatureCollection): FeatureCo
 
 function visibleCollectionPromise(visible: boolean, url: string) {
   return visible ? getFeatureCollection(url) : Promise.resolve(emptyFeatureCollection);
+}
+
+function normalizedFilterValue(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed.toLowerCase() : undefined;
+}
+
+function filterFeatureCollectionByProperty(
+  featureCollection: FeatureCollection,
+  activeFeatureFilter?: ActiveFeatureFilter
+): FeatureCollection {
+  const normalizedFilterValueToMatch = normalizedFilterValue(activeFeatureFilter?.value);
+  if (!activeFeatureFilter?.propertyKey || !normalizedFilterValueToMatch) {
+    return featureCollection;
+  }
+
+  return {
+    ...featureCollection,
+    features: featureCollection.features.filter(feature => {
+      const featureValue = filterableFeaturePropertyValue(
+        (feature.properties ?? {}) as Record<string, unknown>,
+        activeFeatureFilter.propertyKey
+      );
+      return normalizedFilterValue(featureValue) === normalizedFilterValueToMatch;
+    })
+  };
+}
+
+export function filterVisibleFeatureCollectionsByProperty(
+  visibleFeatureCollections: VisibleFeatureCollections,
+  activeFeatureFilter?: ActiveFeatureFilter
+): VisibleFeatureCollections {
+  if (!activeFeatureFilter) {
+    return visibleFeatureCollections;
+  }
+
+  return {
+    parcels: filterFeatureCollectionByProperty(visibleFeatureCollections.parcels, activeFeatureFilter),
+    buildings: filterFeatureCollectionByProperty(visibleFeatureCollections.buildings, activeFeatureFilter),
+    platformEdges: filterFeatureCollectionByProperty(visibleFeatureCollections.platformEdges, activeFeatureFilter),
+    trackCentres: filterFeatureCollectionByProperty(visibleFeatureCollections.trackCentres, activeFeatureFilter),
+    bygning: filterFeatureCollectionByProperty(visibleFeatureCollections.bygning, activeFeatureFilter),
+    bygningOmrade: filterFeatureCollectionByProperty(visibleFeatureCollections.bygningOmrade, activeFeatureFilter),
+    bygningSenterlinje: filterFeatureCollectionByProperty(
+      visibleFeatureCollections.bygningSenterlinje,
+      activeFeatureFilter
+    ),
+    bygningPosisjon: filterFeatureCollectionByProperty(visibleFeatureCollections.bygningPosisjon, activeFeatureFilter)
+  };
 }
 
 export function visibleOgcBbox(map: maplibregl.Map): OgcBbox {

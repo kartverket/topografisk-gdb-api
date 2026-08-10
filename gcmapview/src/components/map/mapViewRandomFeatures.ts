@@ -114,9 +114,7 @@ function offsetsToRing(
   metersPerDegreeLng: number,
   metersPerDegreeLat: number
 ) {
-  const ring = offsets.map(
-    ([x, y]): Position => [lng + x / metersPerDegreeLng, lat + y / metersPerDegreeLat]
-  );
+  const ring = offsets.map(([x, y]): Position => [lng + x / metersPerDegreeLng, lat + y / metersPerDegreeLat]);
 
   return [...ring, ring[0]];
 }
@@ -202,7 +200,10 @@ function randomBuildingAndParcelInView(map: maplibregl.Map): {
   };
 }
 
-function rectanglesOverlap(first: { west: number; south: number; east: number; north: number }, second: { west: number; south: number; east: number; north: number }) {
+function rectanglesOverlap(
+  first: { west: number; south: number; east: number; north: number },
+  second: { west: number; south: number; east: number; north: number }
+) {
   return !(
     first.east <= second.west ||
     first.west >= second.east ||

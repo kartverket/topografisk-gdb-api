@@ -13,7 +13,8 @@ const PROFILE_META: Record<ImportProfile, { title: string; crs: string; detail: 
   bane: {
     title: 'Bane',
     crs: 'EPSG:5973',
-    detail: 'Jernbaneplattformkant and Spormidt are preserved as MultiLineString geometry and upserted by lokalid + identifikasjon_navnerom.',
+    detail:
+      'Jernbaneplattformkant and Spormidt are preserved as MultiLineString geometry and upserted by lokalid + identifikasjon_navnerom.',
     footer: 'Upserts are idempotent by Bane business key.'
   },
   bygning: {
@@ -103,7 +104,9 @@ export function ImportView() {
           </div>
           <p className="text-sm text-muted-foreground">{profileMeta.detail}</p>
           {detectedProfile && file && (
-            <p className="text-sm text-muted-foreground">Detected {PROFILE_META[detectedProfile].title} from file contents.</p>
+            <p className="text-sm text-muted-foreground">
+              Detected {PROFILE_META[detectedProfile].title} from file contents.
+            </p>
           )}
         </div>
 

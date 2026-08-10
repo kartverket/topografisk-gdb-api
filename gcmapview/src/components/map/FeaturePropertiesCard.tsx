@@ -1,19 +1,35 @@
-import { X } from 'lucide-react';
+import { Filter, FilterX, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { formatPropertyValue, type InspectedFeature } from '../../map/featureInspect';
+import {
+  FILTERABLE_FEATURE_PROPERTY_KEYS,
+  filterableFeaturePropertyValue,
+  formatPropertyValue,
+  type ActiveFeatureFilter,
+  type InspectedFeature
+} from '../../map/featureInspect';
 
 type FeaturePropertiesCardProps = {
   feature: InspectedFeature;
+  activeFeatureFilter?: ActiveFeatureFilter;
   onClose: () => void;
+  onApplyFeatureFilter?: (featureFilter: ActiveFeatureFilter) => void;
+  onClearFeatureFilter?: () => void;
   onHoverPositionIndex?: (index: number | undefined) => void;
 };
 
-export function FeaturePropertiesCard({ feature, onClose, onHoverPositionIndex }: FeaturePropertiesCardProps) {
-  const entries = Object.entries(feature.properties).sort(([a], [b]) => a.localeCompare(b));
+export function FeaturePropertiesCard({
+  feature,
+  activeFeatureFilter,
+  onClose,
+  onApplyFeatureFilter,
+  onClearFeatureFilter,
+  onHoverPositionIndex
+}: FeaturePropertiesCardProps) {
   const isSourceLoading = Boolean(feature.positionsLoading);
+  const entries = Object.entries(feature.properties).sort(([a], [b]) => a.localeCompare(b));
 
   return (
     <Card
@@ -110,14 +126,52 @@ export function FeaturePropertiesCard({ feature, onClose, onHoverPositionIndex }
           <p className="text-sm text-muted-foreground">No properties</p>
         ) : (
           <dl className="m-0 grid gap-2 text-sm">
-            {entries.map(([key, value]) => (
-              <div
-                key={key}
-                className="min-w-0">
-                <dt className="font-medium text-muted-foreground">{key}</dt>
-                <dd className="m-0 break-words font-mono text-[12px] text-foreground">{formatPropertyValue(value)}</dd>
-              </div>
-            ))}
+            {entries.map(([key, value]) => {
+              const isFilterableKey = FILTERABLE_FEATURE_PROPERTY_KEYS.includes(
+                key as (typeof FILTERABLE_FEATURE_PROPERTY_KEYS)[number]
+              );
+              const filterValue = isFilterableKey ? filterableFeaturePropertyValue(feature.properties, key) : undefined;
+              const isActiveFilter = Boolean(
+                filterValue && activeFeatureFilter?.propertyKey === key && activeFeatureFilter.value === filterValue
+              );
+
+              return (
+                <div
+                  key={key}
+                  className="min-w-0">
+                  <dt className="font-medium text-muted-foreground">{key}</dt>
+                  {filterValue ? (
+                    <dd className="m-0 flex items-start justify-between gap-2">
+                      <span className="min-w-0 break-words font-mono text-[12px] text-foreground">
+                        {formatPropertyValue(value)}
+                      </span>
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant={isActiveFilter ? 'secondary' : 'ghost'}
+                        className="size-6 shrink-0"
+                        aria-label={
+                          isActiveFilter ? `Clear ${key} filter ${filterValue}` : `Filter by ${key} ${filterValue}`
+                        }
+                        title={
+                          isActiveFilter ? `Clear ${key} filter ${filterValue}` : `Filter by ${key} ${filterValue}`
+                        }
+                        onClick={() =>
+                          isActiveFilter
+                            ? onClearFeatureFilter?.()
+                            : onApplyFeatureFilter?.({ propertyKey: key, value: filterValue })
+                        }>
+                        {isActiveFilter ? <FilterX /> : <Filter />}
+                      </Button>
+                    </dd>
+                  ) : (
+                    <dd className="m-0 break-words font-mono text-[12px] text-foreground">
+                      {formatPropertyValue(value)}
+                    </dd>
+                  )}
+                </div>
+              );
+            })}
           </dl>
         )}
       </CardContent>

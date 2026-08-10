@@ -9,7 +9,11 @@ import { sourcePositions } from './mapViewGeometry';
 const MISSING_HEIGHT_Z = -99_999;
 
 type HoverOverlayTransform = {
-  coordinatePoint?: (coord: maplibregl.MercatorCoordinate, elevation?: number, pixelMatrix?: unknown) => maplibregl.Point;
+  coordinatePoint?: (
+    coord: maplibregl.MercatorCoordinate,
+    elevation?: number,
+    pixelMatrix?: unknown
+  ) => maplibregl.Point;
   _pixelMatrix3D?: unknown;
 };
 
@@ -64,9 +68,7 @@ function numericFeatureProperty(properties: Record<string, unknown>, propertyNam
 }
 
 function publicFeatureProperties(feature: Feature): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(feature.properties ?? {}).filter(([key]) => !key.startsWith('__gcmapview'))
-  );
+  return Object.fromEntries(Object.entries(feature.properties ?? {}).filter(([key]) => !key.startsWith('__gcmapview')));
 }
 
 function adjustedHoverAltitude(height: number | undefined, zOffset = 0): number {
@@ -102,7 +104,11 @@ function hoveredPositionAltitudeMeters(feature: InspectedFeature, positionIndex:
   );
 }
 
-function projectHoverOverlayPoint(map: maplibregl.Map, lngLat: maplibregl.LngLat, altitudeMeters: number): maplibregl.Point {
+function projectHoverOverlayPoint(
+  map: maplibregl.Map,
+  lngLat: maplibregl.LngLat,
+  altitudeMeters: number
+): maplibregl.Point {
   if (altitudeMeters <= 0) {
     return map.project(lngLat);
   }
@@ -138,7 +144,11 @@ export function useSelectedFeature({ mapRef, is3d }: UseSelectedFeatureOptions) 
   const hoveredPositionOverlayRef = useRef<HTMLDivElement | undefined>(undefined);
 
   useEffect(() => {
-    if (!selectedFeature?.positionsLoading || !selectedFeature.collectionId || selectedFeature.featureId === undefined) {
+    if (
+      !selectedFeature?.positionsLoading ||
+      !selectedFeature.collectionId ||
+      selectedFeature.featureId === undefined
+    ) {
       return;
     }
 
@@ -193,9 +203,7 @@ export function useSelectedFeature({ mapRef, is3d }: UseSelectedFeatureOptions) 
         console.error('[gcmapview] failed to load stored coordinate positions', cause);
         if (!cancelled) {
           setSelectedFeature(current =>
-            current && featureSelectionKey(current) === selectionKey
-              ? { ...current, positionsLoading: false }
-              : current
+            current && featureSelectionKey(current) === selectionKey ? { ...current, positionsLoading: false } : current
           );
         }
       }
@@ -229,8 +237,7 @@ export function useSelectedFeature({ mapRef, is3d }: UseSelectedFeatureOptions) 
     let overlay = hoveredPositionOverlayRef.current;
     if (!overlay) {
       overlay = document.createElement('div');
-      overlay.className =
-        'h-3 w-3 rounded-full border-2 border-white bg-amber-500 shadow-[0_0_0_2px_rgb(0_0_0/0.35)]';
+      overlay.className = 'h-3 w-3 rounded-full border-2 border-white bg-amber-500 shadow-[0_0_0_2px_rgb(0_0_0/0.35)]';
       overlay.style.pointerEvents = 'none';
       overlay.style.position = 'absolute';
       overlay.style.top = '0';
