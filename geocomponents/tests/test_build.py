@@ -66,6 +66,13 @@ def test_relationship_becomes_fk_column():
     assert ("parcel_id", "cadastre.parcels") in fks
 
 
+def test_relationship_fk_ddl_is_guarded_for_reapply():
+    ddl = "\n".join(postgis.table_statements(_cadastre_plan()))
+    assert "conrelid = 'cadastre.buildings'::regclass" in ddl
+    assert "and conname = 'buildings_parcel_id_fkey'" in ddl
+    assert 'add constraint "buildings_parcel_id_fkey"' in ddl
+
+
 def test_internal_function_names_are_private_and_per_operation():
     plan = _cadastre_plan()
     parcels = next(c for c in plan.collections if c.collection_name == "parcels")
