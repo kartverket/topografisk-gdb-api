@@ -6,6 +6,8 @@ both the PostGIS schema and the per-dataset
 [OGC API — Features](https://ogcapi.ogc.org/features/) services are generated
 from those descriptions.
 
+System overview (Mermaid): [`ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ## Repository layout
 
 - [`geocomponents/`](geocomponents/) — the engine. Start with its
