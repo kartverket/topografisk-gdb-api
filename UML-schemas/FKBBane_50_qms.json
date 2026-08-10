@@ -1,0 +1,993 @@
+{
+  "SosiVersjon": "5.0",
+  "Objektkatalog": {
+    "Kortnavn": "FKBBane",
+    "Versjon": "5.0",
+    "UndertypeVersjon": "",
+    "Objektkataloggruppe": "",
+    "ObjektkatalogFullstendigNavn": "FKB-Bane",
+    "Objektkataloglink": ""
+  },
+  "GMLSkjema": "http://skjema.geonorge.no/SOSI/produktspesifikasjon/FKB-Bane/5.0/FKBBane.xsd",
+  "DefaultAttributeTypes": [
+    {
+      "TypeName": "Synbarhet",
+      "Type": "CodeList",
+      "Name": "synbarhet",
+      "SosiName": "SYNBARHET",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "CodeListURL": "https://register.geonorge.no/sosi-kodelister/fkb/generell/5.0/synbarhet.gml",
+      "Description": "synbarhet beskriver hvor godt objektene framgår i datagrunnlaget for posisjonering (f.eks. flybildene).",
+      "UUID": "{089E64F2-5E27-4e0d-8858-59AF69711578}",
+      "CodeList": [
+        {
+          "Name": "Middels synlig",
+          "Description": "Objektet er middels synlig/gjenkjennbart i flybilde eller annen datakilde for posisjonering. Ved fotogrammetrisk datafangst brukes denne koden for objekter som har lav kontrast eller er delvis skjult av overliggende objekter (vegetasjon, takoverbygg, bruer etc.). For slike objekter settes en større verdi for nøyaktighet enn kravet (opptil 3 ganger kravet)",
+          "Value": "2",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Ikke synlig",
+          "Description": "Objektet er ikke synlig/gjenkjennbart i flybilde eller annen datakilde for posisjonering. Ved fotogrammetrisk datafangst brukes denne koden for objekter som er helt skjult av overliggende objekter (vegetasjon, takoverbygg, bruer etc.). For slike objekter settes en stor verdi for nøyaktighet (mer enn 3 ganger kravet)",
+          "Value": "3",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Fullt ut synlig",
+          "Description": "Objektet er fullt ut synlig/gjenfinnbart i flybilde eller annen datakilde for posisjonering. Ved fotogrammetrisk registrering skal objekter som er fullt ut synlige registreres i tråd med angitte krav til nøyaktig registrering.",
+          "Value": "0",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Dårlig gjenfinnbar i terreng",
+          "Description": "Objektets posisjon er vanskelig å definere presist i terrenget på grunn av objektets natur eller manglende kontrast mot omgivelsene. Koden kan f.eks. brukes på høydekurver (eller andre isolinjer) eller objekter som er skjult i bakken (f.eks. innmåling av ledninger på lukket grøft)",
+          "Value": "1",
+          "Status": "Gyldig"
+        }
+      ]
+    },
+    {
+      "TypeName": "Datafangstmetode",
+      "Type": "CodeList",
+      "Name": "datafangstmetode",
+      "SosiName": "DATAFANGSTMETODE",
+      "MultiplicityMin": 1,
+      "MultiplicityMax": 1,
+      "CodeListURL": "https://register.geonorge.no/sosi-kodelister/fkb/generell/5.0/datafangstmetode.gml",
+      "Description": "metode for datafangst. .Datafangstmetoden beskriver hvordan selve vektordataene er posisjonert fra et datagrunnlag (observasjoner med landmålingsutstyr, fotogrammetrisk stereomodell, digital terrengmodell etc.) og ikke prosessen med å innhente det bakenforliggende datagrunnlaget.",
+      "UUID": "{4BED438B-1A12-4bec-9FA9-61A627351826}",
+      "CodeList": [
+        {
+          "Name": "Som bygget",
+          "Description": "Posisjonen er hentet fra prosjekterte eller planlagte data, f.eks. fra en BIM-modell, som er verifisert som bygget ved innmålinger",
+          "Value": "byg",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Ukjent",
+          "Description": "Ukjent eller uspesifisert datafangstmetode",
+          "Value": "ukj",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Plandata",
+          "Description": "Posisjonen er hentet plandata. Posisjonen er ikke verifisert med innmåling.",
+          "Value": "pla",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Satellittmålt",
+          "Description": "Posisjonen er målt inn direkte med GNSS (for posisjoner målt inn med GNSS i kombinasjon med andre landmålingsmetoder skal koden Landmåling benyttes)",
+          "Value": "sat",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Generert",
+          "Description": "Posisjonen er manuelt konstruert, eller generert ved maskinlæring eller annen type programvare, fra punktsky fra laserskanning, bildematching, sonar, andre typer sensordata eller kombinasjon av flere typer sensordata.",
+          "Value": "gen",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Fotogrammetri",
+          "Description": "Posisjonen er konstruert/generert fra en fotogrammetrisk stereomodell",
+          "Value": "fot",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Digitalisert",
+          "Description": "Posisjonen er digitalisert fra ortofoto eller andre plane kartdata",
+          "Value": "dig",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Landmålt",
+          "Description": "Posisjonen er målt inn direkte med en landmålingsmetode. Aktuelle landmålingsmetoder kan være nivellering, vinkelmåling, avstandsmåling eller treghetsmåling. Kodeverdien brukes også for kombinasjoner av disse målemetodene eller der disse målemetodene kombineres med GNSS. Landmåling utføres normalt med overskytende målinger og utjevning av resultatet.",
+          "Value": "lan",
+          "Status": "Gyldig"
+        }
+      ]
+    },
+    {
+      "TypeName": "Registreringsversjon",
+      "Type": "CodeList",
+      "Name": "Registreringsversjon",
+      "SosiName": "REGISTRERINGSVERSJON",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "CodeListURL": "https://register.geonorge.no/sosi-kodelister/fkb/generell/5.0/registreringsversjon.gml",
+      "Description": "FKB-verjson som ligger til grunn for registrering. Mest relevant for data som er fotogrammetrisk registrert.",
+      "UUID": "{481EB96A-EB62-4f20-8B7C-868EF3B9B508}",
+      "CodeList": [
+        {
+          "Name": "FKB 4.5 2014-03-01",
+          "Description": "Data registrert etter FKB 4.5 2014-03-01",
+          "Value": "2014-03-01",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "NRL 1.0 2022-07-01",
+          "Description": "Data registrert etter NRL distribusjon 1.0 2022-07-01",
+          "Value": "2022-07-01",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "FKB 4.6 2020-01-01",
+          "Description": "Data registrert etter FKB 4.6/4.61 2020-01-01",
+          "Value": "2020-01-01",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "FKB 4.6 2018-01-01",
+          "Description": "Data registrert etter FKB 4.6/4.61 2018-01-01",
+          "Value": "2018-01-01",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "FKB 5.0 2022-01-01",
+          "Description": "Data registrert etter FKB 5.0 2022-01-01",
+          "Value": "2022-01-01",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "FKB 4.01 2011-01-01",
+          "Description": "Data registrert etter FKB 4.01 2011-01-01",
+          "Value": "2011-01-01",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "FKB 4.0 2007-01-01",
+          "Description": "Data registrert etter FKB 4.0 2007-01-01",
+          "Value": "2007-01-01",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "FKB 4.6 2016-06-01",
+          "Description": "Data registrert etter FKB 4.6 2016-06-01",
+          "Value": "2016-06-01",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "FKB 4.01 2009-03-10",
+          "Description": "Data registrert etter FKB 4.01 2009-03-10",
+          "Value": "2009-03-10",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "FKB 4.5 2015-01-01",
+          "Description": "Data registrert etter FKB 4.5 2015-01-01",
+          "Value": "2015-01-01",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "FKB 4.02 2013-01-01",
+          "Description": "Data registrert etter FKB 4.02 2013-01-01",
+          "Value": "2013-01-01",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "FKB 4.02 2011-12-01",
+          "Description": "Data registrert etter FKB 4.02 2011-12-01",
+          "Value": "2011-12-01",
+          "Status": "Gyldig"
+        }
+      ]
+    },
+    {
+      "TypeName": "Høydereferanse",
+      "Type": "CodeList",
+      "Name": "Høydereferanse",
+      "SosiName": "HREF",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "CodeListURL": "https://register.geonorge.no/sosi-kodelister/fkb/generell/5.0/hoydereferanse.gml",
+      "Description": "koordinatregistering utført på topp eller bunn av et objekt",
+      "UUID": "{628A8673-197F-4036-97EF-D49B433178FC}",
+      "CodeList": [
+        {
+          "Name": "Fot",
+          "Description": "Høyden målt til foten av objektet",
+          "Value": "fot",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Ukjent",
+          "Description": "Ukjent høydereferanse",
+          "Value": "ukjent",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Topp",
+          "Description": "Høyden målt til toppen av objektet",
+          "Value": "topp",
+          "Status": "Gyldig"
+        }
+      ]
+    },
+    {
+      "TypeName": "Medium",
+      "Type": "CodeList",
+      "Name": "Medium",
+      "SosiName": "MEDIUM",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "CodeListURL": "https://register.geonorge.no/sosi-kodelister/fkb/generell/5.0/medium.gml",
+      "Description": "objektets beliggenhet i forhold til jordoverflaten.Eksempel:.Veg på bro, i tunnel, inne i et bygningsmessig anlegg, etc.",
+      "UUID": "{3CCB96CD-98A4-413c-A2A2-3758D8D73CC6}",
+      "CodeList": [
+        {
+          "Name": "På terrenget",
+          "Description": "På terrenget/på bakkenivå",
+          "Value": "T",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Ukjent",
+          "Description": "Ukjent plassering i forhold til jordoverflaten",
+          "Value": "X",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Delvis under vann",
+          "Description": "Delvis i eller under vann",
+          "Value": "D",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "På Isbre",
+          "Description": "På isbre",
+          "Value": "I",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Under terrenget",
+          "Description": "Under terrenget",
+          "Value": "U",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "I vann",
+          "Description": "Alltid i vann",
+          "Value": "V",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "I Bygning",
+          "Description": "I eller på bygning eller bygningsmessig anlegg",
+          "Value": "B",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "I luft",
+          "Description": "I lufta",
+          "Value": "L",
+          "Status": "Gyldig"
+        }
+      ]
+    },
+    {
+      "TypeName": "Jernbanetype",
+      "Type": "CodeList",
+      "Name": "Jernbanetype",
+      "SosiName": "JERNBANETYPE",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "CodeListURL": "https://register.geonorge.no/sosi-kodelister/fkb/bane/5.0/jernbanetype.gml",
+      "Description": "klassifisering av jernbaneanlegg i hht. konstruksjon/dimensjonering",
+      "UUID": "{7D3650C9-2387-4a02-B43D-5DC3590F6DF9}",
+      "CodeList": [
+        {
+          "Name": "Sporveg",
+          "Description": "Spor for skinnegående persontransport som hovedsakelig finnes i byområder, også kalt trikk. Karakterisert av delte traséer i gater og veier. Som regel med strømforsyning i kontaktledning over traséen. Eksempel: Trikken i Oslo",
+          "Value": "S",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Kabelbane",
+          "Description": "Spor for skinnegående transport karakterisert ved kabeldrift. Eksempel: Fløibanen i Bergen.",
+          "Value": "K",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Forstadsbane",
+          "Description": "En mellomting mellom jernbane, tunnelbane og sporveg. Som regel i separate trasé (som tunnelbane), men med strømforsyning i kontaktledning. Eksempel: Bybanen i Bergen, Ekebergbanen i Oslo.",
+          "Value": "F",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Jernbane",
+          "Description": "Spor for togtrafikk for transport av passasjerer og gods. Eksempel: Det nasjonale jernbanenettet.",
+          "Value": "J",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Tunnelbane",
+          "Description": "Spor for skinnegående persontransport som hovedsakelig finnes i byområder. Karakterisert av separate traséer og lengre traséer i tunnel, som regel med strømforsyning i strømskinne. Eksempel: T-banen i Oslo.",
+          "Value": "T",
+          "Status": "Gyldig"
+        }
+      ]
+    },
+    {
+      "TypeName": "Identifikasjon",
+      "Type": "Struct",
+      "Name": "Identifikasjon",
+      "SosiName": "IDENT",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "Description": "Unik identifikasjon av et objekt i et datasett, forvaltet av den ansvarlige produsent/forvalter, og kan benyttes av eksterne applikasjoner som stabil referanse til objektet. .Merknad 1: Denne objektidentifikasjonen må ikke forveksles med en tematisk objektidentifikasjon, slik som f.eks bygningsnummer. .Merknad 2: Denne unike identifikatoren vil ikke endres i løpet av objektets levetid, og ikke gjenbrukes i andre objekt.",
+      "UUID": "{3678046B-4711-4473-B26F-12553D99F99D}",
+      "AttributeTypes": [
+        {
+          "Name": "lokalId",
+          "SosiName": "LOKALID",
+          "UUID": "{21131DB4-F876-45a2-9A57-61116299EC92}"
+        },
+        {
+          "Name": "navnerom",
+          "SosiName": "NAVNEROM",
+          "UUID": "{5E1AA8A4-1CDC-4092-A867-3FCA51F081B3}"
+        },
+        {
+          "Name": "versjonId",
+          "SosiName": "VERSJONID",
+          "UUID": "{0CC490F1-0706-4782-98AA-47794C5EE423}"
+        }
+      ]
+    },
+    {
+      "TypeName": "CharacterString",
+      "Type": "String",
+      "Name": "lokalId",
+      "SosiName": "LOKALID",
+      "MultiplicityMin": 1,
+      "MultiplicityMax": 1,
+      "Description": "lokal identifikator av et objekt.Merknad: Det er dataleverendørens ansvar å sørge for at den lokale identifikatoren er unik innenfor navnerommet. For FKB-data benyttes UUID som lokalId.",
+      "UUID": "{21131DB4-F876-45a2-9A57-61116299EC92}"
+    },
+    {
+      "TypeName": "CharacterString",
+      "Type": "String",
+      "Name": "navnerom",
+      "SosiName": "NAVNEROM",
+      "MultiplicityMin": 1,
+      "MultiplicityMax": 1,
+      "Description": "navnerom som unikt identifiserer datakilden til et objekt, anbefales å være en http-URI.Eksempel: http://data.geonorge.no/SentraltStedsnavnsregister/1.0.Merknad : Verdien for nanverom vil eies av den dataprodusent som har ansvar for de unike identifikatorene og må være registrert i data.geonorge.no eller data.norge.no",
+      "UUID": "{5E1AA8A4-1CDC-4092-A867-3FCA51F081B3}"
+    },
+    {
+      "TypeName": "CharacterString",
+      "Type": "String",
+      "Name": "versjonId",
+      "SosiName": "VERSJONID",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "Description": "identifikasjon av en spesiell versjon av et geografisk objekt (instans)",
+      "UUID": "{0CC490F1-0706-4782-98AA-47794C5EE423}"
+    },
+    {
+      "TypeName": "Datafangstmetode",
+      "Type": "CodeList",
+      "Name": "datafangstmetodeHøyde",
+      "SosiName": "DATAFANGSTMETODEHØYDE",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "Description": "metoden brukt for høyderegistrering av posisjon.Det er bare nødvending å angi en verdi for egenskapen dersom datafangstmetode for høyde avviker fra datafangstmetode for grunnriss.",
+      "UUID": "{1B484A46-9C50-4F84-9C9E-BC25D0FA9C86}",
+      "CodeList": [
+        {
+          "Name": "Som bygget",
+          "Description": "Posisjonen er hentet fra prosjekterte eller planlagte data, f.eks. fra en BIM-modell, som er verifisert som bygget ved innmålinger",
+          "Value": "byg",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Ukjent",
+          "Description": "Ukjent eller uspesifisert datafangstmetode",
+          "Value": "ukj",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Plandata",
+          "Description": "Posisjonen er hentet plandata. Posisjonen er ikke verifisert med innmåling.",
+          "Value": "pla",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Satellittmålt",
+          "Description": "Posisjonen er målt inn direkte med GNSS (for posisjoner målt inn med GNSS i kombinasjon med andre landmålingsmetoder skal koden Landmåling benyttes)",
+          "Value": "sat",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Generert",
+          "Description": "Posisjonen er manuelt konstruert, eller generert ved maskinlæring eller annen type programvare, fra punktsky fra laserskanning, bildematching, sonar, andre typer sensordata eller kombinasjon av flere typer sensordata.",
+          "Value": "gen",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Fotogrammetri",
+          "Description": "Posisjonen er konstruert/generert fra en fotogrammetrisk stereomodell",
+          "Value": "fot",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Digitalisert",
+          "Description": "Posisjonen er digitalisert fra ortofoto eller andre plane kartdata",
+          "Value": "dig",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Landmålt",
+          "Description": "Posisjonen er målt inn direkte med en landmålingsmetode. Aktuelle landmålingsmetoder kan være nivellering, vinkelmåling, avstandsmåling eller treghetsmåling. Kodeverdien brukes også for kombinasjoner av disse målemetodene eller der disse målemetodene kombineres med GNSS. Landmåling utføres normalt med overskytende målinger og utjevning av resultatet.",
+          "Value": "lan",
+          "Status": "Gyldig"
+        }
+      ]
+    },
+    {
+      "TypeName": "Posisjonskvalitet",
+      "Type": "Struct",
+      "Name": "Posisjonskvalitet",
+      "SosiName": "KVALITET",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "Description": "beskrivelse av kvaliteten på stedfestingen.Merknad:.Posisjonskvalitet er ikke konform med kvalitetsmodellen i ISO slik den er defineret i ISO19157:2013, men er en videreføring av tildligere brukte kvalitetsegenskaper i SOSI. FKB 5.0 innfører en egen variant av datatypen Posisjonskvalitet der kodeliste målemetode er byttet ut med den mer generelle kodelista Datafangstmetode.",
+      "UUID": "{1E6768FB-6EDA-4d4f-89F8-76DAEDF3B55A}",
+      "AttributeTypes": [
+        {
+          "Name": "datafangstmetode",
+          "SosiName": "DATAFANGSTMETODE",
+          "UUID": "{4BED438B-1A12-4bec-9FA9-61A627351826}"
+        },
+        {
+          "Name": "nøyaktighet",
+          "SosiName": "NØYAKTIGHET",
+          "UUID": "{761F030D-069A-4b22-A07A-5F6E1618344A}"
+        },
+        {
+          "Name": "synbarhet",
+          "SosiName": "SYNBARHET",
+          "UUID": "{089E64F2-5E27-4e0d-8858-59AF69711578}"
+        },
+        {
+          "Name": "datafangstmetodeHøyde",
+          "SosiName": "DATAFANGSTMETODEHØYDE",
+          "UUID": "{1B484A46-9C50-4F84-9C9E-BC25D0FA9C86}"
+        },
+        {
+          "Name": "nøyaktighetHøyde",
+          "SosiName": "H-NØYAKTIGHET",
+          "UUID": "{2C5D6658-AFB9-403b-8BD7-08217AE11486}"
+        }
+      ]
+    },
+    {
+      "TypeName": "Integer",
+      "Type": "Integer",
+      "Name": "nøyaktighet",
+      "SosiName": "NØYAKTIGHET",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "Description": "standardavviket til posisjoneringa av objektet oppgitt i cm.I de aller fleste sammenhenger benyttes en anslått eller forventet verdi for standardavvik, men dersom man har en beregnet verdi skal denne benyttes. .For objekter med punktgeometri benyttes verdi for punktstandardavvik. For objekter med kurvegeometri benyttes standardavviket for tverravviket fra kurva. For objekter med overflate- eller volumgeometri er forståelsen at standardavviket beregnes ut fra (3D) avvikene mellom sann posisjon og nærmeste punkt på overflata. .Merknad:.Verdien er ment å beskrive nøyaktigheten til objektet sammenlignet med sann verdi. Standardavvik er i utgangspunktet et mål på det tilfeldige avviket og det innebærer at vi forutsetter at det systematiske avviket i liten grad påvirker nøyaktigheten til posisjoneringa. For fotogrammetriske data settes som hovedregel verdien lik kravet til standardavvik ved datafangst. Se standarden Geodatakvalitet for nærmere definisjon av standardavvik og hvordan dette defineres, beregnes og kontrolleres.",
+      "UUID": "{761F030D-069A-4b22-A07A-5F6E1618344A}"
+    },
+    {
+      "TypeName": "Integer",
+      "Type": "Integer",
+      "Name": "nøyaktighetHøyde",
+      "SosiName": "H-NØYAKTIGHET",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "Description": "standardavviket til posisjoneringa av objektet oppgitt i cm.I de aller fleste sammenhenger benyttes en anslått eller forventet verdi for standardavvik, men dersom man har en beregnet verdi skal denne benyttes. .For objekter med punktgeometri benyttes verdi for punktstandardavvik. For objekter med kurvegeometri benyttes standardavviket for tverravviket fra kurva. For objekter med overflate- eller volumgeometri er forståelsen at standardavviket beregnes ut fra (3D) avvikene mellom sann posisjon og nærmeste punkt på overflata. .Merknad:.Verdien er ment å beskrive nøyaktigheten til objektet sammenlignet med sann verdi. Standardavvik er i utgangspunktet et mål på det tilfeldige avviket og det innebærer at vi forutsetter at det systematiske avviket i liten grad påvirker nøyaktigheten til posisjoneringa. For fotogrammetriske data settes som hovedregel verdien lik kravet til standardavvik ved datafangst. Se standarden Geodatakvalitet for nærmere definisjon av standardavvik og hvordan dette defineres, beregnes og kontrolleres.",
+      "UUID": "{2C5D6658-AFB9-403b-8BD7-08217AE11486}"
+    },
+    {
+      "TypeName": "oppdateringsdato",
+      "Type": "DateTime",
+      "Name": "oppdateringsdato",
+      "SosiName": "OPPDATERINGSDATO",
+      "MultiplicityMin": 1,
+      "MultiplicityMax": 1,
+      "Description": "tidspunkt for siste endring på objektet .Merknad FKB: .Denne datoen viser datasystemets siste endring på dataobjektet. Egenskapen settes av forvaltningssystemet etter følgende regler:.i. Oppdateringsdato er tidspunkt for oppdatering av databasen og settes av forvaltningsbasen (ikke av klienten).ii. Oppdateringsdato skal endres også hvis det er kopidata som blir endret eller importert i en ”kopibase”.iii. Når avgrensingslinjene til en flate endres, skal flateobjektet få ny oppdateringsdato.iv. Oppdateringsdato skal endres hvis en egenskap endres.",
+      "UUID": "{F1F1CCDE-676A-4619-B786-D5F5888B9A13}"
+    },
+    {
+      "TypeName": "sluttdato",
+      "Type": "DateTime",
+      "Name": "sluttdato",
+      "SosiName": "SLUTTDATO",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "Description": "Tid for når denne versjonen av objektet var erstattet eller opphørt å eksistere.Merknad FKB:.Egenskapen settes av forvaltningssystemet. Sluttdato skal kun sendes med ut fra forvaltningssystemet i sammenhenger der objektenes historikk er interessant.",
+      "UUID": "{BEC6D7ED-ACD9-4514-B52B-8F5C066CB387}"
+    },
+    {
+      "TypeName": "datafangstdato",
+      "Type": "Date",
+      "Name": "datafangstdato",
+      "SosiName": "DATAFANGSTDATO",
+      "MultiplicityMin": 1,
+      "MultiplicityMax": 1,
+      "Description": "dato når objektet siste gang ble registrert/observert/målt i terrenget",
+      "UUID": "{DA3F8596-5E1C-4646-A3CD-758A806E39B3}"
+    },
+    {
+      "TypeName": "verifiseringsdato",
+      "Type": "Date",
+      "Name": "verifiseringsdato",
+      "SosiName": "VERIFISERINGSDATO",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "Description": "dato når dataene er fastslått å være i samsvar med virkeligheten.Merknad FKB:.Brukes for eksempel i de sammenhenger hvor det er foretatt fotogrammetrisk ajourhold, og hvor det ikke er registrert endringer på objektet (det virkelige objektet er i samsvar med dataobjektet)",
+      "UUID": "{2CEC1334-DB57-4876-A49B-0F1652472482}"
+    },
+    {
+      "TypeName": "informasjon",
+      "Type": "String",
+      "Name": "informasjon",
+      "SosiName": "INFORMASJON",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "Description": "generell opplysning.Merknad FKB:.Mulighet til å legge inn utfyllende informasjon om objektet. Egenskapen bør bare brukes til å legge inn ekstra informasjon om enkeltobjekter. Egenskapen bør ikke brukes til å systematisk angi ekstrainformasjon om mange/alle objekter i et datasett.",
+      "UUID": "{54095C5D-0A05-4d3f-9CE6-CE65A67F0EEA}"
+    },
+    {
+      "TypeName": "eksternpeker",
+      "Type": "URI",
+      "Name": "eksternpeker",
+      "SosiName": "EKSTERNPEKER",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "Description": "referanse til objektet i et eksternt system",
+      "UUID": "{845A150C-27CE-4d17-8A42-097A133E708A}"
+    },
+    {
+      "TypeName": "eksternpeker",
+      "Type": "URI",
+      "Name": "eksternpeker",
+      "SosiName": "EKSTERNPEKER",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "Description": "referanse til objektet i et eksternt system",
+      "UUID": "{42C89B54-EA6E-431a-9AF7-A8482E3109C2}"
+    }
+  ],
+  "FeatureTypes": [
+    {
+      "Name": "Jernbaneplattformkant",
+      "Description": "yttergrense av konstruksjon til bruk ved av-/påstigning for passasjerer eller ved av-/pålasting av gods",
+      "UUID": "{F360DDCC-8511-483f-8347-6909F250F971}",
+      "AttributeTypes": [
+        {
+          "Type": "CodeList",
+          "Name": "medium",
+          "SosiName": "MEDIUM",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "CodeListURL": "https://register.geonorge.no/sosi-kodelister/fkb/generell/5.0/medium.gml",
+          "Description": "objektets beliggenhet i forhold til jordoverflaten",
+          "UUID": "{3CCB96CD-98A4-413c-A2A2-3758D8D73CC6}"
+        },
+        {
+          "Type": "URI",
+          "Name": "eksternpeker",
+          "SosiName": "EKSTERNPEKER",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "referanse til objektet i et eksternt system",
+          "UUID": "{845A150C-27CE-4d17-8A42-097A133E708A}"
+        },
+        {
+          "Type": "Struct",
+          "Name": "kvalitet",
+          "SosiName": "KVALITET",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "beskrivelse av kvaliteten på stedfestingen.Merknad: Denne er identisk med .KVALITET i tidligere versjoner av SOSI.",
+          "UUID": "{1E6768FB-6EDA-4d4f-89F8-76DAEDF3B55A}",
+          "AttributeTypes": [
+            {
+              "Type": "CodeList",
+              "Name": "datafangstmetode",
+              "SosiName": "DATAFANGSTMETODE",
+              "MultiplicityMin": 1,
+              "MultiplicityMax": 1,
+              "CodeListURL": "https://register.geonorge.no/sosi-kodelister/fkb/generell/5.0/datafangstmetode.gml",
+              "Description": "metode for datafangst. .Datafangstmetoden beskriver hvordan selve vektordataene er posisjonert fra et datagrunnlag (observasjoner med landmålingsutstyr, fotogrammetrisk stereomodell, digital terrengmodell etc.) og ikke prosessen med å innhente det bakenforliggende datagrunnlaget.",
+              "UUID": "{4BED438B-1A12-4bec-9FA9-61A627351826}"
+            },
+            {
+              "Type": "Integer",
+              "Name": "nøyaktighet",
+              "SosiName": "NØYAKTIGHET",
+              "MultiplicityMin": 0,
+              "MultiplicityMax": 1,
+              "Description": "standardavviket til posisjoneringa av objektet oppgitt i cm.I de aller fleste sammenhenger benyttes en anslått eller forventet verdi for standardavvik, men dersom man har en beregnet verdi skal denne benyttes. .For objekter med punktgeometri benyttes verdi for punktstandardavvik. For objekter med kurvegeometri benyttes standardavviket for tverravviket fra kurva. For objekter med overflate- eller volumgeometri er forståelsen at standardavviket beregnes ut fra (3D) avvikene mellom sann posisjon og nærmeste punkt på overflata. .Merknad:.Verdien er ment å beskrive nøyaktigheten til objektet sammenlignet med sann verdi. Standardavvik er i utgangspunktet et mål på det tilfeldige avviket og det innebærer at vi forutsetter at det systematiske avviket i liten grad påvirker nøyaktigheten til posisjoneringa. For fotogrammetriske data settes som hovedregel verdien lik kravet til standardavvik ved datafangst. Se standarden Geodatakvalitet for nærmere definisjon av standardavvik og hvordan dette defineres, beregnes og kontrolleres.",
+              "UUID": "{761F030D-069A-4b22-A07A-5F6E1618344A}"
+            },
+            {
+              "Type": "CodeList",
+              "Name": "synbarhet",
+              "SosiName": "SYNBARHET",
+              "MultiplicityMin": 0,
+              "MultiplicityMax": 1,
+              "CodeListURL": "https://register.geonorge.no/sosi-kodelister/fkb/generell/5.0/synbarhet.gml",
+              "Description": "synbarhet beskriver hvor godt objektene framgår i datagrunnlaget for posisjonering (f.eks. flybildene).",
+              "UUID": "{089E64F2-5E27-4e0d-8858-59AF69711578}"
+            },
+            {
+              "Type": "CodeList",
+              "Name": "datafangstmetodeHøyde",
+              "SosiName": "DATAFANGSTMETODEHØYDE",
+              "MultiplicityMin": 0,
+              "MultiplicityMax": 1,
+              "CodeListURL": "https://register.geonorge.no/sosi-kodelister/fkb/generell/5.0/datafangstmetode.gml",
+              "Description": "metoden brukt for høyderegistrering av posisjon.Det er bare nødvending å angi en verdi for egenskapen dersom datafangstmetode for høyde avviker fra datafangstmetode for grunnriss.",
+              "UUID": "{1B484A46-9C50-4F84-9C9E-BC25D0FA9C86}"
+            },
+            {
+              "Type": "Integer",
+              "Name": "nøyaktighetHøyde",
+              "SosiName": "H-NØYAKTIGHET",
+              "MultiplicityMin": 0,
+              "MultiplicityMax": 1,
+              "Description": "standardavviket til posisjoneringa av objektet oppgitt i cm.I de aller fleste sammenhenger benyttes en anslått eller forventet verdi for standardavvik, men dersom man har en beregnet verdi skal denne benyttes. .For objekter med punktgeometri benyttes verdi for punktstandardavvik. For objekter med kurvegeometri benyttes standardavviket for tverravviket fra kurva. For objekter med overflate- eller volumgeometri er forståelsen at standardavviket beregnes ut fra (3D) avvikene mellom sann posisjon og nærmeste punkt på overflata. .Merknad:.Verdien er ment å beskrive nøyaktigheten til objektet sammenlignet med sann verdi. Standardavvik er i utgangspunktet et mål på det tilfeldige avviket og det innebærer at vi forutsetter at det systematiske avviket i liten grad påvirker nøyaktigheten til posisjoneringa. For fotogrammetriske data settes som hovedregel verdien lik kravet til standardavvik ved datafangst. Se standarden Geodatakvalitet for nærmere definisjon av standardavvik og hvordan dette defineres, beregnes og kontrolleres.",
+              "UUID": "{2C5D6658-AFB9-403b-8BD7-08217AE11486}"
+            }
+          ]
+        },
+        {
+          "Type": "Struct",
+          "Name": "identifikasjon",
+          "SosiName": "IDENT",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "unik identifikasjon av et objekt .Merknad FKB:.Unik identifikasjon av et objekt, ivaretas av den ansvarlige produsent/forvalter, og som kan benyttes av eksterne applikasjoner som referanse til objektet.Den unike identifikatoren er unik for kartobjektet og skal ikke endres i kartobjektets levetid. Dette må ikke forveksles med en tematisk identifikator (for eksempel bygningsnummer) som unikt identifiserer et objekt i virkeligheten. En bygning med samme bygningsnummer vil kunne representeres i mange kartprodukter der det finnes en unik identifikasjon i hver av dem.For FKB benyttes UUID (Universally unique identifier) som lokalId. Dette innebærer at lokalId alene alltid vil være unik. Likevel skal alltid navnerom også angis. Navnerom angir FKB-datasettet.",
+          "UUID": "{3678046B-4711-4473-B26F-12553D99F99D}",
+          "AttributeTypes": [
+            {
+              "Type": "String",
+              "Name": "lokalId",
+              "SosiName": "LOKALID",
+              "MultiplicityMin": 1,
+              "MultiplicityMax": 1,
+              "Description": "lokal identifikator av et objekt.Merknad: Det er dataleverendørens ansvar å sørge for at den lokale identifikatoren er unik innenfor navnerommet. For FKB-data benyttes UUID som lokalId.",
+              "UUID": "{21131DB4-F876-45a2-9A57-61116299EC92}"
+            },
+            {
+              "Type": "String",
+              "Name": "navnerom",
+              "SosiName": "NAVNEROM",
+              "MultiplicityMin": 1,
+              "MultiplicityMax": 1,
+              "Description": "navnerom som unikt identifiserer datakilden til et objekt, anbefales å være en http-URI.Eksempel: http://data.geonorge.no/SentraltStedsnavnsregister/1.0.Merknad : Verdien for nanverom vil eies av den dataprodusent som har ansvar for de unike identifikatorene og må være registrert i data.geonorge.no eller data.norge.no",
+              "UUID": "{5E1AA8A4-1CDC-4092-A867-3FCA51F081B3}"
+            },
+            {
+              "Type": "String",
+              "Name": "versjonId",
+              "SosiName": "VERSJONID",
+              "MultiplicityMin": 0,
+              "MultiplicityMax": 1,
+              "Description": "identifikasjon av en spesiell versjon av et geografisk objekt (instans)",
+              "UUID": "{0CC490F1-0706-4782-98AA-47794C5EE423}"
+            }
+          ]
+        },
+        {
+          "Type": "DateTime",
+          "Name": "oppdateringsdato",
+          "SosiName": "OPPDATERINGSDATO",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "tidspunkt for siste endring på objektet .Merknad FKB: .Denne datoen viser datasystemets siste endring på dataobjektet. Egenskapen settes av forvaltningssystemet etter følgende regler:.i. Oppdateringsdato er tidspunkt for oppdatering av databasen og settes av forvaltningsbasen (ikke av klienten).ii. Oppdateringsdato skal endres også hvis det er kopidata som blir endret eller importert i en ”kopibase”.iii. Når avgrensingslinjene til en flate endres, skal flateobjektet få ny oppdateringsdato.iv. Oppdateringsdato skal endres hvis en egenskap endres.",
+          "UUID": "{F1F1CCDE-676A-4619-B786-D5F5888B9A13}"
+        },
+        {
+          "Type": "DateTime",
+          "Name": "sluttdato",
+          "SosiName": "SLUTTDATO",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "Tid for når denne versjonen av objektet var erstattet eller opphørt å eksistere.Merknad FKB:.Egenskapen settes av forvaltningssystemet. Sluttdato skal kun sendes med ut fra forvaltningssystemet i sammenhenger der objektenes historikk er interessant.",
+          "UUID": "{BEC6D7ED-ACD9-4514-B52B-8F5C066CB387}"
+        },
+        {
+          "Type": "Date",
+          "Name": "datafangstdato",
+          "SosiName": "DATAFANGSTDATO",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "dato når objektet siste gang ble registrert/observert/målt i terrenget",
+          "UUID": "{DA3F8596-5E1C-4646-A3CD-758A806E39B3}"
+        },
+        {
+          "Type": "Date",
+          "Name": "verifiseringsdato",
+          "SosiName": "VERIFISERINGSDATO",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "dato når dataene er fastslått å være i samsvar med virkeligheten.Merknad FKB:.Brukes for eksempel i de sammenhenger hvor det er foretatt fotogrammetrisk ajourhold, og hvor det ikke er registrert endringer på objektet (det virkelige objektet er i samsvar med dataobjektet)",
+          "UUID": "{2CEC1334-DB57-4876-A49B-0F1652472482}"
+        },
+        {
+          "Type": "CodeList",
+          "Name": "registreringsversjon",
+          "SosiName": "REGISTRERINGSVERSJON",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "CodeListURL": "https://register.geonorge.no/sosi-kodelister/fkb/generell/5.0/registreringsversjon.gml",
+          "Description": "angivelse av hvilken produktspesifikasjon som er utgangspunkt for dataene",
+          "UUID": "{481EB96A-EB62-4f20-8B7C-868EF3B9B508}"
+        },
+        {
+          "Type": "String",
+          "Name": "informasjon",
+          "SosiName": "INFORMASJON",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "generell opplysning.Merknad FKB:.Mulighet til å legge inn utfyllende informasjon om objektet. Egenskapen bør bare brukes til å legge inn ekstra informasjon om enkeltobjekter. Egenskapen bør ikke brukes til å systematisk angi ekstrainformasjon om mange/alle objekter i et datasett.",
+          "UUID": "{54095C5D-0A05-4d3f-9CE6-CE65A67F0EEA}"
+        }
+      ],
+      "GeometryTypes": [
+        {
+          "Name": "grense",
+          "Type": "GM_Curve",
+          "Description": "forløp som følger overgang mellom ulike fenomener.",
+          "SosiName": "KURVE",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1
+        }
+      ]
+    },
+    {
+      "Name": "Spormidt",
+      "Description": "teoretisk linje midt mellom skinnestrengene",
+      "UUID": "{ED8419C1-DFB6-47b4-A83A-7205E7F5D653}",
+      "AttributeTypes": [
+        {
+          "Type": "CodeList",
+          "Name": "jernbanetype",
+          "SosiName": "JERNBANETYPE",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "CodeListURL": "https://register.geonorge.no/sosi-kodelister/fkb/bane/5.0/jernbanetype.gml",
+          "Description": "klassifisering av jernbaneanlegg i hht. konstruksjon/dimensjonering",
+          "UUID": "{7D3650C9-2387-4a02-B43D-5DC3590F6DF9}"
+        },
+        {
+          "Type": "CodeList",
+          "Name": "høydereferanse",
+          "SosiName": "HREF",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "CodeListURL": "https://register.geonorge.no/sosi-kodelister/fkb/generell/5.0/hoydereferanse.gml",
+          "Description": "koordinatregistering utført på topp eller bunn av et objekt",
+          "UUID": "{628A8673-197F-4036-97EF-D49B433178FC}"
+        },
+        {
+          "Type": "CodeList",
+          "Name": "medium",
+          "SosiName": "MEDIUM",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "CodeListURL": "https://register.geonorge.no/sosi-kodelister/fkb/generell/5.0/medium.gml",
+          "Description": "objektets beliggenhet i forhold til jordoverflaten",
+          "UUID": "{3CCB96CD-98A4-413c-A2A2-3758D8D73CC6}"
+        },
+        {
+          "Type": "URI",
+          "Name": "eksternpeker",
+          "SosiName": "EKSTERNPEKER",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "referanse til objektet i et eksternt system",
+          "UUID": "{42C89B54-EA6E-431a-9AF7-A8482E3109C2}"
+        },
+        {
+          "Type": "Struct",
+          "Name": "kvalitet",
+          "SosiName": "KVALITET",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "beskrivelse av kvaliteten på stedfestingen.Merknad: Denne er identisk med .KVALITET i tidligere versjoner av SOSI.",
+          "UUID": "{1E6768FB-6EDA-4d4f-89F8-76DAEDF3B55A}",
+          "AttributeTypes": [
+            {
+              "Type": "CodeList",
+              "Name": "datafangstmetode",
+              "SosiName": "DATAFANGSTMETODE",
+              "MultiplicityMin": 1,
+              "MultiplicityMax": 1,
+              "CodeListURL": "https://register.geonorge.no/sosi-kodelister/fkb/generell/5.0/datafangstmetode.gml",
+              "Description": "metode for datafangst. .Datafangstmetoden beskriver hvordan selve vektordataene er posisjonert fra et datagrunnlag (observasjoner med landmålingsutstyr, fotogrammetrisk stereomodell, digital terrengmodell etc.) og ikke prosessen med å innhente det bakenforliggende datagrunnlaget.",
+              "UUID": "{4BED438B-1A12-4bec-9FA9-61A627351826}"
+            },
+            {
+              "Type": "Integer",
+              "Name": "nøyaktighet",
+              "SosiName": "NØYAKTIGHET",
+              "MultiplicityMin": 0,
+              "MultiplicityMax": 1,
+              "Description": "standardavviket til posisjoneringa av objektet oppgitt i cm.I de aller fleste sammenhenger benyttes en anslått eller forventet verdi for standardavvik, men dersom man har en beregnet verdi skal denne benyttes. .For objekter med punktgeometri benyttes verdi for punktstandardavvik. For objekter med kurvegeometri benyttes standardavviket for tverravviket fra kurva. For objekter med overflate- eller volumgeometri er forståelsen at standardavviket beregnes ut fra (3D) avvikene mellom sann posisjon og nærmeste punkt på overflata. .Merknad:.Verdien er ment å beskrive nøyaktigheten til objektet sammenlignet med sann verdi. Standardavvik er i utgangspunktet et mål på det tilfeldige avviket og det innebærer at vi forutsetter at det systematiske avviket i liten grad påvirker nøyaktigheten til posisjoneringa. For fotogrammetriske data settes som hovedregel verdien lik kravet til standardavvik ved datafangst. Se standarden Geodatakvalitet for nærmere definisjon av standardavvik og hvordan dette defineres, beregnes og kontrolleres.",
+              "UUID": "{761F030D-069A-4b22-A07A-5F6E1618344A}"
+            },
+            {
+              "Type": "CodeList",
+              "Name": "synbarhet",
+              "SosiName": "SYNBARHET",
+              "MultiplicityMin": 0,
+              "MultiplicityMax": 1,
+              "CodeListURL": "https://register.geonorge.no/sosi-kodelister/fkb/generell/5.0/synbarhet.gml",
+              "Description": "synbarhet beskriver hvor godt objektene framgår i datagrunnlaget for posisjonering (f.eks. flybildene).",
+              "UUID": "{089E64F2-5E27-4e0d-8858-59AF69711578}"
+            },
+            {
+              "Type": "CodeList",
+              "Name": "datafangstmetodeHøyde",
+              "SosiName": "DATAFANGSTMETODEHØYDE",
+              "MultiplicityMin": 0,
+              "MultiplicityMax": 1,
+              "CodeListURL": "https://register.geonorge.no/sosi-kodelister/fkb/generell/5.0/datafangstmetode.gml",
+              "Description": "metoden brukt for høyderegistrering av posisjon.Det er bare nødvending å angi en verdi for egenskapen dersom datafangstmetode for høyde avviker fra datafangstmetode for grunnriss.",
+              "UUID": "{1B484A46-9C50-4F84-9C9E-BC25D0FA9C86}"
+            },
+            {
+              "Type": "Integer",
+              "Name": "nøyaktighetHøyde",
+              "SosiName": "H-NØYAKTIGHET",
+              "MultiplicityMin": 0,
+              "MultiplicityMax": 1,
+              "Description": "standardavviket til posisjoneringa av objektet oppgitt i cm.I de aller fleste sammenhenger benyttes en anslått eller forventet verdi for standardavvik, men dersom man har en beregnet verdi skal denne benyttes. .For objekter med punktgeometri benyttes verdi for punktstandardavvik. For objekter med kurvegeometri benyttes standardavviket for tverravviket fra kurva. For objekter med overflate- eller volumgeometri er forståelsen at standardavviket beregnes ut fra (3D) avvikene mellom sann posisjon og nærmeste punkt på overflata. .Merknad:.Verdien er ment å beskrive nøyaktigheten til objektet sammenlignet med sann verdi. Standardavvik er i utgangspunktet et mål på det tilfeldige avviket og det innebærer at vi forutsetter at det systematiske avviket i liten grad påvirker nøyaktigheten til posisjoneringa. For fotogrammetriske data settes som hovedregel verdien lik kravet til standardavvik ved datafangst. Se standarden Geodatakvalitet for nærmere definisjon av standardavvik og hvordan dette defineres, beregnes og kontrolleres.",
+              "UUID": "{2C5D6658-AFB9-403b-8BD7-08217AE11486}"
+            }
+          ]
+        },
+        {
+          "Type": "Struct",
+          "Name": "identifikasjon",
+          "SosiName": "IDENT",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "unik identifikasjon av et objekt .Merknad FKB:.Unik identifikasjon av et objekt, ivaretas av den ansvarlige produsent/forvalter, og som kan benyttes av eksterne applikasjoner som referanse til objektet.Den unike identifikatoren er unik for kartobjektet og skal ikke endres i kartobjektets levetid. Dette må ikke forveksles med en tematisk identifikator (for eksempel bygningsnummer) som unikt identifiserer et objekt i virkeligheten. En bygning med samme bygningsnummer vil kunne representeres i mange kartprodukter der det finnes en unik identifikasjon i hver av dem.For FKB benyttes UUID (Universally unique identifier) som lokalId. Dette innebærer at lokalId alene alltid vil være unik. Likevel skal alltid navnerom også angis. Navnerom angir FKB-datasettet.",
+          "UUID": "{3678046B-4711-4473-B26F-12553D99F99D}",
+          "AttributeTypes": [
+            {
+              "Type": "String",
+              "Name": "lokalId",
+              "SosiName": "LOKALID",
+              "MultiplicityMin": 1,
+              "MultiplicityMax": 1,
+              "Description": "lokal identifikator av et objekt.Merknad: Det er dataleverendørens ansvar å sørge for at den lokale identifikatoren er unik innenfor navnerommet. For FKB-data benyttes UUID som lokalId.",
+              "UUID": "{21131DB4-F876-45a2-9A57-61116299EC92}"
+            },
+            {
+              "Type": "String",
+              "Name": "navnerom",
+              "SosiName": "NAVNEROM",
+              "MultiplicityMin": 1,
+              "MultiplicityMax": 1,
+              "Description": "navnerom som unikt identifiserer datakilden til et objekt, anbefales å være en http-URI.Eksempel: http://data.geonorge.no/SentraltStedsnavnsregister/1.0.Merknad : Verdien for nanverom vil eies av den dataprodusent som har ansvar for de unike identifikatorene og må være registrert i data.geonorge.no eller data.norge.no",
+              "UUID": "{5E1AA8A4-1CDC-4092-A867-3FCA51F081B3}"
+            },
+            {
+              "Type": "String",
+              "Name": "versjonId",
+              "SosiName": "VERSJONID",
+              "MultiplicityMin": 0,
+              "MultiplicityMax": 1,
+              "Description": "identifikasjon av en spesiell versjon av et geografisk objekt (instans)",
+              "UUID": "{0CC490F1-0706-4782-98AA-47794C5EE423}"
+            }
+          ]
+        },
+        {
+          "Type": "DateTime",
+          "Name": "oppdateringsdato",
+          "SosiName": "OPPDATERINGSDATO",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "tidspunkt for siste endring på objektet .Merknad FKB: .Denne datoen viser datasystemets siste endring på dataobjektet. Egenskapen settes av forvaltningssystemet etter følgende regler:.i. Oppdateringsdato er tidspunkt for oppdatering av databasen og settes av forvaltningsbasen (ikke av klienten).ii. Oppdateringsdato skal endres også hvis det er kopidata som blir endret eller importert i en ”kopibase”.iii. Når avgrensingslinjene til en flate endres, skal flateobjektet få ny oppdateringsdato.iv. Oppdateringsdato skal endres hvis en egenskap endres.",
+          "UUID": "{F1F1CCDE-676A-4619-B786-D5F5888B9A13}"
+        },
+        {
+          "Type": "DateTime",
+          "Name": "sluttdato",
+          "SosiName": "SLUTTDATO",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "Tid for når denne versjonen av objektet var erstattet eller opphørt å eksistere.Merknad FKB:.Egenskapen settes av forvaltningssystemet. Sluttdato skal kun sendes med ut fra forvaltningssystemet i sammenhenger der objektenes historikk er interessant.",
+          "UUID": "{BEC6D7ED-ACD9-4514-B52B-8F5C066CB387}"
+        },
+        {
+          "Type": "Date",
+          "Name": "datafangstdato",
+          "SosiName": "DATAFANGSTDATO",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "dato når objektet siste gang ble registrert/observert/målt i terrenget",
+          "UUID": "{DA3F8596-5E1C-4646-A3CD-758A806E39B3}"
+        },
+        {
+          "Type": "Date",
+          "Name": "verifiseringsdato",
+          "SosiName": "VERIFISERINGSDATO",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "dato når dataene er fastslått å være i samsvar med virkeligheten.Merknad FKB:.Brukes for eksempel i de sammenhenger hvor det er foretatt fotogrammetrisk ajourhold, og hvor det ikke er registrert endringer på objektet (det virkelige objektet er i samsvar med dataobjektet)",
+          "UUID": "{2CEC1334-DB57-4876-A49B-0F1652472482}"
+        },
+        {
+          "Type": "CodeList",
+          "Name": "registreringsversjon",
+          "SosiName": "REGISTRERINGSVERSJON",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "CodeListURL": "https://register.geonorge.no/sosi-kodelister/fkb/generell/5.0/registreringsversjon.gml",
+          "Description": "angivelse av hvilken produktspesifikasjon som er utgangspunkt for dataene",
+          "UUID": "{481EB96A-EB62-4f20-8B7C-868EF3B9B508}"
+        },
+        {
+          "Type": "String",
+          "Name": "informasjon",
+          "SosiName": "INFORMASJON",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "generell opplysning.Merknad FKB:.Mulighet til å legge inn utfyllende informasjon om objektet. Egenskapen bør bare brukes til å legge inn ekstra informasjon om enkeltobjekter. Egenskapen bør ikke brukes til å systematisk angi ekstrainformasjon om mange/alle objekter i et datasett.",
+          "UUID": "{54095C5D-0A05-4d3f-9CE6-CE65A67F0EEA}"
+        }
+      ],
+      "GeometryTypes": [
+        {
+          "Name": "senterlinje",
+          "Type": "GM_Curve",
+          "Description": "forløp som følger objektets sentrale del ",
+          "SosiName": "KURVE",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1
+        }
+      ]
+    }
+  ],
+  "Groups": {
+    "Name": "root",
+    "Group": [
+      {
+        "Name": "FKB-Bane-5.0",
+        "Description": "Datamodell for FKB-Bane.Spesifikasjonen omfatter jernbanens infrastruktur - i hovedsak banelegemet. .Elementer som naturlig inngår i jernbanens infrastruktur, men som beskrives i mer generell form i andre FKB-datasett, er ikke tatt med i denne produktspesifikasjonen. Dette gjelder for eksempel spesifikasjoner for Høydekurve, Bygning, Bygningsmessige anlegg, Veg og Ledning.",
+        "Group": [
+          {
+            "Name": "Generelle elementer",
+            "Description": "pakke med elementer som realiserer tilsvarende elementer i FKB Generell del 5.0.Merknad:.Kopieres direkte inn i de enkelte FKB-datasettene"
+          }
+        ],
+        "TargetTypes": [
+          "Jernbaneplattformkant",
+          "Spormidt"
+        ]
+      }
+    ]
+  }
+}
