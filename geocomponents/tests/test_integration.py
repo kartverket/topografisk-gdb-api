@@ -23,6 +23,11 @@ PARCEL = {
     },
     "properties": {"label": "integration", "source": "test"},
 }
+# Self-intersecting (bowtie) polygon — ST_IsValid returns false.
+_INVALID_GEOM = {
+    "type": "MultiPolygon",
+    "coordinates": [[[[0, 0], [1, 1], [0, 1], [1, 0], [0, 0]]]],
+}
 
 
 def test_description_to_api_crud_roundtrip(db, datasets):
@@ -70,3 +75,35 @@ def test_description_to_api_crud_roundtrip(db, datasets):
         client.get(f"{API}/collections/parcels/items/{fid}?f=json").status_code
         == HTTPStatus.NOT_FOUND
     )
+
+
+def _client(db, datasets):
+    return TestClient(
+        build_gateway(
+            datasets, PygeoapiProvider(dsn=db), base_url="http://localhost:8000"
+        )
+    )
+
+
+def test_create_with_invalid_codelist_value_returns_422(db, datasets):
+    """Pre-code suspect (end-to-end): a codelist violation in the write function
+    must surface as HTTP 422, not 500, via the P0001 → ProviderValidationError path."""
+    feature = {**PARCEL, "properties": {**PARCEL["properties"], "status": "not_a_real_status"}}
+    r = _client(db, datasets).post(
+        f"{API}/collections/parcels/items",
+        content=orjson.dumps(feature).decode(),
+        headers={"content-type": "application/geo+json"},
+    )
+    assert r.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+def test_create_with_invalid_geometry_returns_422(db, datasets):
+    """Pre-code suspect (end-to-end): a geometry that fails ST_IsValid must
+    surface as HTTP 422 via the P0001 → ProviderValidationError path."""
+    feature = {**PARCEL, "geometry": _INVALID_GEOM}
+    r = _client(db, datasets).post(
+        f"{API}/collections/parcels/items",
+        content=orjson.dumps(feature).decode(),
+        headers={"content-type": "application/geo+json"},
+    )
+    assert r.status_code == HTTPStatus.UNPROCESSABLE_ENTITY

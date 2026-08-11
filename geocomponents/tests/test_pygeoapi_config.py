@@ -1,5 +1,12 @@
 from pathlib import Path
 
+import psycopg.errors
+import pytest
+
+from geocomponents.api.db_function_provider import (
+    ProviderValidationError,
+    _rethrow_pg_raise,
+)
 from geocomponents.api.pygeoapi_provider import (
     PROVIDER_PATH,
     _field_schema,
@@ -102,3 +109,32 @@ def test_field_schema_uses_doc_enum_when_no_codelist_values():
     fld = ResolvedField("medium", "text", enum=("A", "B", "C"))
     schema = _field_schema(fld)
     assert schema["enum"] == ["A", "B", "C"]
+
+
+# --------------------------------------------------------------------------
+# ProviderValidationError + _rethrow_pg_raise (Commit 7)
+# --------------------------------------------------------------------------
+
+
+def test_provider_validation_error_maps_to_422():
+    """Pre-code suspect: ProviderValidationError must carry HTTP 422 so pygeoapi
+    returns Unprocessable Content, not 500, for DB validation rejections."""
+    from http import HTTPStatus
+    assert ProviderValidationError().http_status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+def test_rethrow_pg_raise_converts_p0001_to_validation_error():
+    """Pre-code suspect: RaiseException (P0001) must be caught and re-raised as
+    ProviderValidationError — the gateway contract for validation failures."""
+    with pytest.raises(ProviderValidationError), _rethrow_pg_raise():
+        raise psycopg.errors.RaiseException()
+
+
+def test_rethrow_pg_raise_reraises_unknown_sqlstate_unchanged():
+    """Pre-code suspect: a RaiseException with a non-P0001 sqlstate must pass
+    through — the handler must not swallow unexpected DB errors."""
+    class _OtherRaise(psycopg.errors.RaiseException):
+        sqlstate = "P9999"
+
+    with pytest.raises(_OtherRaise), _rethrow_pg_raise():
+        raise _OtherRaise()

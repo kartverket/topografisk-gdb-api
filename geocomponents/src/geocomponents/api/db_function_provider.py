@@ -12,14 +12,39 @@ not physical names.**
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from http import HTTPStatus
+
 import orjson
 import psycopg
+import psycopg.errors
 from pygeoapi.provider.base import (
     BaseProvider,
+    ProviderInvalidDataError,
     ProviderItemNotFoundError,
     ProviderQueryError,
     SchemaType,
 )
+
+
+class ProviderValidationError(ProviderInvalidDataError):
+    """Feature rejected by a DB validation rule (P0001); signals HTTP 422."""
+
+    http_status_code = HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+@contextmanager
+def _rethrow_pg_raise():
+    """Convert a P0001 DB RAISE EXCEPTION to ProviderValidationError."""
+    try:
+        yield
+    except psycopg.errors.RaiseException as exc:
+        if exc.sqlstate == "P0001":
+            msg = (
+                exc.diag.message_primary if exc.diag is not None else None
+            ) or str(exc)
+            raise ProviderValidationError(user_msg=msg) from exc
+        raise
 
 
 def _as_feature_dict(item) -> dict:
@@ -190,7 +215,7 @@ class DbFunctionProvider(BaseProvider):
     # -- write (OGC API Features Part 4) ----------------------------------
     def create(self, item) -> str:
         feature = _as_feature_dict(item)
-        with self._connect() as conn, conn.cursor() as cur:
+        with _rethrow_pg_raise(), self._connect() as conn, conn.cursor() as cur:
             cur.execute(
                 "select ogc.feature_create(%s, %s, %s)",
                 (self.dataset, self.collection, orjson.dumps(feature).decode()),
@@ -201,7 +226,7 @@ class DbFunctionProvider(BaseProvider):
         if not self.upsert_key:
             raise ProviderQueryError("collection has no configured upsert key")
         feature = _as_feature_dict(item)
-        with self._connect() as conn, conn.cursor() as cur:
+        with _rethrow_pg_raise(), self._connect() as conn, conn.cursor() as cur:
             cur.execute(
                 "select ogc.feature_upsert(%s, %s, %s)",
                 (self.dataset, self.collection, orjson.dumps(feature).decode()),
@@ -211,7 +236,7 @@ class DbFunctionProvider(BaseProvider):
     def update(self, identifier, item) -> bool:
         # OGC PUT == full replace.
         feature = _as_feature_dict(item)
-        with self._connect() as conn, conn.cursor() as cur:
+        with _rethrow_pg_raise(), self._connect() as conn, conn.cursor() as cur:
             cur.execute(
                 "select ogc.feature_replace(%s, %s, %s, %s)",
                 (
@@ -229,7 +254,7 @@ class DbFunctionProvider(BaseProvider):
     def patch(self, identifier, item) -> bool:
         # OGC PATCH == partial update: only keys present in `item` change.
         feature = _as_feature_dict(item)
-        with self._connect() as conn, conn.cursor() as cur:
+        with _rethrow_pg_raise(), self._connect() as conn, conn.cursor() as cur:
             cur.execute(
                 "select ogc.feature_update(%s, %s, %s, %s)",
                 (
