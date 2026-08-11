@@ -316,3 +316,53 @@ def test_parent_level_indexable_on_jsonb_does_not_produce_index():
     plan = build_schema_plan(ds)
     exprs = [idx.expression for idx in plan.collections[0].table.indexes]
     assert not any("identifikasjon" in e for e in exprs)
+
+
+# --------------------------------------------------------------------------
+# postgis: extra index DDL from IndexPlan (Commit 4)
+# --------------------------------------------------------------------------
+
+
+def _stmts_for_indexable_dataset() -> list[str]:
+    ds = _make_dataset(
+        fields=[
+            ResolvedField("medium", "text", indexable=True),
+            ResolvedField(
+                "identifikasjon",
+                "jsonb",
+                sub_fields=(ResolvedField("lokalid", "text", indexable=True),),
+            ),
+        ],
+    )
+    return postgis.table_statements(build_schema_plan(ds))
+
+
+def test_indexable_scalar_produces_index_statement_in_ddl():
+    stmts = _stmts_for_indexable_dataset()
+    assert any('"medium"' in s and "create" in s and "index" in s for s in stmts)
+
+
+def test_indexable_jsonb_sub_field_produces_functional_index_statement():
+    stmts = _stmts_for_indexable_dataset()
+    assert any("identifikasjon" in s and "lokalid" in s and "index" in s for s in stmts)
+
+
+def test_extra_index_statement_uses_if_not_exists():
+    stmts = _stmts_for_indexable_dataset()
+    extra = [s for s in stmts if "medium" in s and "index" in s]
+    assert extra, "expected at least one index statement for 'medium'"
+    assert all("if not exists" in s for s in extra)
+
+
+def test_extra_index_statement_uses_qualified_table_name():
+    stmts = _stmts_for_indexable_dataset()
+    extra = [s for s in stmts if "medium" in s and "index" in s]
+    assert all("x.c" in s for s in extra)  # dataset 'x', collection 'c'
+
+
+def test_no_extra_index_statements_when_indexes_empty():
+    ds = _make_dataset(fields=[ResolvedField("medium", "text")])
+    stmts = postgis.table_statements(build_schema_plan(ds))
+    # Only the always-present geometry index should appear; no extra ones.
+    extra = [s for s in stmts if "medium" in s and "index" in s]
+    assert not extra
