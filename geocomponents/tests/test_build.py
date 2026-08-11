@@ -335,6 +335,35 @@ def test_codelist_values_flow_from_resolved_field_to_column_plan():
 
 
 # --------------------------------------------------------------------------
+# Scalar server_managed → server_write_expr on ColumnPlan (Commit 8a)
+# --------------------------------------------------------------------------
+
+
+def test_scalar_server_managed_timestamp_iso_sets_server_write_expr():
+    """Pre-code suspect: a single-segment server_managed path with token
+    timestamp_iso must produce server_write_expr='now()' on the ColumnPlan,
+    indicating the column is server-computed and must not use client input."""
+    ds = _make_dataset(
+        fields=[ResolvedField("oppdateringsdato", "timestamp", required=True)],
+        server_managed_paths={"oppdateringsdato": "timestamp_iso"},
+    )
+    plan = build_schema_plan(ds)
+    col = next(c for c in plan.collections[0].table.columns if c.name == "oppdateringsdato")
+    assert col.server_write_expr == "now()"
+
+
+def test_scalar_without_server_managed_has_no_server_write_expr():
+    """Suspect: a plain scalar field not in server_managed must have
+    server_write_expr=None so it stays in the writable set."""
+    ds = _make_dataset(
+        fields=[ResolvedField("datafangstdato", "date", required=True)],
+    )
+    plan = build_schema_plan(ds)
+    col = next(c for c in plan.collections[0].table.columns if c.name == "datafangstdato")
+    assert col.server_write_expr is None
+
+
+# --------------------------------------------------------------------------
 # postgis: extra index DDL from IndexPlan (Commit 4)
 # --------------------------------------------------------------------------
 

@@ -40,9 +40,9 @@ def _rethrow_pg_raise():
         yield
     except psycopg.errors.RaiseException as exc:
         if exc.sqlstate == "P0001":
-            msg = (
-                exc.diag.message_primary if exc.diag is not None else None
-            ) or str(exc)
+            msg = (exc.diag.message_primary if exc.diag is not None else None) or str(
+                exc
+            )
             raise ProviderValidationError(user_msg=msg) from exc
         raise
 

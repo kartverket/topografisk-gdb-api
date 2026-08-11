@@ -120,6 +120,7 @@ def test_provider_validation_error_maps_to_422():
     """Pre-code suspect: ProviderValidationError must carry HTTP 422 so pygeoapi
     returns Unprocessable Content, not 500, for DB validation rejections."""
     from http import HTTPStatus
+
     assert ProviderValidationError().http_status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
 
@@ -133,6 +134,7 @@ def test_rethrow_pg_raise_converts_p0001_to_validation_error():
 def test_rethrow_pg_raise_reraises_unknown_sqlstate_unchanged():
     """Pre-code suspect: a RaiseException with a non-P0001 sqlstate must pass
     through — the handler must not swallow unexpected DB errors."""
+
     class _OtherRaise(psycopg.errors.RaiseException):
         sqlstate = "P9999"
 

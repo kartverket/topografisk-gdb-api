@@ -27,6 +27,11 @@ from geocomponents.schema.plan import (
     internal_function,
 )
 
+# Token → SQL expression for top-level scalar server_managed fields.
+_SCALAR_SERVER_WRITE: dict[str, str] = {
+    "timestamp_iso": "now()",
+}
+
 
 def _standard_columns() -> list[ColumnPlan]:
     return [
@@ -79,6 +84,11 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:
                 )
             )
         else:
+            # Check for single-segment server_managed path matching this field.
+            server_write_expr: str | None = None
+            if fld.name in coll.server_managed_paths:
+                token = coll.server_managed_paths[fld.name]
+                server_write_expr = _SCALAR_SERVER_WRITE.get(token)
             columns.append(
                 ColumnPlan(
                     fld.name,
@@ -86,6 +96,7 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:
                     nullable=not fld.required,
                     auto_increment=fld.auto_increment,
                     codelist_values=fld.codelist_values,
+                    server_write_expr=server_write_expr,
                 )
             )
             if fld.indexable:

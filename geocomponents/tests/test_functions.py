@@ -304,6 +304,20 @@ def _plan_with_codelist_col(codes: tuple[str, ...]) -> SchemaPlan:
     return SchemaPlan(schema_name="s", collections=(coll,))
 
 
+def _plan_with_server_write_col() -> SchemaPlan:
+    """Minimal SchemaPlan with one scalar server_write_expr column."""
+    table = _table_with_cols(
+        ColumnPlan("medium", "text"),
+        ColumnPlan("oppdateringsdato", "timestamp", server_write_expr="now()"),
+    )
+    coll = CollectionPlan(
+        collection_name="t",
+        table=table,
+        functions={op: internal_function("s", "t", op) for op in OPERATIONS},
+    )
+    return SchemaPlan(schema_name="s", collections=(coll,))
+
+
 def test_fn_create_enum_guard_appears_before_insert():
     """Suspect: the enum validation block must precede INSERT in the create function."""
     plan = _plan_with_codelist_col(("A", "B"))
@@ -343,3 +357,31 @@ def test_geom_check_guarded_short_circuits_before_st_geomfromgeojson():
     table = _table_with_cols()
     sql = _geom_check(table, guarded_by_presence=True)
     assert sql.index("feature ? 'geometry'") < sql.index("ST_IsValid(")
+
+# --------------------------------------------------------------------------
+# Scalar server_write_expr: excluded from writes, substituted in DML (Commit 8a)
+# --------------------------------------------------------------------------
+
+
+def test_server_write_col_absent_from_create_insert_values():
+    """Pre-code suspect: a column with server_write_expr must NOT appear as a
+    client-read value in the INSERT — the server expression is used instead."""
+    plan = _plan_with_server_write_col()
+    stmts = function_statements(plan)
+    create = next(s for s in stmts if "function s._t_create(" in s)
+    # The client value expression must not appear for this column.
+    assert "(feature->'properties'->>'oppdateringsdato')" not in create
+    # The server expression must appear.
+    assert "now()" in create
+    assert '"oppdateringsdato"' in create
+
+
+def test_server_write_col_always_updated_in_patch_not_behind_case_when():
+    """Pre-code suspect: a server_write_expr column must appear unconditionally
+    in the update SET clause — no CASE WHEN guard, unlike client-provided fields."""
+    plan = _plan_with_server_write_col()
+    stmts = function_statements(plan)
+    update = next(s for s in stmts if "function s._t_update(" in s)
+    # server_write_expr column must appear in SET without a CASE WHEN guard.
+    assert '"oppdateringsdato" = now()' in update
+    assert "case when" not in update.split('"oppdateringsdato"')[1].split("\n")[0]
