@@ -89,8 +89,9 @@ def _resolve_field(
                 f"{where}: field '{fld.name}' references unknown code list "
                 f"'{fld.codelist}'"
             )
-        # Code-list columns are plain text for now; DB-side enforcement is a
-        # deferred 'validation in the DB' concern.
+        # Code-list columns are plain text; code values are stored so the
+        # function generator can emit DB-level validation.
+        cl = codelists[fld.codelist]
         return ResolvedField(
             fld.name,
             "text",
@@ -99,6 +100,7 @@ def _resolve_field(
             auto_increment=fld.auto_increment,
             enum=tuple(fld.enum),
             indexable=fld.indexable,
+            codelist_values=tuple(v.code for v in cl.values),
         )
 
     if fld.type_ref is not None:

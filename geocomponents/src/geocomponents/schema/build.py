@@ -85,6 +85,7 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:
                     fld.sql_type,
                     nullable=not fld.required,
                     auto_increment=fld.auto_increment,
+                    codelist_values=fld.codelist_values,
                 )
             )
             if fld.indexable:

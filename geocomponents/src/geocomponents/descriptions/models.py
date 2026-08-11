@@ -240,6 +240,8 @@ class ResolvedField:
     enum: tuple[str, ...] = field(default_factory=tuple)
     # True when the schema builder should emit an index for this field.
     indexable: bool = False
+    # Actual code values from the referenced CodeList (used for DB validation).
+    codelist_values: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)

@@ -151,10 +151,17 @@ def _writable_columns(table: TablePlan) -> list[ColumnPlan]:
 
 
 def _properties_object(table: TablePlan, alias: str) -> str:
-    pairs = [
-        f"'{_quote_key(col.name)}', {alias}.\"{col.name}\""
-        for col in table.property_columns
-    ]
+    pairs = []
+    for col in table.property_columns:
+        val = f'{alias}."{col.name}"'
+        if col.id_inject_key:
+            # Inject the row id as a sub-key into the JSONB column on read.
+            val = (
+                f"({val} || jsonb_build_object("
+                f"'{_quote_key(col.id_inject_key)}', "
+                f'{alias}."{table.id_column}"::text))'
+            )
+        pairs.append(f"'{_quote_key(col.name)}', {val}")
     return "jsonb_build_object(\n      " + ",\n      ".join(pairs) + "\n    )"
 
 
@@ -179,7 +186,57 @@ def _geom_from_feature(table: TablePlan) -> str:
 
 
 def _prop_read(col: ColumnPlan) -> str:
+    """SQL expression that extracts one property from the incoming feature JSON.
+
+    For JSONB columns this applies the server-managed transforms: strips
+    declared keys (e.g. the outward identifier the client must not persist)
+    and injects write-time computed values (e.g. ISO timestamps).
+    For scalar columns it does the original ->>'key'::type cast.
+    """
+    if col.sql_type == "jsonb":
+        expr = f"feature->'properties'->'{_quote_key(col.name)}'"
+        for key in col.strip_keys:
+            # Remove server-managed sub-keys; #- takes a text-array path.
+            expr = f"({expr} #- '{{{_quote_key(key)}}}')"
+        for key, sql_expr in col.write_inject:
+            expr = f"({expr} || jsonb_build_object('{_quote_key(key)}', {sql_expr}))"
+        return expr
     return f"(feature->'properties'->>'{_quote_key(col.name)}')::{col.sql_type}"
+
+
+def _enum_checks(writable: list[ColumnPlan], *, guarded_by_presence: bool) -> list[str]:
+    """IF blocks that raise P0001 when a codelist field has an invalid value."""
+    checks: list[str] = []
+    for col in writable:
+        if not col.codelist_values:
+            continue
+        key = _quote_key(col.name)
+        values_sql = ", ".join(f"'{_quote_key(v)}'" for v in col.codelist_values)
+        val_expr = f"feature->'properties'->>'{key}'"
+        cond_parts: list[str] = []
+        if guarded_by_presence:
+            cond_parts.append(f"feature->'properties' ? '{key}'")
+        cond_parts.append(f"({val_expr}) is not null")
+        cond_parts.append(f"({val_expr}) not in ({values_sql})")
+        cond = "\n       and ".join(cond_parts)
+        checks.append(
+            f"  if {cond} then\n"
+            f"    raise exception 'field {col.name}: value % is not a valid code',"
+            f" ({val_expr}) using errcode = 'P0001';\n"
+            f"  end if;"
+        )
+    return checks
+
+
+def _geom_check(table: TablePlan, *, guarded_by_presence: bool) -> str:
+    """IF block that raises P0002 when the incoming geometry is not valid."""
+    inner = f"not ST_IsValid({_geom_from_feature(table)})"
+    cond = f"feature ? 'geometry' and {inner}" if guarded_by_presence else inner
+    return (
+        f"  if {cond} then\n"
+        f"    raise exception 'invalid geometry' using errcode = 'P0002';\n"
+        f"  end if;"
+    )
 
 
 def _fn_item(plan: CollectionPlan) -> str:
@@ -227,12 +284,17 @@ def _fn_create(plan: CollectionPlan) -> str:
     writable = _writable_columns(t)
     cols = ", ".join([f'"{t.geometry.name}"'] + [f'"{c.name}"' for c in writable])
     vals = ", ".join([_geom_from_feature(t)] + [_prop_read(c) for c in writable])
+    validations = [
+        *_enum_checks(writable, guarded_by_presence=False),
+        _geom_check(t, guarded_by_presence=False),
+    ]
+    guard_block = ("\n".join(validations) + "\n") if validations else ""
     return f"""\
 create or replace function {plan.functions["create"]}(feature jsonb)
 returns uuid language plpgsql as $func$
 declare new_id uuid;
 begin
-  insert into {t.qualified} ({cols})
+{guard_block}  insert into {t.qualified} ({cols})
   values ({vals})
   returning "{t.id_column}" into new_id;
   return new_id;
@@ -250,12 +312,17 @@ def _fn_upsert(plan: CollectionPlan) -> str:
     sets += [f'"{c.name}" = excluded."{c.name}"' for c in writable]
     sets.append('"updated_at" = now()')
     set_clause = ",\n      ".join(sets)
+    validations = [
+        *_enum_checks(writable, guarded_by_presence=False),
+        _geom_check(t, guarded_by_presence=False),
+    ]
+    guard_block = ("\n".join(validations) + "\n") if validations else ""
     return f"""\
 create or replace function {plan.functions["upsert"]}(feature jsonb)
 returns uuid language plpgsql as $func$
 declare result_id uuid;
 begin
-  insert into {t.qualified} ({cols})
+{guard_block}  insert into {t.qualified} ({cols})
   values ({vals})
   on conflict ({conflict_columns}) do update set
       {set_clause}
@@ -272,11 +339,16 @@ def _fn_replace(plan: CollectionPlan) -> str:
     sets += [f'"{c.name}" = {_prop_read(c)}' for c in writable]
     sets.append('"updated_at" = now()')
     set_clause = ",\n      ".join(sets)
+    validations = [
+        *_enum_checks(writable, guarded_by_presence=False),
+        _geom_check(t, guarded_by_presence=False),
+    ]
+    guard_block = ("\n".join(validations) + "\n") if validations else ""
     return f"""\
 create or replace function {plan.functions["replace"]}(fid uuid, feature jsonb)
 returns boolean language plpgsql as $func$
 begin
-  update {t.qualified} set
+{guard_block}  update {t.qualified} set
       {set_clause}
   where "{t.id_column}" = fid;
   return found;
@@ -299,11 +371,16 @@ def _fn_update(plan: CollectionPlan) -> str:
         )
     sets.append('"updated_at" = now()')
     set_clause = ",\n      ".join(sets)
+    validations = [
+        *_enum_checks(writable, guarded_by_presence=True),
+        _geom_check(t, guarded_by_presence=True),
+    ]
+    guard_block = ("\n".join(validations) + "\n") if validations else ""
     return f"""\
 create or replace function {plan.functions["update"]}(fid uuid, feature jsonb)
 returns boolean language plpgsql as $func$
 begin
-  update {t.qualified} set
+{guard_block}  update {t.qualified} set
       {set_clause}
   where "{t.id_column}" = fid;
   return found;

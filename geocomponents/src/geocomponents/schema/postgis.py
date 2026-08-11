@@ -17,7 +17,6 @@ import psycopg
 from geocomponents.schema.plan import (
     CollectionPlan,
     ColumnPlan,
-    IndexPlan,
     SchemaPlan,
     TablePlan,
 )
