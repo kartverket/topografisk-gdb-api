@@ -187,7 +187,8 @@ collections:
 The [`descriptions/`](descriptions/) folder is a complete, runnable example:
 `cadastre.yaml` (a `parcels` collection using a code list and a shared type, a
 `buildings` collection with a relationship, and a read-only `blocks` topology
-collection), a shared `commons.yaml`, and a second dataset `hydro.yaml`.
+collection), `hydro.yaml`, `bane.yaml`, `bygning.yaml`, and a shared
+`commons.yaml`.
 
 ## Running it (local)
 

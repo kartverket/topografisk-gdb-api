@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import orjson
 import psycopg
+from pygeoapi.crs import crs_transform
 from pygeoapi.provider.base import (
     BaseProvider,
     ProviderItemNotFoundError,
@@ -142,6 +143,7 @@ class DbFunctionProvider(BaseProvider):
         return ("application/geo+json", schema)
 
     # -- read -------------------------------------------------------------
+    @crs_transform
     def query(  # noqa: PLR0913, PLR0917 - signature dictated by pygeoapi's BaseProvider.query
         self,
         offset=0,
@@ -176,6 +178,7 @@ class DbFunctionProvider(BaseProvider):
             )
             return cur.fetchone()[0]
 
+    @crs_transform
     def get(self, identifier, **kwargs) -> dict:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(

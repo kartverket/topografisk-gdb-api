@@ -7,14 +7,35 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
-import { type ImportResult, uploadJsonFg } from '../../api/gcimportApi';
+import { inferImportProfile, type ImportProfile, type ImportResult, uploadJsonFg } from '../../api/gcimportApi';
+
+const PROFILE_META: Record<ImportProfile, { title: string; crs: string; detail: string; footer: string }> = {
+  bane: {
+    title: 'Bane',
+    crs: 'EPSG:5973',
+    detail:
+      'Jernbaneplattformkant and Spormidt are preserved as MultiLineString geometry and upserted by lokalid + identifikasjon_navnerom.',
+    footer: 'Upserts are idempotent by Bane business key.'
+  },
+  bygning: {
+    title: 'Bygning',
+    crs: 'EPSG:5972',
+    detail:
+      'Bygning linework, centerlines, positions, and area footprints are routed through one importer and preserved by collection geometry.',
+    footer: 'Upserts are idempotent by Bygning business key.'
+  }
+};
 
 export function ImportView() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const selectionVersionRef = useRef(0);
   const [file, setFile] = useState<File | null>(null);
+  const [profile, setProfile] = useState<ImportProfile>('bane');
+  const [detectedProfile, setDetectedProfile] = useState<ImportProfile | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  const profileMeta = PROFILE_META[profile];
 
   async function submit() {
     if (!file) return;
@@ -22,7 +43,7 @@ export function ImportView() {
     setError('');
     setResult(null);
     try {
-      setResult(await uploadJsonFg(file));
+      setResult(await uploadJsonFg(file, profile));
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : 'Import failed');
     } finally {
@@ -30,8 +51,27 @@ export function ImportView() {
     }
   }
 
-  function chooseFile(selected: File | undefined) {
-    setFile(selected ?? null);
+  async function chooseFile(selected: File | undefined) {
+    const nextFile = selected ?? null;
+    const selectionVersion = selectionVersionRef.current + 1;
+    selectionVersionRef.current = selectionVersion;
+    setFile(nextFile);
+    setError('');
+    setResult(null);
+    setDetectedProfile(null);
+    if (!nextFile) return;
+
+    const inferredProfile = await inferImportProfile(nextFile);
+    if (selectionVersionRef.current !== selectionVersion || inferredProfile === null) {
+      return;
+    }
+    setProfile(inferredProfile);
+    setDetectedProfile(inferredProfile);
+  }
+
+  function chooseProfile(nextProfile: ImportProfile) {
+    setProfile(nextProfile);
+    setDetectedProfile(null);
     setError('');
     setResult(null);
   }
@@ -42,14 +82,34 @@ export function ImportView() {
     <Card className="mx-auto w-full max-w-xl">
       <CardHeader>
         <p className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">Feature import</p>
-        <CardTitle className="text-2xl">Import Bane features</CardTitle>
+        <CardTitle className="text-2xl">Import {profileMeta.title} features</CardTitle>
         <CardDescription className="max-w-[52ch]">
-          Upload JSON-FG, or classic GeoJSON (.geojson with CRS and objtype). Features are validated, transformed to
-          EPSG:5973, and upserted by their Bane identity.
+          Upload JSON-FG, or classic GeoJSON (.geojson with CRS and objtype). Features are validated, transformed to{' '}
+          {profileMeta.crs}, and imported with the selected dataset profile.
         </CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            {(['bane', 'bygning'] as const).map(option => (
+              <Button
+                key={option}
+                type="button"
+                variant={profile === option ? 'default' : 'outline'}
+                onClick={() => chooseProfile(option)}>
+                {PROFILE_META[option].title}
+              </Button>
+            ))}
+          </div>
+          <p className="text-sm text-muted-foreground">{profileMeta.detail}</p>
+          {detectedProfile && file && (
+            <p className="text-sm text-muted-foreground">
+              Detected {PROFILE_META[detectedProfile].title} from file contents.
+            </p>
+          )}
+        </div>
+
         <button
           type="button"
           className={cn(
@@ -143,14 +203,14 @@ export function ImportView() {
                 size="sm"
                 className="h-auto px-0"
                 render={<Link to="/" />}>
-                View Bane layers on the map
+                Return to map
               </Button>
             </AlertDescription>
           </Alert>
         )}
       </CardContent>
 
-      <CardFooter className="text-xs text-muted-foreground">Upserts are idempotent by Bane business key.</CardFooter>
+      <CardFooter className="text-xs text-muted-foreground">{profileMeta.footer}</CardFooter>
     </Card>
   );
 }

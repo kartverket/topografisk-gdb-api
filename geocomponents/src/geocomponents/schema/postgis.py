@@ -66,7 +66,7 @@ def _fk_ddl(table: TablePlan) -> list[str]:
             f'add constraint "{cname}" '
             f'foreign key ("{fk.column}") '
             f'references {fk.ref_table} ("{fk.ref_column}") '
-            f"on delete set null"
+            "on delete set null"
         )
     return stmts
 
@@ -93,8 +93,7 @@ def table_statements(plan: SchemaPlan) -> list[str]:
     """One complete SQL command per list element (idempotent where possible).
 
     FK constraints come after all tables so collection order and cross-collection
-    cycles don't matter. Adding a constraint isn't ``IF NOT EXISTS``, so callers
-    apply it defensively (see ``apply_tables``).
+    cycles don't matter.
     """
 
     stmts: list[str] = [

@@ -7,7 +7,7 @@ collections:
     title: Jernbaneplattformkant
     description: Avgrensning av en jernbaneplattform.
     geometry:
-      type: LineString
+      type: MultiLineString
       srid: 5973
       has_z: true
     upsert_key:
@@ -61,7 +61,7 @@ collections:
     title: Spormidt
     description: Senterlinje for jernbanespor.
     geometry:
-      type: LineString
+      type: MultiLineString
       srid: 5973
       has_z: true
     upsert_key:

@@ -3,16 +3,97 @@ import type { Feature, FeatureCollection, Position } from './geojson';
 
 export const platformEdgesExtrusionSourceId = 'bane-platform-edges-3d';
 export const trackCentresExtrusionSourceId = 'bane-track-centres-3d';
+export const bygningExtrusionSourceId = 'bygning-linework-3d';
+export const bygningSenterlinjeExtrusionSourceId = 'bygning-senterlinje-3d';
 export const platformEdgesExtrusionLayerId = 'bane-platform-edges-extrusion';
 export const trackCentresExtrusionLayerId = 'bane-track-centres-extrusion';
+export const bygningExtrusionLayerId = 'bygning-linework-extrusion';
+export const bygningSenterlinjeExtrusionLayerId = 'bygning-senterlinje-extrusion';
 export const buildingsExtrusionLayerId = 'buildings-extrusion';
 
 export const DEFAULT_3D_PITCH = 60;
 export const FLOOR_HEIGHT_M = 3;
 export const ELEVATED_LINE_WIDTH_M = 3;
+export const BYGNING_LINEWORK_ELEVATED_LINE_WIDTH_M = 0.25;
+export const BYGNING_ELEVATED_LINE_WIDTH_M = 0.25;
 /** Vertical thickness of elevated line beams (meters). */
 export const ELEVATED_LINE_THICKNESS_M = 2;
+export const BYGNING_ELEVATED_LINE_THICKNESS_M = 1;
 const MIN_EXTRUSION_HEIGHT_M = 0.5;
+const MAX_LINE_HEIGHT_RANGE_M = 50;
+
+type HeightRange = {
+  minimum: number;
+  maximum: number;
+};
+
+function numericProperty(properties: Feature['properties'], propertyName: string): number | undefined {
+  const value = properties?.[propertyName];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function lineCoordinateSets(feature: Feature): Position[][] {
+  if (!feature.geometry?.coordinates || !Array.isArray(feature.geometry.coordinates)) {
+    return [];
+  }
+
+  if (feature.geometry.type === 'LineString') {
+    return [feature.geometry.coordinates as Position[]];
+  }
+
+  if (feature.geometry.type === 'MultiLineString') {
+    return feature.geometry.coordinates as Position[][];
+  }
+
+  return [];
+}
+
+function adjustedHeight(z: number | undefined, heightOffset: number): number {
+  if (typeof z !== 'number' || !Number.isFinite(z) || z <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, z - heightOffset);
+}
+
+function featurePositiveHeightRange(feature: Feature): HeightRange | undefined {
+  let minimum = Number.POSITIVE_INFINITY;
+  let maximum = 0;
+
+  for (const coordinates of lineCoordinateSets(feature)) {
+    for (const position of coordinates) {
+      const z = position[2];
+      if (typeof z === 'number' && Number.isFinite(z) && z > 0) {
+        minimum = Math.min(minimum, z);
+        maximum = Math.max(maximum, z);
+      }
+    }
+  }
+
+  if (!Number.isFinite(minimum)) {
+    return undefined;
+  }
+
+  return { minimum, maximum };
+}
+
+function percentile(sortedValues: number[], fraction: number): number {
+  if (sortedValues.length === 0) {
+    return 0;
+  }
+
+  const index = (sortedValues.length - 1) * fraction;
+  const lowerIndex = Math.floor(index);
+  const upperIndex = Math.ceil(index);
+  const lowerValue = sortedValues[lowerIndex] ?? sortedValues[sortedValues.length - 1] ?? 0;
+  const upperValue = sortedValues[upperIndex] ?? lowerValue;
+
+  if (lowerIndex === upperIndex) {
+    return lowerValue;
+  }
+
+  return lowerValue + (upperValue - lowerValue) * (index - lowerIndex);
+}
 
 function segmentFootprint(lon1: number, lat1: number, lon2: number, lat2: number, widthMeters: number): Position[] {
   const midLat = (((lat1 + lat2) / 2) * Math.PI) / 180;
@@ -35,8 +116,25 @@ function segmentFootprint(lon1: number, lat1: number, lon2: number, lat2: number
   ];
 }
 
+function terrainAdjustedElevation(
+  terrainElevationMeters: number | undefined,
+  z: number | undefined,
+  heightOffset: number
+): number {
+  const absoluteElevation = adjustedHeight(z, heightOffset);
+  if (absoluteElevation <= 0) {
+    return 0;
+  }
+
+  if (typeof terrainElevationMeters !== 'number' || !Number.isFinite(terrainElevationMeters)) {
+    return absoluteElevation;
+  }
+
+  return Math.max(0, absoluteElevation - terrainElevationMeters);
+}
+
 /**
- * Approximate elevated LineStrings as thin fill-extrusion beams.
+ * Approximate elevated LineStrings and MultiLineStrings as thin fill-extrusion beams.
  *
  * Z is used as elevation (base/height), not as a column from the ground.
  * That matters for MapLibre: translucent fill-extrusion punches holes where
@@ -46,46 +144,90 @@ function segmentFootprint(lon1: number, lat1: number, lon2: number, lat2: number
 export function elevatedLineSegments(
   featureCollection: FeatureCollection,
   widthMeters = ELEVATED_LINE_WIDTH_M,
-  thicknessMeters = ELEVATED_LINE_THICKNESS_M
+  thicknessMeters = ELEVATED_LINE_THICKNESS_M,
+  heightOffset = 0,
+  terrainElevationAt?: (longitude: number, latitude: number) => number | undefined,
+  clampToGround = false
 ): FeatureCollection {
   const features: Feature[] = [];
-  const halfThickness = Math.max(thicknessMeters, MIN_EXTRUSION_HEIGHT_M) / 2;
+  const extrusionThickness = Math.max(thicknessMeters, MIN_EXTRUSION_HEIGHT_M);
+  const halfThickness = extrusionThickness / 2;
 
   for (const feature of featureCollection.features) {
-    if (feature.geometry?.type !== 'LineString' || !Array.isArray(feature.geometry.coordinates)) {
-      continue;
-    }
+    for (const coordinates of lineCoordinateSets(feature)) {
+      for (let index = 0; index < coordinates.length - 1; index += 1) {
+        const start = coordinates[index];
+        const end = coordinates[index + 1];
+        if (!start || !end) continue;
 
-    const coordinates = feature.geometry.coordinates as Position[];
-    for (let index = 0; index < coordinates.length - 1; index += 1) {
-      const start = coordinates[index];
-      const end = coordinates[index + 1];
-      if (!start || !end) continue;
+        const startTerrainElevation = terrainElevationAt?.(start[0], start[1]);
+        const endTerrainElevation = terrainElevationAt?.(end[0], end[1]);
+        const rawZ1 = terrainAdjustedElevation(startTerrainElevation, start[2], heightOffset);
+        const rawZ2 = terrainAdjustedElevation(endTerrainElevation, end[2], heightOffset);
+        const rawMidZ = (rawZ1 + rawZ2) / 2;
+        const clampedMidZ = Math.max(0, rawMidZ);
+        const isGroundLevel = rawMidZ <= 0;
+        const sourceHeight = numericProperty(feature.properties, 'height');
+        const base = clampToGround ? clampedMidZ : isGroundLevel ? 0 : Math.max(0, rawMidZ - halfThickness);
+        const height = clampToGround
+          ? Math.max(base + MIN_EXTRUSION_HEIGHT_M, clampedMidZ + extrusionThickness)
+          : isGroundLevel
+            ? 0
+            : Math.max(base + MIN_EXTRUSION_HEIGHT_M, rawMidZ + halfThickness);
 
-      const z1 = typeof start[2] === 'number' && Number.isFinite(start[2]) ? start[2] : 0;
-      const z2 = typeof end[2] === 'number' && Number.isFinite(end[2]) ? end[2] : 0;
-      const midZ = (z1 + z2) / 2;
-      const base = Math.max(0, midZ - halfThickness);
-      const height = Math.max(base + MIN_EXTRUSION_HEIGHT_M, midZ + halfThickness);
-
-      features.push({
-        type: 'Feature',
-        properties: {
-          ...(feature.properties ?? {}),
-          // Color by rail elevation; base/height define the thin beam.
-          elevation: midZ,
-          base,
-          height
-        },
-        geometry: {
-          type: 'Polygon',
-          coordinates: [segmentFootprint(start[0], start[1], end[0], end[1], widthMeters)]
-        }
-      });
+        features.push({
+          type: 'Feature',
+          id: feature.id,
+          properties: {
+            ...(feature.properties ?? {}),
+            ...(sourceHeight !== undefined ? { sourceHeight } : {}),
+            elevation: rawMidZ,
+            base,
+            height,
+            zOffset: 0
+          },
+          geometry: {
+            type: 'Polygon',
+            coordinates: [segmentFootprint(start[0], start[1], end[0], end[1], widthMeters)]
+          }
+        });
+      }
     }
   }
 
   return { type: 'FeatureCollection', features };
+}
+
+export function lowestPositiveLineHeight(featureCollections: readonly FeatureCollection[]): number {
+  const minimumHeights: number[] = [];
+
+  for (const featureCollection of featureCollections) {
+    for (const feature of featureCollection.features) {
+      const range = featurePositiveHeightRange(feature);
+      if (!range) {
+        continue;
+      }
+
+      if (range.maximum - range.minimum > MAX_LINE_HEIGHT_RANGE_M) {
+        continue;
+      }
+
+      minimumHeights.push(range.minimum);
+    }
+  }
+
+  if (minimumHeights.length === 0) {
+    return 0;
+  }
+
+  const sortedMinimumHeights = [...minimumHeights].sort((left, right) => left - right);
+  const firstQuartile = percentile(sortedMinimumHeights, 0.25);
+  const thirdQuartile = percentile(sortedMinimumHeights, 0.75);
+  const interquartileRange = thirdQuartile - firstQuartile;
+  const lowerFence = firstQuartile - interquartileRange * 1.5;
+  const filteredMinimumHeights = sortedMinimumHeights.filter(height => height >= lowerFence);
+
+  return filteredMinimumHeights[0] ?? sortedMinimumHeights[0] ?? 0;
 }
 
 export function buildingExtrusionHeightExpression(floorHeightM = FLOOR_HEIGHT_M): ExpressionSpecification {
@@ -100,8 +242,11 @@ export const EXTRUSION_OPACITY_MIN = 0.35;
 export const EXTRUSION_OPACITY_MAX = 0.9;
 
 /** Top of the translucent shaft / base of the opaque cap. */
-export function extrusionShaftTopExpression(heightExpression: ExpressionSpecification): ExpressionSpecification {
-  return ['max', 0, ['-', heightExpression, EXTRUSION_TOP_CAP_M]];
+export function extrusionShaftTopExpression(
+  heightExpression: ExpressionSpecification,
+  baseExpression: ExpressionSpecification | number = 0
+): ExpressionSpecification {
+  return ['max', baseExpression, ['-', heightExpression, EXTRUSION_TOP_CAP_M]];
 }
 
 /** Max finite Z from a LineString coordinate array (meters). */

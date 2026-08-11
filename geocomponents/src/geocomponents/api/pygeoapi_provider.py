@@ -42,6 +42,13 @@ from geocomponents.processes.registry import PROCESS_REGISTRY
 
 PROVIDER_PATH = "geocomponents.api.db_function_provider.DbFunctionProvider"
 CRS84 = "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
+WGS84_SRID = 4326
+
+
+def _storage_crs_uri(coll: ResolvedCollection) -> str | None:
+    if coll.srid == WGS84_SRID:
+        return None
+    return f"http://www.opengis.net/def/crs/EPSG/0/{coll.srid}"
 
 
 # pygeoapi's HTML rendering memoizes the *translated config* in the module-global
@@ -84,6 +91,7 @@ def _provider_fields(coll: ResolvedCollection) -> dict:
 
 
 def _collection_resource(dataset: str, coll: ResolvedCollection, dsn: str) -> dict:
+    storage_crs = _storage_crs_uri(coll)
     return {
         "type": "collection",
         "title": coll.title,
@@ -109,6 +117,15 @@ def _collection_resource(dataset: str, coll: ResolvedCollection, dsn: str) -> di
                 "geometry_type": coll.geometry_type,
                 "srid": coll.srid,
                 "upsert_key": list(coll.upsert_key),
+                **(
+                    {
+                        "storage_crs": storage_crs,
+                        "crs": [CRS84, storage_crs],
+                        "always_xy": True,
+                    }
+                    if storage_crs
+                    else {}
+                ),
             }
         ],
     }

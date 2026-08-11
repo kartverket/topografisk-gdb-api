@@ -21,6 +21,13 @@ def _bane_plan():
     return build_schema_plan(bane)
 
 
+def _bygning_plan():
+    bygning = next(
+        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bygning"
+    )
+    return build_schema_plan(bygning)
+
+
 def test_dataset_maps_to_schema_and_collections_to_tables():
     plan = _cadastre_plan()
     assert plan.schema_name == "cadastre"
@@ -57,6 +64,12 @@ def test_relationship_becomes_fk_column():
     assert "parcel_id" in {col.name for col in buildings.table.columns}
     fks = {(fk.column, fk.ref_table) for fk in buildings.table.foreign_keys}
     assert ("parcel_id", "cadastre.parcels") in fks
+
+
+def test_relationship_fk_ddl_is_rendered_with_stable_constraint_name():
+    ddl = "\n".join(postgis.table_statements(_cadastre_plan()))
+    assert "alter table cadastre.buildings" in ddl
+    assert 'add constraint "buildings_parcel_id_fkey"' in ddl
 
 
 def test_internal_function_names_are_private_and_per_operation():
@@ -109,9 +122,62 @@ def test_bane_geometry_columns_include_height():
     for collection_name in ("jernbaneplattformkant", "spormidt"):
         coll = next(c for c in plan.collections if c.collection_name == collection_name)
         assert coll.table.geometry.has_z
-        assert coll.table.geometry.postgis_type == "LineStringZ"
+        assert coll.table.geometry.postgis_type == "MultiLineStringZ"
     ddl = "\n".join(postgis.table_statements(plan))
-    assert '"geometry" geometry(LineStringZ, 5973)' in ddl
+    assert '"geometry" geometry(MultiLineStringZ, 5973)' in ddl
+
+
+def test_bygning_geometry_and_business_key_are_built_correctly():
+    plan = _bygning_plan()
+    coll = next(c for c in plan.collections if c.collection_name == "bygning")
+    assert coll.table.geometry.has_z
+    assert coll.table.geometry.postgis_type == "MultiLineStringZ"
+    ddl = "\n".join(postgis.table_statements(plan))
+    assert '"geometry" geometry(MultiLineStringZ, 5972)' in ddl
+    assert (
+        'on bygning.bygning ("lokalid", "identifikasjon_navnerom") nulls not distinct'
+    ) in ddl
+
+
+def test_bygning_omrade_geometry_and_business_key_are_built_correctly():
+    plan = _bygning_plan()
+    coll = next(c for c in plan.collections if c.collection_name == "bygning_omrade")
+    assert coll.table.geometry.has_z
+    assert coll.table.geometry.postgis_type == "MultiPolygonZ"
+    ddl = "\n".join(postgis.table_statements(plan))
+    assert '"geometry" geometry(MultiPolygonZ, 5972)' in ddl
+    assert (
+        'on bygning.bygning_omrade ("lokalid", "identifikasjon_navnerom") '
+        "nulls not distinct"
+    ) in ddl
+
+
+def test_bygning_senterlinje_geometry_and_business_key_are_built_correctly():
+    plan = _bygning_plan()
+    coll = next(
+        c for c in plan.collections if c.collection_name == "bygning_senterlinje"
+    )
+    assert coll.table.geometry.has_z
+    assert coll.table.geometry.postgis_type == "MultiLineStringZ"
+    ddl = "\n".join(postgis.table_statements(plan))
+    assert '"geometry" geometry(MultiLineStringZ, 5972)' in ddl
+    assert (
+        'on bygning.bygning_senterlinje ("lokalid", "identifikasjon_navnerom") '
+        "nulls not distinct"
+    ) in ddl
+
+
+def test_bygning_posisjon_geometry_and_business_key_are_built_correctly():
+    plan = _bygning_plan()
+    coll = next(c for c in plan.collections if c.collection_name == "bygning_posisjon")
+    assert coll.table.geometry.has_z
+    assert coll.table.geometry.postgis_type == "PointZ"
+    ddl = "\n".join(postgis.table_statements(plan))
+    assert '"geometry" geometry(PointZ, 5972)' in ddl
+    assert (
+        'on bygning.bygning_posisjon ("lokalid", "identifikasjon_navnerom") '
+        "nulls not distinct"
+    ) in ddl
 
 
 # --------------------------------------------------------------------------

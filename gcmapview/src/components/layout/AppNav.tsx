@@ -5,7 +5,7 @@ import { useMapDimension } from '../map/MapDimensionContext';
 
 export function AppNav() {
   const location = useLocation();
-  const { is3d, setIs3d } = useMapDimension();
+  const { is3d, adjustElevatedHeights, setIs3d, setAdjustElevatedHeights } = useMapDimension();
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -15,6 +15,7 @@ export function AppNav() {
         <Button
           variant={location.pathname === '/' ? 'default' : 'outline'}
           size="sm"
+          nativeButton={false}
           render={
             <NavLink
               to="/"
@@ -27,6 +28,7 @@ export function AppNav() {
         <Button
           variant={location.pathname === '/import' ? 'default' : 'outline'}
           size="sm"
+          nativeButton={false}
           render={<NavLink to="/import" />}>
           <Upload data-icon="inline-start" />
           Import
@@ -41,6 +43,17 @@ export function AppNav() {
         <Cuboid data-icon="inline-start" />
         {is3d ? '3D on' : '3D off'}
       </Button>
+      {is3d ? (
+        <label className="flex items-center gap-2 rounded-md border border-border bg-card/80 px-3 py-1.5 text-sm shadow-sm">
+          <input
+            type="checkbox"
+            className="size-4 accent-foreground"
+            checked={!adjustElevatedHeights}
+            onChange={event => setAdjustElevatedHeights(!event.target.checked)}
+          />
+          <span>Terrain</span>
+        </label>
+      ) : null}
     </div>
   );
 }

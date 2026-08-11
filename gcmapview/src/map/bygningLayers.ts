@@ -1,14 +1,15 @@
 import * as maplibregl from 'maplibre-gl';
 import type { FeatureCollection, Position } from './geojson';
-import { heightColorExpression, maxCoordinateHeight } from './map3d';
+import { maxCoordinateHeight } from './map3d';
 
-export const platformEdgesSourceId = 'bane-platform-edges';
-export const trackCentresSourceId = 'bane-track-centres';
+export const bygningSourceId = 'bygning-linework';
+export const bygningLayerId = 'bygning-linework-line';
 
-export const platformEdgesLayerId = 'bane-platform-edges-line';
-export const trackCentresLayerId = 'bane-track-centres-line';
+export function bygningLayerFeatureCollection(featureCollection: FeatureCollection): FeatureCollection {
+  return normalizeBygningFeatureCollection(featureCollection);
+}
 
-export function normalizeBaneFeatureCollection(featureCollection: FeatureCollection): FeatureCollection {
+export function normalizeBygningFeatureCollection(featureCollection: FeatureCollection): FeatureCollection {
   return {
     type: 'FeatureCollection',
     features: featureCollection.features.map(feature => {
@@ -51,37 +52,19 @@ export function normalizeBaneFeatureCollection(featureCollection: FeatureCollect
   };
 }
 
-export function addBaneSourcesAndLayers(
-  map: maplibregl.Map,
-  platformEdges: FeatureCollection,
-  trackCentres: FeatureCollection
-) {
-  map.addSource(platformEdgesSourceId, {
+export function addBygningSourcesAndLayers(map: maplibregl.Map, bygning: FeatureCollection) {
+  map.addSource(bygningSourceId, {
     type: 'geojson',
-    data: normalizeBaneFeatureCollection(platformEdges)
-  });
-  map.addSource(trackCentresSourceId, {
-    type: 'geojson',
-    data: normalizeBaneFeatureCollection(trackCentres)
+    data: bygningLayerFeatureCollection(bygning)
   });
   map.addLayer({
-    id: platformEdgesLayerId,
+    id: bygningLayerId,
     type: 'line',
-    source: platformEdgesSourceId,
+    source: bygningSourceId,
     paint: {
       'line-color': '#000000',
-      'line-opacity': 0.9,
-      'line-width': ['interpolate', ['linear'], ['zoom'], 5, 1.5, 14, 4]
-    }
-  });
-  map.addLayer({
-    id: trackCentresLayerId,
-    type: 'line',
-    source: trackCentresSourceId,
-    paint: {
-      'line-color': heightColorExpression(),
       'line-opacity': 0.95,
-      'line-width': ['interpolate', ['linear'], ['zoom'], 5, 1.5, 14, 5]
+      'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.8, 14, 2.2]
     }
   });
 }

@@ -1,6 +1,6 @@
 # System architecture
 
-Overview of **topografisk-gdb-api**: YAML-described topographic datasets become PostGIS schemas and OGC API — Features services. Import and map viewing sit beside that engine. There are no message queues — communication is HTTP and PostgreSQL/PostGIS.
+Overview of **topografisk-gdb-api**: YAML-described topographic datasets become PostGIS schemas and OGC API — Features services. Import and developer map viewing sit beside that engine. There are no message queues — communication is HTTP and PostgreSQL/PostGIS.
 
 For package-level detail see [`geocomponents/README.md`](../geocomponents/README.md), [`gcimport/README.md`](../gcimport/README.md), [`gcmapview/README.md`](../gcmapview/README.md), and [`geocomponents/DEPLOY.md`](../geocomponents/DEPLOY.md).
 
@@ -67,7 +67,7 @@ YAML is the source of truth. Four swappable seams: descriptions → schema → a
 ```mermaid
 flowchart LR
   subgraph Descriptions
-    YAML["*.yaml<br/>bane, cadastre, hydro, commons"]
+    YAML["*.yaml<br/>bane, bygning, cadastre, hydro, commons"]
   end
 
   subgraph Schema
@@ -108,22 +108,22 @@ Collections are either `simple` (CRUD when configured) or `topology` (read-only 
 
 ## Data flows
 
-### Import (FKB-Bane)
+### Import (Bane / Bygning)
 
 ```mermaid
 sequenceDiagram
   participant U as Uploader
   participant I as gcimport :8001
   participant G as geocomponents :8000
-  participant DB as PostGIS bane.*
+  participant DB as PostGIS dataset.*
 
-  U->>I: POST /imports (JSON-FG or .geojson)
+  U->>I: POST /imports[?profile=bane|bygning]
   alt .geojson
     I->>I: convert → JSON-FG
   end
-  I->>I: validate, CRS → EPSG:5973
+  I->>I: validate, normalize, CRS transform
   loop each feature
-    I->>G: POST …/bane/…/items:upsert
+    I->>G: POST …/{dataset}/…/items:upsert
     G->>DB: ogc.feature_upsert
     DB-->>G: stable UUID
     G-->>I: {id}
@@ -131,8 +131,10 @@ sequenceDiagram
   I-->>U: {total, features[]}
 ```
 
-- Profile: `gcimport` Bane rules — collections `jernbaneplattformkant`, `spormidt`; upsert key `(lokalid, identifikasjon_navnerom)`; geometry `LineString` (Z allowed), CRS `EPSG:5973`.
-- Offline converter: `geojson-to-jsonfg` (Geonorge-style namespaces and property aliases).
+- `GCIMPORT_PROFILE` selects the default profile; `POST /imports?profile=bane|bygning` can override it per request.
+- Bane imports target `jernbaneplattformkant` and `spormidt`; geometry is stored as `MultiLineStringZ` in `EPSG:5973` and upserted by `(lokalid, identifikasjon_navnerom)`.
+- Bygning imports route linework, areas, centerlines, and positions into `bygning`, `bygning_omrade`, `bygning_senterlinje`, and `bygning_posisjon`; storage CRS is `EPSG:5972`.
+- Offline converter: `geojson-to-jsonfg` normalizes classic GeoJSON into JSON-FG before upload when needed.
 
 ### View / edit (gcmapview)
 
@@ -142,16 +144,20 @@ flowchart LR
   OSM[OSM tiles]
   CAD[cadastre OGC API]
   BANE[bane OGC API]
+  BYG[bygning OGC API]
 
   MV --> OSM
   MV -->|bbox GeoJSON| CAD
-  MV -->|bbox LineStrings| BANE
+  MV -->|bbox MultiLineStrings| BANE
+  MV -->|bbox lines, polygons, points| BYG
   MV -->|POST create parcels/buildings| CAD
+  MV -->|POST uploads| GCI[gcimport]
 ```
 
 - Cadastre: editable parcels/buildings in `EPSG:4326`.
-- Bane: read-only in the UI; client transforms `EPSG:5973` ↔ WGS84 for display.
-- Import UI at `/import` posts to gcimport.
+- Bane: read-only in the UI; client transforms `EPSG:5973` ↔ WGS84 for display and renders platform edges plus track centres.
+- Bygning: read-only in the UI; client loads linework, area footprints, centerlines, and positions from `EPSG:5972`, with 2D/3D derived rendering paths in the browser.
+- Import UI at `/import` auto-detects Bane vs Bygning from file contents, but the user can override the profile before upload.
 
 ### “Export”
 
@@ -205,6 +211,6 @@ flowchart LR
 
 1. **YAML drives schema and API surface** — change descriptions, then `apply-schema` / `serve`.
 2. **API ↔ DB contract is `ogc.feature_*` only** — no ad-hoc table SQL from the HTTP layer.
-3. **Upsert is first-class for Bane** via `upsert_key` + `items:upsert` (idempotent retries).
-4. **gcimport is profile-pluggable** — same `POST /imports`, different dataset rules.
+3. **Upsert is first-class for imported datasets** via `upsert_key` + `items:upsert` (idempotent retries for Bane and Bygning).
+4. **gcimport is profile-pluggable** — one `POST /imports` surface, dataset-specific routing and validation rules.
 5. **NIBIO / AR5** is preparatory topology material, not part of the live stack yet.
