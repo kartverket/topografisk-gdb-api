@@ -146,8 +146,13 @@ def _writable_columns(table: TablePlan) -> list[ColumnPlan]:
     return [
         c
         for c in table.property_columns
-        if c.name not in _AUDIT and not c.auto_increment
+        if c.name not in _AUDIT and not c.auto_increment and not c.server_write_expr
     ]
+
+
+def _server_write_columns(table: TablePlan) -> list[ColumnPlan]:
+    """Columns whose values are computed by the server, not read from the feature."""
+    return [c for c in table.property_columns if c.server_write_expr]
 
 
 def _properties_object(table: TablePlan, alias: str) -> str:
@@ -282,8 +287,17 @@ $func$"""
 def _fn_create(plan: CollectionPlan) -> str:
     t = plan.table
     writable = _writable_columns(t)
-    cols = ", ".join([f'"{t.geometry.name}"'] + [f'"{c.name}"' for c in writable])
-    vals = ", ".join([_geom_from_feature(t)] + [_prop_read(c) for c in writable])
+    sw = _server_write_columns(t)
+    cols = ", ".join(
+        [f'"{t.geometry.name}"']
+        + [f'"{c.name}"' for c in writable]
+        + [f'"{c.name}"' for c in sw]
+    )
+    vals = ", ".join(
+        [_geom_from_feature(t)]
+        + [_prop_read(c) for c in writable]
+        + [c.server_write_expr for c in sw]
+    )
     validations = [
         *_enum_checks(writable, guarded_by_presence=False),
         _geom_check(t, guarded_by_presence=False),
@@ -305,11 +319,21 @@ $func$"""
 def _fn_upsert(plan: CollectionPlan) -> str:
     t = plan.table
     writable = _writable_columns(t)
-    cols = ", ".join([f'"{t.geometry.name}"'] + [f'"{c.name}"' for c in writable])
-    vals = ", ".join([_geom_from_feature(t)] + [_prop_read(c) for c in writable])
+    sw = _server_write_columns(t)
+    cols = ", ".join(
+        [f'"{t.geometry.name}"']
+        + [f'"{c.name}"' for c in writable]
+        + [f'"{c.name}"' for c in sw]
+    )
+    vals = ", ".join(
+        [_geom_from_feature(t)]
+        + [_prop_read(c) for c in writable]
+        + [c.server_write_expr for c in sw]
+    )
     conflict_columns = ", ".join(f'"{name}"' for name in plan.upsert_key)
     sets = [f'"{t.geometry.name}" = excluded."{t.geometry.name}"']
     sets += [f'"{c.name}" = excluded."{c.name}"' for c in writable]
+    sets += [f'"{c.name}" = {c.server_write_expr}' for c in sw]
     sets.append('"updated_at" = now()')
     set_clause = ",\n      ".join(sets)
     validations = [
@@ -335,8 +359,10 @@ $func$"""
 def _fn_replace(plan: CollectionPlan) -> str:
     t = plan.table
     writable = _writable_columns(t)
+    sw = _server_write_columns(t)
     sets = [f'"{t.geometry.name}" = {_geom_from_feature(t)}']
     sets += [f'"{c.name}" = {_prop_read(c)}' for c in writable]
+    sets += [f'"{c.name}" = {c.server_write_expr}' for c in sw]
     sets.append('"updated_at" = now()')
     set_clause = ",\n      ".join(sets)
     validations = [
@@ -360,6 +386,7 @@ def _fn_update(plan: CollectionPlan) -> str:
     """Partial update: only keys present in the incoming feature change."""
     t = plan.table
     writable = _writable_columns(t)
+    sw = _server_write_columns(t)
     sets = [
         f"\"{t.geometry.name}\" = case when feature ? 'geometry' "
         f'then {_geom_from_feature(t)} else "{t.geometry.name}" end'
@@ -369,6 +396,8 @@ def _fn_update(plan: CollectionPlan) -> str:
             f"\"{c.name}\" = case when feature->'properties' ? '{_quote_key(c.name)}' "
             f'then {_prop_read(c)} else "{c.name}" end'
         )
+    # server_write columns are always refreshed on any write, unconditionally.
+    sets += [f'"{c.name}" = {c.server_write_expr}' for c in sw]
     sets.append('"updated_at" = now()')
     set_clause = ",\n      ".join(sets)
     validations = [

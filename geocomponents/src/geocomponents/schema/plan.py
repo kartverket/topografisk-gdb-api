@@ -71,6 +71,9 @@ class ColumnPlan:
     write_inject: tuple[tuple[str, str], ...] = ()
     # Permitted code values for DB-level validation (empty = no validation).
     codelist_values: tuple[str, ...] = ()
+    # Scalar server-managed: SQL expression substituted for client input on write.
+    # When set, the column is excluded from the writable set entirely.
+    server_write_expr: str | None = None
 
 
 @dataclass(frozen=True)
