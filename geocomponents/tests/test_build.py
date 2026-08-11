@@ -319,6 +319,22 @@ def test_parent_level_indexable_on_jsonb_does_not_produce_index():
 
 
 # --------------------------------------------------------------------------
+# codelist_values flow to ColumnPlan (Commit 5 prerequisite)
+# --------------------------------------------------------------------------
+
+
+def test_codelist_values_flow_from_resolved_field_to_column_plan():
+    """Suspect: codelist_values on ResolvedField must reach ColumnPlan unchanged
+    so the SQL generator can emit validation without re-reading descriptions."""
+    ds = _make_dataset(
+        fields=[ResolvedField("medium", "text", codelist_values=("ASFALT", "GRUS"))],
+    )
+    plan = build_schema_plan(ds)
+    col = next(c for c in plan.collections[0].table.columns if c.name == "medium")
+    assert col.codelist_values == ("ASFALT", "GRUS")
+
+
+# --------------------------------------------------------------------------
 # postgis: extra index DDL from IndexPlan (Commit 4)
 # --------------------------------------------------------------------------
 

@@ -465,3 +465,49 @@ def test_field_rejects_no_type_source():
     """A field must select its column type somehow."""
     with pytest.raises(ValidationError):
         FieldDef.model_validate({"name": "f"})
+
+
+# --------------------------------------------------------------------------
+# codelist_values flow (Commit 5 prerequisite)
+# --------------------------------------------------------------------------
+
+
+def test_codelist_values_populated_from_declared_codes():
+    """Suspect: codes in ResolvedField.codelist_values must match the codelist
+    declaration order and content."""
+    dataset = DatasetDef.model_validate(
+        {
+            "name": "x",
+            "codelists": [
+                {
+                    "name": "surface",
+                    "values": [
+                        {"code": "ASFALT"},
+                        {"code": "GRUS"},
+                        {"code": "STEIN"},
+                    ],
+                }
+            ],
+            "collections": [
+                {"name": "c", "fields": [{"name": "f", "codelist": "surface"}]}
+            ],
+        }
+    )
+    ds = resolve_dataset(dataset, Commons())
+    assert ds.collections[0].fields[0].codelist_values == ("ASFALT", "GRUS", "STEIN")
+
+
+def test_codelist_with_no_values_gives_empty_codelist_values():
+    """Suspect: a codelist with no declared values must not raise; codelist_values
+    must be an empty tuple so downstream callers can check truthiness safely."""
+    dataset = DatasetDef.model_validate(
+        {
+            "name": "x",
+            "codelists": [{"name": "empty"}],
+            "collections": [
+                {"name": "c", "fields": [{"name": "f", "codelist": "empty"}]}
+            ],
+        }
+    )
+    ds = resolve_dataset(dataset, Commons())
+    assert ds.collections[0].fields[0].codelist_values == ()

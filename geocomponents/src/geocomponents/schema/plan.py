@@ -69,6 +69,8 @@ class ColumnPlan:
     id_inject_key: str | None = None
     # JSONB-only: (key, sql_expr) pairs injected when writing to the DB.
     write_inject: tuple[tuple[str, str], ...] = ()
+    # Permitted code values for DB-level validation (empty = no validation).
+    codelist_values: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
