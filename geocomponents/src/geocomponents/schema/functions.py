@@ -234,7 +234,7 @@ def _geom_check(table: TablePlan, *, guarded_by_presence: bool) -> str:
     cond = f"feature ? 'geometry' and {inner}" if guarded_by_presence else inner
     return (
         f"  if {cond} then\n"
-        f"    raise exception 'invalid geometry' using errcode = 'P0002';\n"
+        f"    raise exception 'invalid geometry' using errcode = 'P0001';\n"
         f"  end if;"
     )
 

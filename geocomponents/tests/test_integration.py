@@ -25,6 +25,11 @@ PARCEL = {
     },
     "properties": {"label": "integration", "source": "test"},
 }
+# Self-intersecting (bowtie) polygon — ST_IsValid returns false.
+_INVALID_GEOM = {
+    "type": "MultiPolygon",
+    "coordinates": [[[[0, 0], [1, 1], [0, 1], [1, 0], [0, 0]]]],
+}
 
 BYGNING = {
     "type": "Feature",
@@ -168,13 +173,16 @@ def test_description_to_api_crud_roundtrip(db, datasets):
     )
 
 
-def test_bygning_upsert_roundtrip(db, datasets):
-    client = TestClient(
+def _client(db, datasets):
+    return TestClient(
         build_gateway(
             datasets, PygeoapiProvider(dsn=db), base_url="http://localhost:8000"
         )
     )
 
+
+def test_bygning_upsert_roundtrip(db, datasets):
+    client = _client(db, datasets)
     first = client.post(
         f"{BYGNING_API}/collections/bygning/items:upsert",
         content=orjson.dumps(BYGNING).decode(),
@@ -213,11 +221,7 @@ def test_bygning_upsert_roundtrip(db, datasets):
 
 
 def test_bygning_omrade_upsert_roundtrip(db, datasets):
-    client = TestClient(
-        build_gateway(
-            datasets, PygeoapiProvider(dsn=db), base_url="http://localhost:8000"
-        )
-    )
+    client = _client(db, datasets)
 
     first = client.post(
         f"{BYGNING_API}/collections/bygning_omrade/items:upsert",
@@ -245,11 +249,7 @@ def test_bygning_omrade_upsert_roundtrip(db, datasets):
 
 
 def test_bygning_senterlinje_upsert_roundtrip(db, datasets):
-    client = TestClient(
-        build_gateway(
-            datasets, PygeoapiProvider(dsn=db), base_url="http://localhost:8000"
-        )
-    )
+    client = _client(db, datasets)
 
     first = client.post(
         f"{BYGNING_API}/collections/bygning_senterlinje/items:upsert",
@@ -289,11 +289,7 @@ def test_bygning_senterlinje_upsert_roundtrip(db, datasets):
 
 
 def test_bygning_posisjon_upsert_roundtrip(db, datasets):
-    client = TestClient(
-        build_gateway(
-            datasets, PygeoapiProvider(dsn=db), base_url="http://localhost:8000"
-        )
-    )
+    client = _client(db, datasets)
 
     first = client.post(
         f"{BYGNING_API}/collections/bygning_posisjon/items:upsert",
@@ -330,3 +326,30 @@ def test_bygning_posisjon_upsert_roundtrip(db, datasets):
     assert abs(listed_lon - lon) < 1e-6
     assert abs(listed_lat - lat) < 1e-6
     assert listed_z == -99999.0
+
+
+def test_create_with_invalid_codelist_value_returns_422(db, datasets):
+    """Pre-code suspect (end-to-end): a codelist violation in the write function
+    must surface as HTTP 422, not 500, via the P0001 → ProviderValidationError path."""
+    feature = {
+        **PARCEL,
+        "properties": {**PARCEL["properties"], "status": "not_a_real_status"},
+    }
+    r = _client(db, datasets).post(
+        f"{API}/collections/parcels/items",
+        content=orjson.dumps(feature).decode(),
+        headers={"content-type": "application/geo+json"},
+    )
+    assert r.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+def test_create_with_invalid_geometry_returns_422(db, datasets):
+    """Pre-code suspect (end-to-end): a geometry that fails ST_IsValid must
+    surface as HTTP 422 via the P0001 → ProviderValidationError path."""
+    feature = {**PARCEL, "geometry": _INVALID_GEOM}
+    r = _client(db, datasets).post(
+        f"{API}/collections/parcels/items",
+        content=orjson.dumps(feature).decode(),
+        headers={"content-type": "application/geo+json"},
+    )
+    assert r.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
