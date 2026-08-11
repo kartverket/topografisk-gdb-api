@@ -47,6 +47,15 @@ def internal_function(schema: str, collection: str, operation: str) -> str:
 
 
 @dataclass(frozen=True)
+class IndexPlan:
+    """One index to emit after the table DDL."""
+
+    expression: str  # column name or functional expression, without outer parens
+    unique: bool = False
+    method: str = "btree"
+
+
+@dataclass(frozen=True)
 class ColumnPlan:
     name: str
     sql_type: str
@@ -54,6 +63,12 @@ class ColumnPlan:
     primary_key: bool = False
     default: str | None = None
     auto_increment: bool = False
+    # JSONB-only: keys stripped from incoming feature properties before storing.
+    strip_keys: tuple[str, ...] = ()
+    # JSONB-only: key injected as id::text in the GeoJSON read response.
+    id_inject_key: str | None = None
+    # JSONB-only: (key, sql_expr) pairs injected when writing to the DB.
+    write_inject: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -85,6 +100,7 @@ class TablePlan:
     columns: tuple[ColumnPlan, ...]
     geometry: GeometryColumnPlan
     foreign_keys: tuple[ForeignKeyPlan, ...] = ()
+    indexes: tuple[IndexPlan, ...] = ()
 
     @property
     def qualified(self) -> str:

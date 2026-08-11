@@ -3,12 +3,45 @@ from pathlib import Path
 import pytest
 
 from geocomponents.descriptions.loader import load_resolved_datasets
+from geocomponents.descriptions.models import (
+    ResolvedCollection,
+    ResolvedDataset,
+    ResolvedField,
+)
 from geocomponents.schema import postgis
 from geocomponents.schema.build import build_schema_plan
 from geocomponents.schema.plan import OPERATIONS, READ_OPS
 
 DESCRIPTIONS = Path(__file__).resolve().parents[1] / "descriptions"
 WGS84_SRID = 4326
+
+
+def _make_dataset(
+    *,
+    fields: list[ResolvedField] | None = None,
+    server_managed_paths: dict[str, str] | None = None,
+    outward_identifier_path: str | None = None,
+) -> ResolvedDataset:
+    """Minimal dataset fixture for build tests."""
+    return ResolvedDataset(
+        name="x",
+        title="X",
+        description="",
+        collections=(
+            ResolvedCollection(
+                name="c",
+                title="C",
+                description="",
+                feature_model="simple",
+                geometry_type="Point",
+                srid=4258,
+                fields=tuple(fields or []),
+                relationships=(),
+                server_managed_paths=server_managed_paths or {},
+                outward_identifier_path=outward_identifier_path,
+            ),
+        ),
+    )
 
 
 def _cadastre_plan():
@@ -135,3 +168,151 @@ def test_fk_constraint_name_raises_when_over_63():
     long_column = "c" * 40 + "_id"  # 43 chars
     with pytest.raises(ValueError, match=r"63"):
         postgis._fk_constraint_name(long_table, long_column)
+
+
+# --------------------------------------------------------------------------
+# JSONB column injection metadata (Commit 3)
+# --------------------------------------------------------------------------
+
+
+def test_jsonb_field_with_server_managed_outward_identifier_sets_id_inject_key():
+    """server_managed outward_identifier → ColumnPlan.id_inject_key populated."""
+    ds = _make_dataset(
+        fields=[
+            ResolvedField(
+                "identifikasjon",
+                "jsonb",
+                sub_fields=(
+                    ResolvedField("lokalid", "text"),
+                    ResolvedField("navnerom", "text"),
+                ),
+            )
+        ],
+        server_managed_paths={"identifikasjon.lokalid": "outward_identifier"},
+    )
+    plan = build_schema_plan(ds)
+    col = next(
+        c for c in plan.collections[0].table.columns if c.name == "identifikasjon"
+    )
+    assert col.id_inject_key == "lokalid"
+    assert "lokalid" in col.strip_keys
+
+
+def test_jsonb_field_with_server_managed_timestamp_iso_sets_write_inject():
+    """server_managed timestamp_iso → ColumnPlan.write_inject populated."""
+    ds = _make_dataset(
+        fields=[
+            ResolvedField(
+                "identifikasjon",
+                "jsonb",
+                sub_fields=(
+                    ResolvedField("lokalid", "text"),
+                    ResolvedField("versjonid", "text"),
+                ),
+            )
+        ],
+        server_managed_paths={"identifikasjon.versjonid": "timestamp_iso"},
+    )
+    plan = build_schema_plan(ds)
+    col = next(
+        c for c in plan.collections[0].table.columns if c.name == "identifikasjon"
+    )
+    assert ("versjonid", "now()::text") in col.write_inject
+    assert "versjonid" in col.strip_keys
+
+
+def test_jsonb_field_both_server_managed_tokens():
+    """Both outward_identifier and timestamp_iso in server_managed → all injection metadata set."""
+    ds = _make_dataset(
+        fields=[
+            ResolvedField(
+                "identifikasjon",
+                "jsonb",
+                sub_fields=(
+                    ResolvedField("lokalid", "text"),
+                    ResolvedField("versjonid", "text"),
+                ),
+            )
+        ],
+        server_managed_paths={
+            "identifikasjon.lokalid": "outward_identifier",
+            "identifikasjon.versjonid": "timestamp_iso",
+        },
+    )
+    plan = build_schema_plan(ds)
+    col = next(
+        c for c in plan.collections[0].table.columns if c.name == "identifikasjon"
+    )
+    assert col.id_inject_key == "lokalid"
+    assert ("versjonid", "now()::text") in col.write_inject
+    assert set(col.strip_keys) == {"lokalid", "versjonid"}
+
+
+def test_non_jsonb_field_has_no_injection_metadata():
+    """A plain scalar field must not accidentally pick up injection metadata."""
+    ds = _make_dataset(
+        fields=[ResolvedField("medium", "text")],
+    )
+    plan = build_schema_plan(ds)
+    col = next(c for c in plan.collections[0].table.columns if c.name == "medium")
+    assert col.strip_keys == ()
+    assert col.id_inject_key is None
+    assert col.write_inject == ()
+
+
+# --------------------------------------------------------------------------
+# IndexPlan generation (Commit 3)
+# --------------------------------------------------------------------------
+
+
+def test_indexable_sub_field_of_jsonb_produces_functional_index():
+    """indexable:True on a JSONB sub-field → functional IndexPlan in TablePlan.indexes."""
+    ds = _make_dataset(
+        fields=[
+            ResolvedField(
+                "identifikasjon",
+                "jsonb",
+                sub_fields=(ResolvedField("lokalid", "text", indexable=True),),
+            )
+        ],
+    )
+    plan = build_schema_plan(ds)
+    exprs = [idx.expression for idx in plan.collections[0].table.indexes]
+    assert any("identifikasjon" in e and "lokalid" in e for e in exprs)
+
+
+def test_indexable_scalar_field_produces_regular_index():
+    """indexable:True on a scalar field → IndexPlan with the column name."""
+    ds = _make_dataset(
+        fields=[ResolvedField("medium", "text", indexable=True)],
+    )
+    plan = build_schema_plan(ds)
+    exprs = [idx.expression for idx in plan.collections[0].table.indexes]
+    assert any("medium" in e for e in exprs)
+
+
+def test_non_indexable_scalar_field_produces_no_extra_index():
+    """indexable:False (default) on a scalar field → no IndexPlan."""
+    ds = _make_dataset(
+        fields=[ResolvedField("medium", "text", indexable=False)],
+    )
+    plan = build_schema_plan(ds)
+    exprs = [idx.expression for idx in plan.collections[0].table.indexes]
+    assert not any("medium" in e for e in exprs)
+
+
+def test_parent_level_indexable_on_jsonb_does_not_produce_index():
+    """indexable on the parent object field itself is ignored; only sub-fields matter."""
+    ds = _make_dataset(
+        fields=[
+            ResolvedField(
+                "identifikasjon",
+                "jsonb",
+                indexable=True,  # parent marked, not the sub-field
+                sub_fields=(ResolvedField("lokalid", "text", indexable=False),),
+            )
+        ],
+    )
+    plan = build_schema_plan(ds)
+    exprs = [idx.expression for idx in plan.collections[0].table.indexes]
+    assert not any("identifikasjon" in e for e in exprs)

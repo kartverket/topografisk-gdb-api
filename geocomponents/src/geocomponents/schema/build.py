@@ -21,6 +21,7 @@ from geocomponents.schema.plan import (
     ColumnPlan,
     ForeignKeyPlan,
     GeometryColumnPlan,
+    IndexPlan,
     SchemaPlan,
     TablePlan,
     internal_function,
@@ -39,16 +40,55 @@ def _standard_columns() -> list[ColumnPlan]:
 
 def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:
     columns: list[ColumnPlan] = _standard_columns()
+    indexes: list[IndexPlan] = []
 
     for fld in coll.fields:
-        columns.append(
-            ColumnPlan(
-                fld.name,
-                fld.sql_type,
-                nullable=not fld.required,
-                auto_increment=fld.auto_increment,
+        if fld.sql_type == "jsonb":
+            # Translate server_managed_paths entries for this field into
+            # ColumnPlan injection metadata.  Only consider paths whose first
+            # dot-segment matches this field's name.
+            strip_keys: list[str] = []
+            id_inject_key: str | None = None
+            write_inject: list[tuple[str, str]] = []
+
+            for path, rule in coll.server_managed_paths.items():
+                parts = path.split(".", 1)
+                if len(parts) == 2 and parts[0] == fld.name:  # noqa: PLR2004
+                    sub_key = parts[1]
+                    strip_keys.append(sub_key)
+                    if rule == "outward_identifier":
+                        id_inject_key = sub_key
+                    elif rule == "timestamp_iso":
+                        write_inject.append((sub_key, "now()::text"))
+
+            # Functional indexes for directly indexable sub-fields.
+            # SafeIdentifier guarantees no single quotes in key names.
+            for sf in fld.sub_fields:
+                if sf.indexable:
+                    expr = f"(\"{fld.name}\"->>'{sf.name}')"
+                    indexes.append(IndexPlan(expr))
+
+            columns.append(
+                ColumnPlan(
+                    fld.name,
+                    fld.sql_type,
+                    nullable=not fld.required,
+                    strip_keys=tuple(strip_keys),
+                    id_inject_key=id_inject_key,
+                    write_inject=tuple(write_inject),
+                )
             )
-        )
+        else:
+            columns.append(
+                ColumnPlan(
+                    fld.name,
+                    fld.sql_type,
+                    nullable=not fld.required,
+                    auto_increment=fld.auto_increment,
+                )
+            )
+            if fld.indexable:
+                indexes.append(IndexPlan(f'"{fld.name}"'))
 
     foreign_keys: list[ForeignKeyPlan] = []
     for rel in coll.relationships:
@@ -70,6 +110,7 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:
         columns=tuple(columns),
         geometry=geometry,
         foreign_keys=tuple(foreign_keys),
+        indexes=tuple(indexes),
     )
 
 
