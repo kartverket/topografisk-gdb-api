@@ -52,9 +52,9 @@ _QMS_SCALAR_TYPES: dict[str, str] = {
 }
 
 _GM_TO_GEOCOMPONENTS: dict[str, str] = {
-    "GM_Curve": "LineString",
-    "GM_Point": "Point",
-    "GM_Surface": "Polygon",
+    "GM_Curve": "MultiLineString",
+    "GM_Point": "MultiPoint",
+    "GM_Surface": "MultiPolygon",
     "GM_MultiCurve": "MultiLineString",
     "GM_MultiPoint": "MultiPoint",
     "GM_MultiSurface": "MultiPolygon",

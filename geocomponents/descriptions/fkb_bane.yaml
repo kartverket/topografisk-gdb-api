@@ -7,7 +7,7 @@ collections:
   description: yttergrense av konstruksjon til bruk ved av-/påstigning for passasjerer
     eller ved av-/pålasting av gods
   geometry:
-    type: LineString
+    type: MultiLineString
     srid: 4326
   outward_identifier: identifikasjon.lokalid
   server_managed:
@@ -64,7 +64,7 @@ collections:
   title: Spormidt
   description: teoretisk linje midt mellom skinnestrengene
   geometry:
-    type: LineString
+    type: MultiLineString
     srid: 4326
   outward_identifier: identifikasjon.lokalid
   server_managed:
