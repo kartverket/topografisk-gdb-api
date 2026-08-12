@@ -49,9 +49,19 @@ def _value(sql_type, variant=0):
     return "x" if variant == 0 else "y"
 
 
+def _field_value(f, variant=0):
+    """Pick a value for *f* that satisfies DB constraints (codelist, jsonb shape)."""
+    if f.codelist_values:
+        return f.codelist_values[variant % len(f.codelist_values)]
+    if f.sql_type == "jsonb":
+        # Provide a proper object so #- path operators don't fail on scalars.
+        return {sf.name: _field_value(sf, variant) for sf in f.sub_fields}
+    return _value(f.sql_type, variant)
+
+
 def _sample_feature(coll):
     props = {
-        f.name: _value(f.sql_type)
+        f.name: _field_value(f)
         for f in coll.fields
         if f.required and not f.auto_increment
     }
@@ -141,16 +151,12 @@ def test_simple_collections_support_full_crud_roundtrip(datasets, conn):
                             coll.name,
                             fid,
                             orjson.dumps(
-                                {
-                                    "properties": {
-                                        changed.name: _value(changed.sql_type, 1)
-                                    }
-                                }
+                                {"properties": {changed.name: _field_value(changed, 1)}}
                             ).decode(),
                         ),
                     )
                     props = _item(cur, d.name, coll.name, fid)["properties"]
-                    assert props[changed.name] == _value(changed.sql_type, 1)
+                    assert props[changed.name] == _field_value(changed, 1)
                     assert props["source"] == "orig"  # untouched
 
                 cur.execute(

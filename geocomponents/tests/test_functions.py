@@ -358,6 +358,7 @@ def test_geom_check_guarded_short_circuits_before_st_geomfromgeojson():
     sql = _geom_check(table, guarded_by_presence=True)
     assert sql.index("feature ? 'geometry'") < sql.index("ST_IsValid(")
 
+
 # --------------------------------------------------------------------------
 # Scalar server_write_expr: excluded from writes, substituted in DML (Commit 8a)
 # --------------------------------------------------------------------------

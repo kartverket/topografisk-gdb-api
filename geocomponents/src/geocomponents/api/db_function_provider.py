@@ -17,11 +17,8 @@ from http import HTTPStatus
 
 import orjson
 import psycopg
-<<<<<<< HEAD
-from pygeoapi.crs import crs_transform
-=======
 import psycopg.errors
->>>>>>> 101b5a8 (TT-73: api - P0001 → HTTP 422 for DB validation rejections)
+from pygeoapi.crs import crs_transform
 from pygeoapi.provider.base import (
     BaseProvider,
     ProviderInvalidDataError,

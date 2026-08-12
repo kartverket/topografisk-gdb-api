@@ -34,7 +34,7 @@ word boundaries that contained Norwegian characters are lost:
 | `datafangstmetodeHøyde`| `datafangstmetodehoyde`   |
 | `høydereferanse`       | `hoydereferanse`          |
 
-The generated YAML is valid and the system works, but lossy if we need to 
+The generated YAML is valid and the system works, but lossy if we need to
 represent exact data back to a user through the API.
 A future PR could extend `SafeIdentifier` to allow
 Unicode letters (PostgreSQL supports quoted Unicode identifiers) or to preserve

@@ -43,7 +43,7 @@ def _standard_columns() -> list[ColumnPlan]:
     ]
 
 
-def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:
+def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: PLR0912
     columns: list[ColumnPlan] = _standard_columns()
     indexes: list[IndexPlan] = []
 
