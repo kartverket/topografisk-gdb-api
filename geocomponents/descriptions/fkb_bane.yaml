@@ -8,7 +8,8 @@ collections:
     eller ved av-/pålasting av gods
   geometry:
     type: MultiLineString
-    srid: 4326
+    srid: 5973
+    haz_z: true
   outward_identifier: identifikasjon.lokalid
   server_managed:
     identifikasjon.versjonid: timestamp_iso
@@ -65,7 +66,8 @@ collections:
   description: teoretisk linje midt mellom skinnestrengene
   geometry:
     type: MultiLineString
-    srid: 4326
+    srid: 5973
+    haz_z: true
   outward_identifier: identifikasjon.lokalid
   server_managed:
     identifikasjon.versjonid: timestamp_iso

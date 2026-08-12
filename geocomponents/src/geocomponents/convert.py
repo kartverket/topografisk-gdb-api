@@ -134,6 +134,7 @@ def _convert_feature_type(
     dat_by_uuid: dict[str, dict],
     srid: int,
     codelists: dict[str, dict],
+    has_z: bool,
 ) -> dict:
     """Convert one QMS FeatureType to a geocomponents collection dict."""
     coll_name = _safe_id(ft["Name"])
@@ -181,7 +182,7 @@ def _convert_feature_type(
         "name": coll_name,
         "title": ft["Name"],
         "description": description,
-        "geometry": {"type": geom_type, "srid": srid},
+        "geometry": {"type": geom_type, "srid": srid, "haz_z": has_z},
     }
     if outward_identifier:
         coll["outward_identifier"] = outward_identifier
@@ -194,14 +195,16 @@ def _convert_feature_type(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-def convert_qms(data: dict, dataset_name: str, srid: int = 4326) -> str:
+def convert_qms(data: dict, dataset_name: str, srid: int, has_z: bool) -> str:
     """Convert a QMS schema dict to a geocomponents dataset YAML string."""
     dat_by_uuid = _build_dat_lookup(data)
     codelists: dict[str, dict] = {}
     collections = []
 
     for ft in data.get("FeatureTypes", []):
-        collections.append(_convert_feature_type(ft, dat_by_uuid, srid, codelists))
+        collections.append(
+            _convert_feature_type(ft, dat_by_uuid, srid, codelists, has_z)
+        )
 
     obj_katalog = data.get("Objektkatalog", {})
     title = obj_katalog.get("ObjektkatalogFullstendigNavn") or dataset_name
@@ -238,10 +241,16 @@ def _cli_main() -> None:  # pragma: no cover
     parser.add_argument(
         "--srid", type=int, default=4326, help="Geometry SRID (default: 4326)"
     )
+    parser.add_argument(
+        "--has-z",
+        type=bool,
+        default=True,
+        help="Geometries has z coordinates (default True)",
+    )
     args = parser.parse_args()
 
     data = json.loads(args.input.read_text(encoding="utf-8"))
-    yaml_str = convert_qms(data, args.dataset_name, srid=args.srid)
+    yaml_str = convert_qms(data, args.dataset_name, srid=args.srid, has_z=args.has_z)
     args.output.write_text(yaml_str, encoding="utf-8")
     sys.stderr.write(f"Written: {args.output}\n")
 
