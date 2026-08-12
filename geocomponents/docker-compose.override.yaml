@@ -68,3 +68,87 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+  gccore-migrate:
+    build: ../gccore
+    command: ["migrate-db"]
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: geocomponents
+      DB_USER: geocomponents
+      DB_PASSWORD: geocomponents
+    volumes:
+      - ../gccore/src:/app/src:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  gccore:
+    build: ../gccore
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: geocomponents
+      DB_USER: geocomponents
+      DB_PASSWORD: geocomponents
+    ports:
+      - "8002:8000"
+    volumes:
+      - ../gccore/src:/app/src:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      db:
+        condition: service_healthy
+      gccore-migrate:
+        condition: service_completed_successfully
+
+  gcjobs-migrate:
+    build: ../gcjobs
+    command: ["migrate-db"]
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: geocomponents
+      DB_USER: geocomponents
+      DB_PASSWORD: geocomponents
+    volumes:
+      - ../gcjobs/src:/app/src:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  gcjobs:
+    build: ../gcjobs
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: geocomponents
+      DB_USER: geocomponents
+      DB_PASSWORD: geocomponents
+    ports:
+      - "8003:8000"
+    volumes:
+      - ../gcjobs/src:/app/src:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      db:
+        condition: service_healthy
+      gcjobs-migrate:
+        condition: service_completed_successfully

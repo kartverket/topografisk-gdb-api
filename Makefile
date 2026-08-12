@@ -1,4 +1,4 @@
-.PHONY: docker-up frontend-install frontend-build frontend-run gcimport-install gcimport-test gcimport-run
+.PHONY: docker-up frontend-install frontend-build frontend-run gcimport-install gcimport-test gcimport-run gccore-install gccore-test gccore-run gcjobs-install gcjobs-test gcjobs-run
 
 docker-up:
 	cd geocomponents && docker compose up
@@ -32,3 +32,21 @@ gcimport-test:
 
 gcimport-run:
 	uv run --project gcimport uvicorn gcimport.app:app --port 8001
+
+gccore-install:
+	uv sync --project gccore
+
+gccore-test:
+	cd gccore && uv run pytest
+
+gccore-run:
+	uv run --project gccore gccore serve --port 8002
+
+gcjobs-install:
+	uv sync --project gcjobs
+
+gcjobs-test:
+	cd gcjobs && uv run pytest
+
+gcjobs-run:
+	uv run --project gcjobs gcjobs serve --port 8003
