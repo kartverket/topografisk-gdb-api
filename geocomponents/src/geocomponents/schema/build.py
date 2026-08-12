@@ -66,6 +66,17 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:
                     elif rule == "timestamp_iso":
                         write_inject.append((sub_key, "now()::text"))
 
+            # The standalone `outward_identifier:` key is stored separately from
+            # `server_managed_paths`.  If it targets a sub-field of this JSONB
+            # column, apply the same strip-on-write / inject-on-read behaviour.
+            if coll.outward_identifier_path is not None:
+                oi_parts = coll.outward_identifier_path.split(".", 1)
+                if len(oi_parts) == 2 and oi_parts[0] == fld.name:  # noqa: PLR2004
+                    sub_key = oi_parts[1]
+                    if sub_key not in strip_keys:
+                        strip_keys.append(sub_key)
+                    id_inject_key = sub_key
+
             # Functional indexes for directly indexable sub-fields.
             # SafeIdentifier guarantees no single quotes in key names.
             for sf in fld.sub_fields:

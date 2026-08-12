@@ -314,6 +314,35 @@ def test_jsonb_field_both_server_managed_tokens():
     assert set(col.strip_keys) == {"lokalid", "versjonid"}
 
 
+def test_standalone_outward_identifier_sets_id_inject_key_and_strip():
+    """outward_identifier_path alone (no server_managed entry) must populate
+    id_inject_key and strip_keys on the matching JSONB ColumnPlan.
+    """
+    ds = _make_dataset(
+        fields=[
+            ResolvedField(
+                "identifikasjon",
+                "jsonb",
+                sub_fields=(
+                    ResolvedField("lokalid", "text"),
+                    ResolvedField("versjonid", "text"),
+                ),
+            )
+        ],
+        outward_identifier_path="identifikasjon.lokalid",
+        server_managed_paths={"identifikasjon.versjonid": "timestamp_iso"},
+    )
+    plan = build_schema_plan(ds)
+    col = next(
+        c for c in plan.collections[0].table.columns if c.name == "identifikasjon"
+    )
+    assert col.id_inject_key == "lokalid"
+    assert "lokalid" in col.strip_keys
+    # The server_managed versjonid injection must still be present.
+    assert ("versjonid", "now()::text") in col.write_inject
+    assert "versjonid" in col.strip_keys
+
+
 def test_non_jsonb_field_has_no_injection_metadata():
     """A plain scalar field must not accidentally pick up injection metadata."""
     ds = _make_dataset(
@@ -414,7 +443,9 @@ def test_scalar_server_managed_timestamp_iso_sets_server_write_expr():
         server_managed_paths={"oppdateringsdato": "timestamp_iso"},
     )
     plan = build_schema_plan(ds)
-    col = next(c for c in plan.collections[0].table.columns if c.name == "oppdateringsdato")
+    col = next(
+        c for c in plan.collections[0].table.columns if c.name == "oppdateringsdato"
+    )
     assert col.server_write_expr == "now()"
 
 
@@ -425,7 +456,9 @@ def test_scalar_without_server_managed_has_no_server_write_expr():
         fields=[ResolvedField("datafangstdato", "date", required=True)],
     )
     plan = build_schema_plan(ds)
-    col = next(c for c in plan.collections[0].table.columns if c.name == "datafangstdato")
+    col = next(
+        c for c in plan.collections[0].table.columns if c.name == "datafangstdato"
+    )
     assert col.server_write_expr is None
 
 

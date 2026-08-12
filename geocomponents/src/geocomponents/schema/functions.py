@@ -234,7 +234,7 @@ def _enum_checks(writable: list[ColumnPlan], *, guarded_by_presence: bool) -> li
 
 
 def _geom_check(table: TablePlan, *, guarded_by_presence: bool) -> str:
-    """IF block that raises P0002 when the incoming geometry is not valid."""
+    """IF block that raises P0001 when the incoming geometry is not valid."""
     inner = f"not ST_IsValid({_geom_from_feature(table)})"
     cond = f"feature ? 'geometry' and {inner}" if guarded_by_presence else inner
     return (
