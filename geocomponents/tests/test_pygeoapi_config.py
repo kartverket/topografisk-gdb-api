@@ -1,7 +1,20 @@
 from pathlib import Path
 
-from geocomponents.api.pygeoapi_provider import PROVIDER_PATH, build_config
+import psycopg.errors
+import pytest
+
+from geocomponents.api.db_function_provider import (
+    ProviderValidationError,
+    _rethrow_pg_raise,
+)
+from geocomponents.api.pygeoapi_provider import (
+    PROVIDER_PATH,
+    _field_schema,
+    _json_type,
+    build_config,
+)
 from geocomponents.descriptions.loader import load_resolved_datasets
+from geocomponents.descriptions.models import ResolvedField
 
 DESCRIPTIONS = Path(__file__).resolve().parents[1] / "descriptions"
 PUBLIC_URL = "http://example.org/datasets/cadastre/ogc_api"
@@ -144,3 +157,82 @@ def test_wgs84_collections_keep_default_crs_behaviour():
     assert "storage_crs" not in provider
     assert "crs" not in provider
     assert "always_xy" not in provider
+
+
+# --------------------------------------------------------------------------
+# _json_type and _field_schema — pre-code suspects (Commit 6)
+# --------------------------------------------------------------------------
+
+
+def test_json_type_jsonb_maps_to_object():
+    """Pre-code suspect: jsonb must map to 'object', not the catch-all 'string'."""
+    assert _json_type("jsonb") == "object"
+
+
+def test_field_schema_jsonb_empty_sub_fields_produces_object_with_empty_properties():
+    """Pre-code suspect: JSONB with no sub-fields must not raise — emits
+    type:object with an empty properties dict."""
+    fld = ResolvedField("obj", "jsonb", sub_fields=())
+    assert _field_schema(fld) == {"type": "object", "properties": {}}
+
+
+def test_field_schema_jsonb_depth2_nesting_recurses():
+    """Pre-code suspect: JSONB-inside-JSONB must produce nested properties,
+    confirming the recursion handles arbitrary depth."""
+    inner = ResolvedField("inner", "jsonb", sub_fields=(ResolvedField("x", "text"),))
+    outer = ResolvedField("outer", "jsonb", sub_fields=(inner,))
+    schema = _field_schema(outer)
+    assert schema["properties"]["inner"]["type"] == "object"
+    assert schema["properties"]["inner"]["properties"]["x"]["type"] == "string"
+
+
+def test_field_schema_codelist_values_wins_over_doc_enum():
+    """Pre-code suspect: when both codelist_values and enum are set,
+    codelist_values (enforced) must appear in the schema enum — not the doc hint."""
+    fld = ResolvedField(
+        "medium",
+        "text",
+        codelist_values=("ASFALT", "GRUS"),
+        enum=("hint_a", "hint_b"),
+    )
+    schema = _field_schema(fld)
+    assert schema["enum"] == ["ASFALT", "GRUS"]
+
+
+def test_field_schema_uses_doc_enum_when_no_codelist_values():
+    """Pre-code suspect: documented enum hints must appear when there are no
+    codelist values, so authors can express constraints without a full CodeList."""
+    fld = ResolvedField("medium", "text", enum=("A", "B", "C"))
+    schema = _field_schema(fld)
+    assert schema["enum"] == ["A", "B", "C"]
+
+
+# --------------------------------------------------------------------------
+# ProviderValidationError + _rethrow_pg_raise (Commit 7)
+# --------------------------------------------------------------------------
+
+
+def test_provider_validation_error_maps_to_422():
+    """Pre-code suspect: ProviderValidationError must carry HTTP 422 so pygeoapi
+    returns Unprocessable Content, not 500, for DB validation rejections."""
+    from http import HTTPStatus
+
+    assert ProviderValidationError().http_status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+def test_rethrow_pg_raise_converts_p0001_to_validation_error():
+    """Pre-code suspect: RaiseException (P0001) must be caught and re-raised as
+    ProviderValidationError — the gateway contract for validation failures."""
+    with pytest.raises(ProviderValidationError), _rethrow_pg_raise():
+        raise psycopg.errors.RaiseException()
+
+
+def test_rethrow_pg_raise_reraises_unknown_sqlstate_unchanged():
+    """Pre-code suspect: a RaiseException with a non-P0001 sqlstate must pass
+    through — the handler must not swallow unexpected DB errors."""
+
+    class _OtherRaise(psycopg.errors.RaiseException):
+        sqlstate = "P9999"
+
+    with pytest.raises(_OtherRaise), _rethrow_pg_raise():
+        raise _OtherRaise()

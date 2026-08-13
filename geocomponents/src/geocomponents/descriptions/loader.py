@@ -66,20 +66,41 @@ def _resolve_field(
     *,
     where: str,
 ) -> ResolvedField:
+    """Resolve one FieldDef into a DB-neutral ResolvedField."""
+    if fld.type == "object":
+        # Recurse into sub-fields; compose the where path so error messages
+        # name the full field path (e.g. "… / field 'kvalitet' / field 'x'").
+        child_where = f"{where} / field '{fld.name}'"
+        sub = tuple(
+            _resolve_field(sf, types, codelists, where=child_where) for sf in fld.fields
+        )
+        return ResolvedField(
+            fld.name,
+            "jsonb",
+            fld.required,
+            sub_fields=sub,
+            enum=tuple(fld.enum),
+            indexable=fld.indexable,
+        )
+
     if fld.codelist is not None:
         if fld.codelist not in codelists:
             raise DescriptionError(
                 f"{where}: field '{fld.name}' references unknown code list "
                 f"'{fld.codelist}'"
             )
-        # Code-list columns are plain text for now; DB-side enforcement is a
-        # deferred 'validation in the DB' concern.
+        # Code-list columns are plain text; code values are stored so the
+        # function generator can emit DB-level validation.
+        cl = codelists[fld.codelist]
         return ResolvedField(
             fld.name,
             "text",
             fld.required,
             codelist=fld.codelist,
             auto_increment=fld.auto_increment,
+            enum=tuple(fld.enum),
+            indexable=fld.indexable,
+            codelist_values=tuple(v.code for v in cl.values),
         )
 
     if fld.type_ref is not None:
@@ -92,6 +113,8 @@ def _resolve_field(
             types[fld.type_ref].sql_type,
             fld.required,
             auto_increment=fld.auto_increment,
+            enum=tuple(fld.enum),
+            indexable=fld.indexable,
         )
 
     if fld.type is not None:
@@ -105,6 +128,8 @@ def _resolve_field(
             BUILTIN_SQL_TYPES[fld.type],
             fld.required,
             auto_increment=fld.auto_increment,
+            enum=tuple(fld.enum),
+            indexable=fld.indexable,
         )
 
     # FieldDef enforces "exactly one of type / type_ref / codelist" at parse time,
@@ -114,9 +139,35 @@ def _resolve_field(
     )
 
 
+def _resolve_dot_path(
+    fields: tuple[ResolvedField, ...],
+    dot_path: str,
+    *,
+    where: str,
+    kind: str,
+) -> ResolvedField:
+    """Walk a dot-path through a resolved field tree; raise DescriptionError if any segment is missing."""
+    parts = dot_path.split(".")
+    current = fields
+    found: ResolvedField | None = None
+    for part in parts:
+        found = next((f for f in current if f.name == part), None)
+        if found is None:
+            raise DescriptionError(
+                f"{where}: {kind} path '{dot_path}' — segment '{part}' not found"
+            )
+        current = found.sub_fields
+    if found is None:
+        # Guards against callers passing an empty dot_path.
+        raise DescriptionError(f"{where}: {kind} path cannot be empty")
+    return found
+
+
 def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
     types = {t.name: t for t in commons.field_types}
-    codelists = {c.name: c for c in commons.code_lists}
+    # Dataset-local codelists take precedence over commons codelists.
+    codelists: dict[str, CodeList] = {c.name: c for c in commons.code_lists}
+    codelists.update({c.name: c for c in dataset.codelists})
     collection_names = {c.name for c in dataset.collections}
 
     unknown_processes = set(dataset.processes) - known_process_ids()
@@ -167,6 +218,24 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
                 )
             resolved_rels.append(ResolvedRelationship(rel.name, rel.target))
 
+        # Validate outward_identifier and server_managed dot-paths against
+        # the resolved field tree before storing them on the collection.
+        resolved_tuple = tuple(resolved_fields)
+        if coll.outward_identifier:
+            _resolve_dot_path(
+                resolved_tuple,
+                coll.outward_identifier,
+                where=where,
+                kind="outward_identifier",
+            )
+        for path in coll.server_managed:
+            _resolve_dot_path(
+                resolved_tuple,
+                path,
+                where=where,
+                kind="server_managed",
+            )
+
         resolved_collections.append(
             ResolvedCollection(
                 name=coll.name,
@@ -176,9 +245,11 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
                 geometry_type=coll.geometry.type,
                 srid=coll.geometry.srid,
                 has_z=coll.geometry.has_z,
-                fields=tuple(resolved_fields),
+                fields=resolved_tuple,
                 relationships=tuple(resolved_rels),
                 upsert_key=tuple(coll.upsert_key),
+                outward_identifier_path=coll.outward_identifier,
+                server_managed_paths=dict(coll.server_managed),
             )
         )
 
