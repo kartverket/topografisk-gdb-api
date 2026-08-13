@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from geocomponents.descriptions.loader import (
     DescriptionError,

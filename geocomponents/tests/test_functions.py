@@ -1,5 +1,10 @@
 from pathlib import Path
 
+from geocomponents.descriptions.models import (
+    ResolvedCollection,
+    ResolvedDataset,
+    ResolvedField,
+)
 from geocomponents.descriptions.loader import load_resolved_datasets
 from geocomponents.schema.build import build_schema_plan
 from geocomponents.schema.functions import (
@@ -28,6 +33,35 @@ DESCRIPTIONS = Path(__file__).resolve().parents[1] / "descriptions"
 def _plan(name="cadastre"):
     d = next(x for x in load_resolved_datasets(DESCRIPTIONS) if x.name == name)
     return build_schema_plan(d)
+
+
+def _synthetic_plan(
+    *,
+    fields: tuple[ResolvedField, ...],
+    geometry_type: str = "Point",
+    srid: int = 4326,
+    has_z: bool = False,
+) -> SchemaPlan:
+    return build_schema_plan(
+        ResolvedDataset(
+            name="x",
+            title="X",
+            description="",
+            collections=(
+                ResolvedCollection(
+                    name="c",
+                    title="C",
+                    description="",
+                    feature_model="simple",
+                    geometry_type=geometry_type,
+                    srid=srid,
+                    has_z=has_z,
+                    fields=fields,
+                    relationships=(),
+                ),
+            ),
+        )
+    )
 
 
 def test_dispatch_exposes_all_feature_entrypoints_taking_dataset_and_collection():
@@ -62,10 +96,13 @@ def test_topology_collection_has_reads_only():
 
 
 def test_create_function_omits_auto_increment_fields():
-    plan = _plan("bane")
-    platform = next(
-        c for c in plan.collections if c.collection_name == "jernbaneplattformkant"
+    plan = _synthetic_plan(
+        fields=(
+            ResolvedField("objid", "integer", required=True, auto_increment=True),
+            ResolvedField("medium", "text"),
+        )
     )
+    platform = plan.collections[0]
     create_sql = next(
         stmt
         for stmt in function_statements(plan)
@@ -76,7 +113,7 @@ def test_create_function_omits_auto_increment_fields():
 
 
 def test_upsert_function_conflicts_on_declared_business_key():
-    plan = _plan("bane")
+    plan = _plan("fkb_bane")
     platform = next(
         c for c in plan.collections if c.collection_name == "jernbaneplattformkant"
     )
@@ -85,12 +122,11 @@ def test_upsert_function_conflicts_on_declared_business_key():
         for stmt in function_statements(plan)
         if f"function {platform.functions['upsert']}(" in stmt
     )
-    assert 'on conflict ("lokalid", "identifikasjon_navnerom")' in sql
-    assert '"objid"' not in sql.split("values", maxsplit=1)[0]
+    assert 'on conflict (("identifikasjon" #>> \'{lokalid}\'))' in sql
 
 
 def test_has_z_collections_force_3d_on_ingest():
-    plan = _plan("bane")
+    plan = _plan("fkb_bane")
     sql = "\n".join(function_statements(plan))
     assert (
         "ST_Force3D(ST_SetSRID(ST_GeomFromGeoJSON(feature->'geometry'), 5973))" in sql

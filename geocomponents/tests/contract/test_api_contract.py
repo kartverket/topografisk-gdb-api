@@ -203,8 +203,6 @@ def test_openapi_post_items_documents_only_a_geojson_create(offline_client):
 
 
 def test_openapi_advertises_upsert_only_for_configured_collections(offline_client):
-    bane_oas = offline_client.get(f"{_api('bane')}/openapi?f=json").json()
-    assert "/collections/jernbaneplattformkant/items:upsert" in bane_oas["paths"]
     fkb_bane_oas = offline_client.get(f"{_api('fkb_bane')}/openapi?f=json").json()
     assert "/collections/jernbaneplattformkant/items:upsert" in fkb_bane_oas["paths"]
     cadastre_oas = offline_client.get(f"{_api('cadastre')}/openapi?f=json").json()
@@ -316,7 +314,7 @@ def test_golden_bbox_filter(client):
         client.delete(f"{api}/collections/parcels/items/{fid}")
 
 
-@pytest.mark.parametrize("dataset_name", ["bane", "fkb_bane"])
+@pytest.mark.parametrize("dataset_name", ["fkb_bane"])
 def test_bane_upsert_is_idempotent_by_business_key(client, dataset_name):
     url = f"{_api(dataset_name)}/collections/jernbaneplattformkant/items:upsert"
     feature = {
@@ -361,8 +359,7 @@ def test_bane_upsert_is_idempotent_by_business_key(client, dataset_name):
         f"{first.json()['id']}?f=json"
     ).json()
     assert item["properties"]["informasjon"] == "replaced"
-    if dataset_name == "fkb_bane":
-        assert item["properties"]["eksternpeker"] == "platform-1"
+    assert item["properties"]["eksternpeker"] == "platform-1"
 
 
 def test_golden_conformance_includes_part4_even_though_dataset_has_topology(client):
