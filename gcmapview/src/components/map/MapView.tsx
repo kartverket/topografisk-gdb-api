@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import robotoLatinVariableUrl from '@fontsource-variable/roboto/files/roboto-latin-wght-normal.woff2';
 import { AlertCircle, Eraser, Plus } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -25,13 +26,19 @@ import {
   inspectFeaturesAtPoint,
   type ActiveFeatureFilter
 } from '../../map/featureInspect';
-import type { FeatureCollection } from '../../map/geojson';
 import { useLayerVisibilityStore } from '../../store/layerVisibilityStore';
 import { useMapViewStore } from '../../store/mapViewStore';
+import {
+  clearBuildingDebugMarkers,
+  createBuildingDebugMarkerState,
+  setBuildingDebugMarkerVisibility,
+  updateBuildingDebugMarkers
+} from './buildingDebugMarkers';
+import { applyObjtypeLabelVisibility, OBJTYPE_LABEL_MIN_ZOOM, upsertObjtypeLabelLayer } from './objtypeLabels';
 import { FeaturePropertiesCard } from './FeaturePropertiesCard';
 import { MapLayersCard } from './MapLayersCard';
 import { useMapDimension } from './useMapDimension';
-import { buildingCentroidsFeatureCollection, featureCentroid, logLoadedCoordinates } from './mapViewGeometry';
+import { buildingCentroidsFeatureCollection, logLoadedCoordinates } from './mapViewGeometry';
 import {
   addNativeFeatureSourcesAndLayers,
   clearVectorSources,
@@ -64,6 +71,9 @@ const DEFERRED_ELEVATED_SOURCE_DELAY_MS = 120;
 
 const mapStyle: maplibregl.StyleSpecification = {
   version: 8,
+  'font-faces': {
+    'Roboto Variable': robotoLatinVariableUrl
+  },
   sources: {
     osm: {
       type: 'raster',
@@ -97,7 +107,7 @@ function isTerrainEnabled(is3d: boolean, adjustElevatedHeights: boolean) {
 export function MapView() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map>(null);
-  const buildingMarkerRefs = useRef<maplibregl.Marker[]>([]);
+  const buildingMarkerStateRef = useRef(createBuildingDebugMarkerState());
   const pendingReloadTimeoutRef = useRef<number | undefined>(undefined);
   const pendingElevatedRefreshTimeoutRef = useRef<number | undefined>(undefined);
   const reloadVisibleDataRef = useRef<(() => Promise<void>) | undefined>(undefined);
@@ -180,42 +190,6 @@ export function MapView() {
     if (favoriteView.adjustElevatedHeights !== undefined) {
       setAdjustElevatedHeights(favoriteView.adjustElevatedHeights);
     }
-  }
-
-  function applyBuildingMarkerVisibility(visible: boolean) {
-    for (const marker of buildingMarkerRefs.current) {
-      marker.getElement().style.display = visible ? '' : 'none';
-    }
-  }
-
-  function updateBuildingDebugMarkers(map: maplibregl.Map, buildings: FeatureCollection) {
-    for (const marker of buildingMarkerRefs.current) {
-      marker.remove();
-    }
-
-    const showMarkers = !is3dRef.current && useLayerVisibilityStore.getState().visibility.buildings;
-
-    buildingMarkerRefs.current = buildings.features.flatMap(building => {
-      const centroid = featureCentroid(building);
-      if (!centroid) {
-        return [];
-      }
-
-      const markerElement = document.createElement('div');
-      markerElement.className =
-        'h-1.5 w-1.5 rounded-full border border-white bg-black shadow-[0_0_0_1px_rgb(0_0_0/0.45)]';
-      markerElement.title = `Building ${building.id ?? ''}`.trim();
-      markerElement.style.display = showMarkers ? '' : 'none';
-
-      return [
-        new maplibregl.Marker({
-          element: markerElement,
-          anchor: 'center'
-        })
-          .setLngLat([centroid[0], centroid[1]])
-          .addTo(map)
-      ];
-    });
   }
 
   function saveCurrentFavoriteView() {
@@ -341,7 +315,13 @@ export function MapView() {
       'building-centroids',
       buildingCentroidsFeatureCollection(renderedFeatureCollections.buildings)
     );
-    updateBuildingDebugMarkers(map, renderedFeatureCollections.buildings);
+    upsertObjtypeLabelLayer(map, renderedFeatureCollections, visibility);
+    updateBuildingDebugMarkers(
+      buildingMarkerStateRef.current,
+      map,
+      renderedFeatureCollections.buildings,
+      !is3dRef.current && useLayerVisibilityStore.getState().visibility.buildings
+    );
   }
 
   useEffect(() => {
@@ -350,6 +330,7 @@ export function MapView() {
     }
 
     let cancelled = false;
+    const buildingMarkerState = buildingMarkerStateRef.current;
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
       style: mapStyle,
@@ -385,7 +366,8 @@ export function MapView() {
       if (!vectorZoomActive) {
         latestVectorDataRef.current = emptyVisibleFeatureCollections;
         await clearVectorSources(map);
-        updateBuildingDebugMarkers(map, emptyFeatureCollection);
+        upsertObjtypeLabelLayer(map, emptyVisibleFeatureCollections, useLayerVisibilityStore.getState().visibility);
+        updateBuildingDebugMarkers(buildingMarkerStateRef.current, map, emptyFeatureCollection, false);
         if (!cancelled && requestId === visibleRequestId) {
           setError(undefined);
           closeSelectedFeatureInspectorRef.current();
@@ -445,6 +427,7 @@ export function MapView() {
 
       pendingReloadTimeoutRef.current = window.setTimeout(() => {
         pendingReloadTimeoutRef.current = undefined;
+        applyObjtypeLabelVisibility(map, !is3dRef.current && map.getZoom() > OBJTYPE_LABEL_MIN_ZOOM);
         void reloadVisibleData();
       }, 120);
     }
@@ -468,7 +451,9 @@ export function MapView() {
         adjustElevatedHeightsRef.current,
         false
       );
-      updateBuildingDebugMarkers(map, emptyFeatureCollection);
+      upsertObjtypeLabelLayer(map, emptyVisibleFeatureCollections, useLayerVisibilityStore.getState().visibility);
+      applyObjtypeLabelVisibility(map, !is3dRef.current && map.getZoom() > OBJTYPE_LABEL_MIN_ZOOM);
+      updateBuildingDebugMarkers(buildingMarkerState, map, emptyFeatureCollection, false);
       map.on('movestart', handleMoveStart);
       map.on('moveend', scheduleVisibleDataReload);
 
@@ -499,10 +484,7 @@ export function MapView() {
       map.off('movestart', handleMoveStart);
       map.off('moveend', scheduleVisibleDataReload);
       mapRef.current = null;
-      for (const marker of buildingMarkerRefs.current) {
-        marker.remove();
-      }
-      buildingMarkerRefs.current = [];
+      clearBuildingDebugMarkers(buildingMarkerState);
       resizeObserver.disconnect();
       map.remove();
     };
@@ -520,7 +502,11 @@ export function MapView() {
       useLayerVisibilityStore.getState().visibility,
       isTerrainEnabled(is3d, adjustElevatedHeights)
     );
-    applyBuildingMarkerVisibility(useLayerVisibilityStore.getState().visibility.buildings && !is3d);
+    applyObjtypeLabelVisibility(map, !is3d && map.getZoom() > OBJTYPE_LABEL_MIN_ZOOM);
+    setBuildingDebugMarkerVisibility(
+      buildingMarkerStateRef.current,
+      useLayerVisibilityStore.getState().visibility.buildings && !is3d
+    );
   }, [adjustElevatedHeights, is3d, isMapReady]);
 
   useEffect(() => {
@@ -544,7 +530,7 @@ export function MapView() {
     }
 
     applyMapLayerVisibility(map, is3d, layerVisibility, isTerrainEnabled(is3d, adjustElevatedHeights));
-    applyBuildingMarkerVisibility(layerVisibility.buildings && !is3d);
+    setBuildingDebugMarkerVisibility(buildingMarkerStateRef.current, layerVisibility.buildings && !is3d);
 
     const visibilityChanged = layerVisibilityChanged(previousLayerVisibilityRef.current, layerVisibility);
     previousLayerVisibilityRef.current = layerVisibility;
