@@ -8,6 +8,10 @@ from pathlib import Path
 import pytest
 import yaml
 
+from geocomponents.convert import _safe_id, convert_qms
+from geocomponents.descriptions.loader import resolve_dataset
+from geocomponents.descriptions.models import Commons, DatasetDef
+
 QMS_FILE = Path(__file__).resolve().parents[2] / "UML-schemas" / "FKBBane_50_qms.json"
 
 
@@ -20,7 +24,7 @@ def qms_data():
 def converted(qms_data):
     from geocomponents.convert import convert_qms
 
-    return yaml.safe_load(convert_qms(qms_data, "fkb_bane"))
+    return yaml.safe_load(convert_qms(qms_data, "fkb_bane", 4326, True))
 
 
 # --------------------------------------------------------------------------
@@ -30,14 +34,12 @@ def converted(qms_data):
 
 def test_safe_id_transliterates_o_with_stroke():
     """Pre-code suspect: ø must become 'o' so the name passes SafeIdentifier."""
-    from geocomponents.convert import _safe_id
 
     assert _safe_id("nøyaktighet") == "noyaktighet"
 
 
 def test_safe_id_transliterates_capital_o_with_stroke_and_lowercases():
     """Pre-code suspect: Ø must become 'o' (lowercase after transliteration)."""
-    from geocomponents.convert import _safe_id
 
     assert _safe_id("datafangstmetodeHøyde") == "datafangstmetodehoyde"
     assert _safe_id("høydereferanse") == "hoydereferanse"
@@ -129,11 +131,8 @@ def test_shared_codelist_not_duplicated(converted):
 def test_convert_output_validates_as_geocomponents_dataset(qms_data):
     """Pre-code suspect (integration): the YAML must parse and resolve without
     error through the full description pipeline."""
-    from geocomponents.convert import convert_qms
-    from geocomponents.descriptions.loader import resolve_dataset
-    from geocomponents.descriptions.models import Commons, DatasetDef
 
-    yaml_str = convert_qms(qms_data, "fkb_bane")
+    yaml_str = convert_qms(qms_data, "fkb_bane", 4326, True)
     dataset = DatasetDef.model_validate(yaml.safe_load(yaml_str))
     resolved = resolve_dataset(dataset, Commons())
     assert len(resolved.collections) == 2
