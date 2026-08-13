@@ -9,11 +9,21 @@ from __future__ import annotations
 from http import HTTPStatus
 
 import orjson
+import psycopg
 import pyproj
+import pytest
 from starlette.testclient import TestClient
 
 from geocomponents.api.pygeoapi_provider import PygeoapiProvider
+from geocomponents.descriptions.models import (
+    ResolvedCollection,
+    ResolvedDataset,
+    ResolvedField,
+)
 from geocomponents.gateway.mounter import build_gateway
+from geocomponents.schema import functions as _schema_fns
+from geocomponents.schema import postgis as _postgis
+from geocomponents.schema.build import build_schema_plan
 
 API = "/datasets/cadastre/ogc_api"
 BYGNING_API = "/datasets/bygning/ogc_api"
@@ -24,6 +34,11 @@ PARCEL = {
         "coordinates": [[[[10, 55], [10, 56], [11, 56], [11, 55], [10, 55]]]],
     },
     "properties": {"label": "integration", "source": "test"},
+}
+# Self-intersecting (bowtie) polygon — ST_IsValid returns false.
+_INVALID_GEOM = {
+    "type": "MultiPolygon",
+    "coordinates": [[[[0, 0], [1, 1], [0, 1], [1, 0], [0, 0]]]],
 }
 
 BYGNING = {
@@ -119,6 +134,66 @@ BYGNING_POSISJON = {
         "source": "test",
     },
 }
+# --------------------------------------------------------------------------
+# Dummy dataset for outward_identifier tests
+# --------------------------------------------------------------------------
+
+_IDENT_DATASET = ResolvedDataset(
+    name="test_ident",
+    title="Test Identifikasjon",
+    description="",
+    collections=(
+        ResolvedCollection(
+            name="line",
+            title="Line",
+            description="",
+            feature_model="simple",
+            geometry_type="LineString",
+            srid=4326,
+            fields=(
+                ResolvedField(
+                    "identifikasjon",
+                    "jsonb",
+                    required=True,
+                    sub_fields=(
+                        ResolvedField("lokalid", "text", required=True),
+                        ResolvedField("navnerom", "text", required=True),
+                        ResolvedField("versjonid", "text"),
+                    ),
+                ),
+                ResolvedField("oppdateringsdato", "timestamptz", required=True),
+            ),
+            relationships=(),
+            outward_identifier_path="identifikasjon.lokalid",
+            server_managed_paths={
+                "identifikasjon.versjonid": "timestamp_iso",
+                "oppdateringsdato": "timestamp_iso",
+            },
+        ),
+    ),
+)
+
+_IDENT_API = "/datasets/test_ident/ogc_api"
+_IDENT_GEOM = {"type": "LineString", "coordinates": [[10, 55], [11, 56]]}
+
+
+@pytest.fixture(scope="module")
+def ident_client(db):
+    conn = psycopg.connect(db)
+    conn.autocommit = True
+    conn.execute("drop schema if exists test_ident cascade")
+    conn.autocommit = False
+    plan = build_schema_plan(_IDENT_DATASET)
+    _postgis.apply_tables(conn, plan)
+    _schema_fns.apply_functions(conn, plan)
+    conn.close()
+    return TestClient(
+        build_gateway(
+            [_IDENT_DATASET],
+            PygeoapiProvider(dsn=db),
+            base_url="http://localhost:8000",
+        )
+    )
 
 
 def test_description_to_api_crud_roundtrip(db, datasets):
@@ -168,13 +243,16 @@ def test_description_to_api_crud_roundtrip(db, datasets):
     )
 
 
-def test_bygning_upsert_roundtrip(db, datasets):
-    client = TestClient(
+def _client(db, datasets):
+    return TestClient(
         build_gateway(
             datasets, PygeoapiProvider(dsn=db), base_url="http://localhost:8000"
         )
     )
 
+
+def test_bygning_upsert_roundtrip(db, datasets):
+    client = _client(db, datasets)
     first = client.post(
         f"{BYGNING_API}/collections/bygning/items:upsert",
         content=orjson.dumps(BYGNING).decode(),
@@ -213,11 +291,7 @@ def test_bygning_upsert_roundtrip(db, datasets):
 
 
 def test_bygning_omrade_upsert_roundtrip(db, datasets):
-    client = TestClient(
-        build_gateway(
-            datasets, PygeoapiProvider(dsn=db), base_url="http://localhost:8000"
-        )
-    )
+    client = _client(db, datasets)
 
     first = client.post(
         f"{BYGNING_API}/collections/bygning_omrade/items:upsert",
@@ -245,11 +319,7 @@ def test_bygning_omrade_upsert_roundtrip(db, datasets):
 
 
 def test_bygning_senterlinje_upsert_roundtrip(db, datasets):
-    client = TestClient(
-        build_gateway(
-            datasets, PygeoapiProvider(dsn=db), base_url="http://localhost:8000"
-        )
-    )
+    client = _client(db, datasets)
 
     first = client.post(
         f"{BYGNING_API}/collections/bygning_senterlinje/items:upsert",
@@ -289,11 +359,7 @@ def test_bygning_senterlinje_upsert_roundtrip(db, datasets):
 
 
 def test_bygning_posisjon_upsert_roundtrip(db, datasets):
-    client = TestClient(
-        build_gateway(
-            datasets, PygeoapiProvider(dsn=db), base_url="http://localhost:8000"
-        )
-    )
+    client = _client(db, datasets)
 
     first = client.post(
         f"{BYGNING_API}/collections/bygning_posisjon/items:upsert",
@@ -330,3 +396,88 @@ def test_bygning_posisjon_upsert_roundtrip(db, datasets):
     assert abs(listed_lon - lon) < 1e-6
     assert abs(listed_lat - lat) < 1e-6
     assert listed_z == -99999.0
+
+
+def test_create_with_invalid_codelist_value_returns_422(db, datasets):
+    """Pre-code suspect (end-to-end): a codelist violation in the write function
+    must surface as HTTP 422, not 500, via the P0001 → ProviderValidationError path."""
+    feature = {
+        **PARCEL,
+        "properties": {**PARCEL["properties"], "status": "not_a_real_status"},
+    }
+    r = _client(db, datasets).post(
+        f"{API}/collections/parcels/items",
+        content=orjson.dumps(feature).decode(),
+        headers={"content-type": "application/geo+json"},
+    )
+    assert r.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+def test_create_with_invalid_geometry_returns_422(db, datasets):
+    """Pre-code suspect (end-to-end): a geometry that fails ST_IsValid must
+    surface as HTTP 422 via the P0001 → ProviderValidationError path."""
+    feature = {**PARCEL, "geometry": _INVALID_GEOM}
+    r = _client(db, datasets).post(
+        f"{API}/collections/parcels/items",
+        content=orjson.dumps(feature).decode(),
+        headers={"content-type": "application/geo+json"},
+    )
+    assert r.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+# --------------------------------------------------------------------------
+# outward_identifier: strip on write, inject on read
+# --------------------------------------------------------------------------
+
+
+def test_outward_identifier_replaces_client_supplied_lokalid_and_versjonid(
+    ident_client,
+):
+    """Client-supplied lokalid and versjonid are stripped on write"""
+    feature = {
+        "type": "Feature",
+        "geometry": _IDENT_GEOM,
+        "properties": {
+            "identifikasjon": {
+                "lokalid": "client-supplied-uuid",
+                "navnerom": "http://example.com",
+                "versjonid": "client-supplied-version",
+            }
+        },
+    }
+    r = ident_client.post(
+        f"{_IDENT_API}/collections/line/items",
+        content=orjson.dumps(feature).decode(),
+        headers={"content-type": "application/geo+json"},
+    )
+    assert r.status_code == HTTPStatus.CREATED
+    fid = r.headers["Location"].rstrip("/").split("/")[-1]
+
+    got = ident_client.get(f"{_IDENT_API}/collections/line/items/{fid}?f=json").json()
+    ident = got["properties"]["identifikasjon"]
+    assert ident["lokalid"] == fid  # row UUID, not client value
+    assert ident["versjonid"] != "client-supplied-version"  # server timestamp
+
+
+def test_outward_identifier_injects_lokalid_and_versjonid_when_absent(ident_client):
+    """When lokalid and versjonid are absent from the request, lokalid is
+    injected from the row UUID and versjonid from the server clock on read."""
+    feature = {
+        "type": "Feature",
+        "geometry": _IDENT_GEOM,
+        "properties": {
+            "identifikasjon": {"navnerom": "http://example.com"},
+        },
+    }
+    r = ident_client.post(
+        f"{_IDENT_API}/collections/line/items",
+        content=orjson.dumps(feature).decode(),
+        headers={"content-type": "application/geo+json"},
+    )
+    assert r.status_code == HTTPStatus.CREATED
+    fid = r.headers["Location"].rstrip("/").split("/")[-1]
+
+    got = ident_client.get(f"{_IDENT_API}/collections/line/items/{fid}?f=json").json()
+    ident = got["properties"]["identifikasjon"]
+    assert ident["lokalid"] == fid  # row UUID injected
+    assert "versjonid" in ident  # server timestamp injected

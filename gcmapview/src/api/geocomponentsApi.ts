@@ -6,7 +6,7 @@ export const geocomponentsApiBaseUrl = (import.meta.env.VITE_GEOCOMPONENTS_API_U
 );
 
 const cadastreApiUrl = `${geocomponentsApiBaseUrl}/datasets/cadastre/ogc_api`;
-const baneApiUrl = `${geocomponentsApiBaseUrl}/datasets/bane/ogc_api`;
+const fkbBaneApiUrl = `${geocomponentsApiBaseUrl}/datasets/fkb_bane/ogc_api`;
 const bygningApiUrl = `${geocomponentsApiBaseUrl}/datasets/bygning/ogc_api`;
 
 export type CollectionId =
@@ -28,8 +28,8 @@ export type CollectionMetadata = {
 const collectionApiUrls: Record<CollectionId, string> = {
   parcels: cadastreApiUrl,
   buildings: cadastreApiUrl,
-  jernbaneplattformkant: baneApiUrl,
-  spormidt: baneApiUrl,
+  jernbaneplattformkant: fkbBaneApiUrl,
+  spormidt: fkbBaneApiUrl,
   bygning: bygningApiUrl,
   bygning_omrade: bygningApiUrl,
   bygning_senterlinje: bygningApiUrl,

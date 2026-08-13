@@ -46,6 +46,24 @@ def internal_function(schema: str, collection: str, operation: str) -> str:
     return f"{schema}._{collection}_{operation}"
 
 
+def upsert_sql_expression(path: str) -> str:
+    """Render one upsert key path as a SQL conflict/index expression."""
+    parts = path.split(".")
+    if len(parts) == 1:
+        return f'"{parts[0]}"'
+    head, *tail = parts
+    return f"(\"{head}\" #>> '{{{','.join(tail)}}}')"
+
+
+@dataclass(frozen=True)
+class IndexPlan:
+    """One index to emit after the table DDL."""
+
+    expression: str  # column name or functional expression, without outer parens
+    unique: bool = False
+    method: str = "btree"
+
+
 @dataclass(frozen=True)
 class ColumnPlan:
     name: str
@@ -54,6 +72,17 @@ class ColumnPlan:
     primary_key: bool = False
     default: str | None = None
     auto_increment: bool = False
+    # JSONB-only: keys stripped from incoming feature properties before storing.
+    strip_keys: tuple[str, ...] = ()
+    # JSONB-only: key injected as id::text in the GeoJSON read response.
+    id_inject_key: str | None = None
+    # JSONB-only: (key, sql_expr) pairs injected when writing to the DB.
+    write_inject: tuple[tuple[str, str], ...] = ()
+    # Permitted code values for DB-level validation (empty = no validation).
+    codelist_values: tuple[str, ...] = ()
+    # Scalar server-managed: SQL expression substituted for client input on write.
+    # When set, the column is excluded from the writable set entirely.
+    server_write_expr: str | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +114,7 @@ class TablePlan:
     columns: tuple[ColumnPlan, ...]
     geometry: GeometryColumnPlan
     foreign_keys: tuple[ForeignKeyPlan, ...] = ()
+    indexes: tuple[IndexPlan, ...] = ()
 
     @property
     def qualified(self) -> str:
@@ -108,7 +138,8 @@ class CollectionPlan:
     collection_name: str
     table: TablePlan
     functions: dict[str, str]  # operation -> internal function name (private)
-    upsert_key: tuple[str, ...] = ()
+    upsert_field: str | None = None
+    upsert_path: str | None = None
 
     @property
     def id_field(self) -> str:

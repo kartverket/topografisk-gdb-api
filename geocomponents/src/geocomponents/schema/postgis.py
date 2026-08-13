@@ -14,7 +14,13 @@ from __future__ import annotations
 
 import psycopg
 
-from geocomponents.schema.plan import CollectionPlan, ColumnPlan, SchemaPlan, TablePlan
+from geocomponents.schema.plan import (
+    CollectionPlan,
+    ColumnPlan,
+    SchemaPlan,
+    TablePlan,
+    upsert_sql_expression,
+)
 
 # PostgreSQL's NAMEDATALEN default. Identifiers longer than this are silently
 # truncated by the server, so two distinct long names can collide.
@@ -71,6 +77,20 @@ def _fk_ddl(table: TablePlan) -> list[str]:
     return stmts
 
 
+def _extra_index_ddl(collection_name: str, table: TablePlan) -> list[str]:
+    """Emit CREATE INDEX for each IndexPlan attached to a table."""
+    stmts: list[str] = []
+    for i, idx in enumerate(table.indexes):
+        unique = "unique " if idx.unique else ""
+        method = f" using {idx.method}" if idx.method != "btree" else ""
+        name = f'"{collection_name}_{i}_idx"'
+        stmts.append(
+            f"create {unique}index if not exists {name} "
+            f"on {table.qualified}{method} ({idx.expression})"
+        )
+    return stmts
+
+
 def _geometry_index_ddl(plan: CollectionPlan) -> str:
     geom = plan.table.geometry.name
     return (
@@ -80,9 +100,10 @@ def _geometry_index_ddl(plan: CollectionPlan) -> str:
 
 
 def _upsert_index_ddl(plan: CollectionPlan) -> str | None:
-    if not plan.upsert_key:
+    if plan.upsert_field is None:
         return None
-    columns = ", ".join(f'"{name}"' for name in plan.upsert_key)
+    conflict_path = plan.upsert_path or plan.upsert_field
+    columns = upsert_sql_expression(conflict_path)
     return (
         f'create unique index if not exists "{plan.collection_name}_upsert_key_idx" '
         f"on {plan.table.qualified} ({columns}) nulls not distinct"
@@ -107,6 +128,7 @@ def table_statements(plan: SchemaPlan) -> list[str]:
         stmts.append(_table_ddl(coll.table))
     for coll in plan.collections:
         stmts.append(_geometry_index_ddl(coll))
+        stmts.extend(_extra_index_ddl(coll.collection_name, coll.table))
         if upsert_index := _upsert_index_ddl(coll):
             stmts.append(upsert_index)
     for coll in plan.collections:

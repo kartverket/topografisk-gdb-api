@@ -336,7 +336,7 @@ def main(argv: list[str] | None = None) -> int:
         "--profile",
         default=BANE_PROFILE.name,
         choices=sorted(BUILTIN_PROFILES),
-        help="Built-in profile name (default: bane)",
+        help=f"Built-in profile name (default: {BANE_PROFILE.name})",
     )
     args = parser.parse_args(argv)
 

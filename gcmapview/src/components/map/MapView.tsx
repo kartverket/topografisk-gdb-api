@@ -20,19 +20,18 @@ import {
   configureInitialMapInteraction,
   terrainSourceId
 } from '../../map/mapDimension';
-import { useMapDimension } from './MapDimensionContext';
-import { FeaturePropertiesCard } from './FeaturePropertiesCard';
-import { MapLayersCard } from './MapLayersCard';
-import { useLayerVisibilityStore } from '../../store/layerVisibilityStore';
-import { useMapViewStore } from '../../store/mapViewStore';
 import {
   hasInspectableFeatureAtPoint,
   inspectFeaturesAtPoint,
   type ActiveFeatureFilter
 } from '../../map/featureInspect';
 import type { FeatureCollection } from '../../map/geojson';
+import { useLayerVisibilityStore } from '../../store/layerVisibilityStore';
+import { useMapViewStore } from '../../store/mapViewStore';
+import { FeaturePropertiesCard } from './FeaturePropertiesCard';
+import { MapLayersCard } from './MapLayersCard';
+import { useMapDimension } from './useMapDimension';
 import { buildingCentroidsFeatureCollection, featureCentroid, logLoadedCoordinates } from './mapViewGeometry';
-import { randomNonOverlappingBuildingAndParcel } from './mapViewRandomFeatures';
 import {
   addNativeFeatureSourcesAndLayers,
   clearVectorSources,
@@ -55,6 +54,7 @@ import {
   upsertGeoJsonSource,
   visibleOgcBbox
 } from './mapViewData';
+import { randomNonOverlappingBuildingAndParcel } from './mapViewRandomFeatures';
 import { useSelectedFeature } from './useSelectedFeature';
 
 /** Default initial view when no local favorite view has been saved. */
@@ -120,6 +120,10 @@ export function MapView() {
   const removeFavoriteView = useMapViewStore(state => state.removeFavoriteView);
   const activeFavoriteView =
     favoriteViews.find(favoriteView => favoriteView.name === activeFavoriteName) ?? favoriteViews[0];
+  const initialFavoriteViewRef = useRef<{ center: [number, number]; zoom: number }>({
+    center: activeFavoriteView?.center ?? OTTA_CENTER,
+    zoom: activeFavoriteView?.zoom ?? OTTA_ZOOM
+  });
   const [status, setStatus] = useState('Loading map...');
   const [error, setError] = useState<string>();
   const [isMapReady, setIsMapReady] = useState(false);
@@ -127,6 +131,9 @@ export function MapView() {
   const [isCreating, setIsCreating] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const { selectedFeature, setHoveredPositionIndex, setSelectedFeature } = useSelectedFeature({ mapRef, is3d });
+  const closeSelectedFeatureInspectorRef = useRef<() => void>(() => {});
+  const setSelectedFeatureRef = useRef(setSelectedFeature);
+  setSelectedFeatureRef.current = setSelectedFeature;
 
   function cancelPendingMapWork() {
     if (pendingReloadTimeoutRef.current !== undefined) {
@@ -302,6 +309,7 @@ export function MapView() {
 
     setSelectedFeature(undefined);
   }
+  closeSelectedFeatureInspectorRef.current = closeSelectedFeatureInspector;
 
   async function applyRenderedVisibleData(
     map: maplibregl.Map,
@@ -345,8 +353,8 @@ export function MapView() {
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
       style: mapStyle,
-      center: activeFavoriteView?.center ?? OTTA_CENTER,
-      zoom: activeFavoriteView?.zoom ?? OTTA_ZOOM
+      center: initialFavoriteViewRef.current.center,
+      zoom: initialFavoriteViewRef.current.zoom
     });
     mapRef.current = map;
     const resizeObserver = new ResizeObserver(() => map.resize());
@@ -380,7 +388,7 @@ export function MapView() {
         updateBuildingDebugMarkers(map, emptyFeatureCollection);
         if (!cancelled && requestId === visibleRequestId) {
           setError(undefined);
-          closeSelectedFeatureInspector();
+          closeSelectedFeatureInspectorRef.current();
           setStatus(
             `Zoom in above level ${MIN_VECTOR_ZOOM} to load vector data (current z=${map.getZoom().toFixed(1)}).`
           );
@@ -467,11 +475,11 @@ export function MapView() {
       map.on('click', event => {
         const inspectedFeature = inspectFeaturesAtPoint(map, event.point);
         if (!inspectedFeature) {
-          closeSelectedFeatureInspector();
+          closeSelectedFeatureInspectorRef.current();
           return;
         }
 
-        setSelectedFeature(inspectedFeature);
+        setSelectedFeatureRef.current(inspectedFeature);
       });
       map.on('mousemove', event => {
         map.getCanvas().style.cursor = hasInspectableFeatureAtPoint(map, event.point) ? 'pointer' : '';
@@ -735,7 +743,7 @@ export function MapView() {
   return (
     <section
       className="relative min-h-0 w-full overflow-hidden rounded-[min(var(--radius-4xl),24px)] border border-border bg-card shadow-sm"
-      aria-label="Cadastre, Bane, and Bygning map">
+      aria-label="Cadastre, FKB-Bane, and Bygning map">
       <div
         ref={mapContainerRef}
         className="absolute inset-0 h-full w-full"

@@ -10,9 +10,6 @@ collections:
       type: MultiLineString
       srid: 5972
       has_z: true
-    upsert_key:
-      - lokalid
-      - identifikasjon_navnerom
     fields:
       - name: objtype
         type: string
@@ -67,9 +64,6 @@ collections:
       type: MultiPolygon
       srid: 5972
       has_z: true
-    upsert_key:
-      - lokalid
-      - identifikasjon_navnerom
     fields:
       - name: objtype
         type: string
@@ -124,9 +118,6 @@ collections:
       type: MultiLineString
       srid: 5972
       has_z: true
-    upsert_key:
-      - lokalid
-      - identifikasjon_navnerom
     fields:
       - name: objtype
         type: string
@@ -175,9 +166,6 @@ collections:
       type: Point
       srid: 5972
       has_z: true
-    upsert_key:
-      - lokalid
-      - identifikasjon_navnerom
     fields:
       - name: objtype
         type: string
