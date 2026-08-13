@@ -182,7 +182,7 @@ def _convert_feature_type(
         "name": coll_name,
         "title": ft["Name"],
         "description": description,
-        "geometry": {"type": geom_type, "srid": srid, "haz_z": has_z},
+        "geometry": {"type": geom_type, "srid": srid, "has_z": has_z},
     }
     if outward_identifier:
         coll["outward_identifier"] = outward_identifier
