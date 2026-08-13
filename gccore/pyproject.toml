@@ -1,0 +1,80 @@
+[project]
+name = "gccore"
+version = "0.1.0"
+description = "Core FastAPI service with Alembic-managed schema in the shared geocomponents database"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.16",
+    "fastapi>=0.141.1",
+    "psycopg[binary]>=3.3.4",
+    "sqlalchemy>=2.0.43",
+    "typer>=0.27.0",
+    "uvicorn>=0.52.0",
+]
+
+[project.scripts]
+gccore = "gccore.cli:app"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28",
+    "pytest>=8.0",
+    "ruff==0.16.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gccore"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+indent-width = 4
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "F",
+    "E4",
+    "E7",
+    "E9",
+    "B",
+    "RUF",
+    "SIM",
+    "RET",
+    "C4",
+    "PIE",
+    "S",
+    "I",
+    "UP",
+    "N",
+    "A",
+    "Q",
+    "TID",
+    "T20",
+    "DTZ",
+    "PTH",
+    "PLR",
+]
+ignore = []
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PLR2004"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

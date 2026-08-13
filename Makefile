@@ -1,10 +1,12 @@
-.PHONY: docker-up frontend-install frontend-build frontend-run gcimport-install gcimport-test gcimport-run
+.PHONY: docker-up frontend-install frontend-build frontend-run gcimport-install gcimport-test gcimport-run gccore-install gccore-test gccore-run gcjobs-install gcjobs-test gcjobs-run
+
+DOCKER_COMPOSE := $(shell command -v docker-compose >/dev/null 2>&1 && echo docker-compose || echo 'docker compose')
 
 docker-up:
-	cd geocomponents && docker compose up
+	cd geocomponents && $(DOCKER_COMPOSE) up
 
 docker-down:
-	cd geocomponents && docker compose down
+	cd geocomponents && $(DOCKER_COMPOSE) down
 
 docker-delete-db-volume:
 	docker volume rm "geocomponents_pgdata"
@@ -32,3 +34,21 @@ gcimport-test:
 
 gcimport-run:
 	uv run --project gcimport uvicorn gcimport.app:app --port 8001
+
+gccore-install:
+	uv sync --project gccore
+
+gccore-test:
+	cd gccore && uv run pytest
+
+gccore-run:
+	uv run --project gccore gccore serve --port 8002
+
+gcjobs-install:
+	uv sync --project gcjobs
+
+gcjobs-test:
+	cd gcjobs && uv run pytest
+
+gcjobs-run:
+	uv run --project gcjobs gcjobs serve --port 8003
