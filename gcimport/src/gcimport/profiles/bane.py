@@ -58,9 +58,7 @@ def _fkb_bane_upstream_properties(
 ) -> dict[str, object]:
     upstream = dict(properties)
 
-    identifikasjon = _nested_string_properties(
-        upstream, _IDENTIFIKASJON_PROPERTY_NAMES
-    )
+    identifikasjon = _nested_string_properties(upstream, _IDENTIFIKASJON_PROPERTY_NAMES)
     if identifikasjon:
         upstream["identifikasjon"] = identifikasjon
 
@@ -69,6 +67,7 @@ def _fkb_bane_upstream_properties(
         upstream["kvalitet"] = kvalitet
 
     return upstream
+
 
 BANE_PROFILE = ImportProfile(
     name="fkb_bane",

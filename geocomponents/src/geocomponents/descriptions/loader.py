@@ -17,6 +17,7 @@ import yaml
 from geocomponents.descriptions.models import (
     BUILTIN_SQL_TYPES,
     CodeList,
+    CollectionDef,
     Commons,
     DatasetDef,
     FieldDef,

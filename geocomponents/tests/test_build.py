@@ -125,7 +125,9 @@ def test_pgcrypto_extension_declared_for_gen_random_uuid():
 def test_auto_increment_field_uses_postgresql_identity():
     plan = build_schema_plan(
         _make_dataset(
-            fields=[ResolvedField("objid", "integer", required=True, auto_increment=True)]
+            fields=[
+                ResolvedField("objid", "integer", required=True, auto_increment=True)
+            ]
         )
     )
     objid = next(c for c in plan.collections[0].table.columns if c.name == "objid")
@@ -137,7 +139,7 @@ def test_auto_increment_field_uses_postgresql_identity():
 def test_bane_business_key_gets_unique_nulls_not_distinct_index():
     ddl = "\n".join(postgis.table_statements(_fkb_bane_plan()))
     assert (
-        'on fkb_bane.jernbaneplattformkant (("identifikasjon" #>> \'{lokalid}\')) '
+        "on fkb_bane.jernbaneplattformkant ((\"identifikasjon\" #>> '{lokalid}')) "
         "nulls not distinct"
     ) in ddl
 
@@ -174,7 +176,7 @@ def test_fkb_bane_geometry_and_business_key_match_import_profile():
     ddl = "\n".join(postgis.table_statements(plan))
     assert '"geometry" geometry(MultiLineStringZ, 5973)' in ddl
     assert (
-        'on fkb_bane.jernbaneplattformkant (("identifikasjon" #>> \'{lokalid}\')) '
+        "on fkb_bane.jernbaneplattformkant ((\"identifikasjon\" #>> '{lokalid}')) "
         "nulls not distinct"
     ) in ddl
 

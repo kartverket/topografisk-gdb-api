@@ -52,7 +52,7 @@ def upsert_sql_expression(path: str) -> str:
     if len(parts) == 1:
         return f'"{parts[0]}"'
     head, *tail = parts
-    return f'("{head}" #>> \'' + '{' + ','.join(tail) + '}' + "')"
+    return f"(\"{head}\" #>> '{{{','.join(tail)}}}')"
 
 
 @dataclass(frozen=True)

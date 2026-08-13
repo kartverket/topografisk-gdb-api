@@ -144,6 +144,8 @@ def test_bygning_dataset_resolves_expected_geometry_and_upsert_field():
     assert position.upsert_field == "lokalid"
     assert position.upsert_path == "lokalid"
     assert position.supports_upsert
+
+
 def test_unknown_process_raises_clear_error():
     dataset = DatasetDef.model_validate({"name": "x", "processes": ["nope"]})
     with pytest.raises(DescriptionError, match="unknown process"):

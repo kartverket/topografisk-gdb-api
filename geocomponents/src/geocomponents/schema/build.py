@@ -115,8 +115,8 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
             # Check for single-segment server_managed path matching this field.
             server_write_expr: str | None = None
             if fld.name in coll.server_managed_paths:
-                token = coll.server_managed_paths[fld.name]
-                if token == "outward_identifier":
+                server_managed_rule = coll.server_managed_paths[fld.name]
+                if server_managed_rule == "outward_identifier":
                     if coll.outward_identifier_path is None:
                         msg = (
                             f"collection '{coll.name}' uses server_managed outward_identifier "
@@ -127,7 +127,7 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
                         coll.outward_identifier_path
                     )
                 else:
-                    server_write_expr = _SCALAR_SERVER_WRITE.get(token)
+                    server_write_expr = _SCALAR_SERVER_WRITE.get(server_managed_rule)
             columns.append(
                 ColumnPlan(
                     fld.name,

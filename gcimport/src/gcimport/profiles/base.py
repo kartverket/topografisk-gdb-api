@@ -24,7 +24,9 @@ class ImportProfile:
     identity_fields: tuple[str, ...]
     geometry_types: Mapping[str, str] | None = None
     merge_duplicate_multilinestrings: bool = False
-    property_transform: Callable[[dict[str, object], str], dict[str, object]] | None = None
+    property_transform: Callable[[dict[str, object], str], dict[str, object]] | None = (
+        None
+    )
 
     def __post_init__(self) -> None:
         normalized_required_fields = {

@@ -1,11 +1,11 @@
 from pathlib import Path
 
+from geocomponents.descriptions.loader import load_resolved_datasets
 from geocomponents.descriptions.models import (
     ResolvedCollection,
     ResolvedDataset,
     ResolvedField,
 )
-from geocomponents.descriptions.loader import load_resolved_datasets
 from geocomponents.schema.build import build_schema_plan
 from geocomponents.schema.functions import (
     _enum_checks,
@@ -122,7 +122,7 @@ def test_upsert_function_conflicts_on_declared_business_key():
         for stmt in function_statements(plan)
         if f"function {platform.functions['upsert']}(" in stmt
     )
-    assert 'on conflict (("identifikasjon" #>> \'{lokalid}\'))' in sql
+    assert "on conflict ((\"identifikasjon\" #>> '{lokalid}'))" in sql
 
 
 def test_has_z_collections_force_3d_on_ingest():
