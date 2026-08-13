@@ -28,6 +28,7 @@ def _properties(**overrides: Any) -> dict[str, Any]:
         "identifikasjon_navnerom": "test",
         "oppdateringsdato": "2026-01-01T00:00:00Z",
         "datafangstdato": "2025-01-01T00:00:00Z",
+        "kvalitet_datafangstmetode": "fot",
         "medium": "T",
     }
     values.update(overrides)
@@ -500,6 +501,36 @@ def test_imports_bane_linestring_place_for_compatibility() -> None:
     payload = json.loads(requests[0].content)
     assert payload["geometry"]["type"] == "MultiLineString"
     assert payload["geometry"]["coordinates"][0][0][:2] != [10.7, 59.9]
+
+
+def test_imports_fkb_bane_nested_upstream_properties() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": PLATFORM_UUID})
+
+    feature = _feature(
+        properties=_properties(
+            identifikasjon_versjonid="2026-01-02T00:00:00Z",
+            kvalitet_noyaktighet=10,
+        )
+    )
+
+    with _test_client(httpx.MockTransport(handler)) as client:
+        response = _post(client, _document([feature]))
+
+    assert response.status_code == 200
+    payload = json.loads(requests[0].content)
+    assert payload["properties"]["identifikasjon"] == {
+        "lokalid": "feature-1",
+        "navnerom": "test",
+        "versjonid": "2026-01-02T00:00:00Z",
+    }
+    assert payload["properties"]["kvalitet"] == {
+        "datafangstmetode": "fot",
+        "noyaktighet": 10,
+    }
 
 
 def test_dataset_rules_are_supplied_by_profile() -> None:
@@ -1171,7 +1202,7 @@ def test_reports_upstream_failure_as_bad_gateway() -> None:
 
     assert response.status_code == 502
     assert response.json()["detail"] == {
-        "message": "Bane API upsert failed",
+        "message": "FKB-Bane API upsert failed",
         "collection": "jernbaneplattformkant",
         "id": "feature-1",
         "reason": "upstream returned HTTP 503",

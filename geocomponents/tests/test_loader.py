@@ -80,14 +80,25 @@ def test_feature_model_and_processes_resolve():
     assert by_name["blocks"].supports_crud is False
 
 
-def test_bane_upsert_key_resolves():
-    bane = next(d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bane")
-    for coll in bane.collections:
-        assert coll.upsert_key == ("lokalid", "identifikasjon_navnerom")
+def test_fkb_bane_dataset_resolves_expected_geometry_and_upsert_field():
+    fkb_bane = next(
+        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "fkb_bane"
+    )
+    assert [coll.name for coll in fkb_bane.collections] == [
+        "jernbaneplattformkant",
+        "spormidt",
+    ]
+
+    for coll in fkb_bane.collections:
+        assert coll.geometry_type == "MultiLineString"
+        assert coll.srid == 5973
+        assert coll.has_z is True
+        assert coll.upsert_field == "identifikasjon.lokalid"
+        assert coll.upsert_path == "identifikasjon.lokalid"
         assert coll.supports_upsert
 
 
-def test_bygning_dataset_resolves_expected_geometry_and_upsert_key():
+def test_bygning_dataset_resolves_expected_geometry_and_upsert_field():
     bygning = next(
         d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bygning"
     )
@@ -102,14 +113,16 @@ def test_bygning_dataset_resolves_expected_geometry_and_upsert_key():
     assert linework.geometry_type == "MultiLineString"
     assert linework.srid == 5972
     assert linework.has_z is True
-    assert linework.upsert_key == ("lokalid", "identifikasjon_navnerom")
+    assert linework.upsert_field == "lokalid"
+    assert linework.upsert_path == "lokalid"
     assert linework.supports_upsert
 
     area = next(coll for coll in bygning.collections if coll.name == "bygning_omrade")
     assert area.geometry_type == "MultiPolygon"
     assert area.srid == 5972
     assert area.has_z is True
-    assert area.upsert_key == ("lokalid", "identifikasjon_navnerom")
+    assert area.upsert_field == "lokalid"
+    assert area.upsert_path == "lokalid"
     assert area.supports_upsert
 
     centerline = next(
@@ -118,7 +131,8 @@ def test_bygning_dataset_resolves_expected_geometry_and_upsert_key():
     assert centerline.geometry_type == "MultiLineString"
     assert centerline.srid == 5972
     assert centerline.has_z is True
-    assert centerline.upsert_key == ("lokalid", "identifikasjon_navnerom")
+    assert centerline.upsert_field == "lokalid"
+    assert centerline.upsert_path == "lokalid"
     assert centerline.supports_upsert
 
     position = next(
@@ -127,19 +141,9 @@ def test_bygning_dataset_resolves_expected_geometry_and_upsert_key():
     assert position.geometry_type == "Point"
     assert position.srid == 5972
     assert position.has_z is True
-    assert position.upsert_key == ("lokalid", "identifikasjon_navnerom")
+    assert position.upsert_field == "lokalid"
+    assert position.upsert_path == "lokalid"
     assert position.supports_upsert
-
-
-def test_upsert_key_must_reference_writable_fields():
-    dataset = DatasetDef.model_validate(
-        {
-            "name": "x",
-            "collections": [{"name": "c", "upsert_key": ["missing"]}],
-        }
-    )
-    with pytest.raises(DescriptionError, match="unknown field"):
-        resolve_dataset(dataset, Commons())
 
 
 def test_unknown_process_raises_clear_error():

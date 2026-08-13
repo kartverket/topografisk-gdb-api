@@ -28,6 +28,7 @@ from geocomponents.schema.plan import (
     ColumnPlan,
     SchemaPlan,
     TablePlan,
+    upsert_sql_expression,
 )
 
 # Audit columns are server-managed; never written from incoming features.
@@ -320,6 +321,9 @@ def _fn_upsert(plan: CollectionPlan) -> str:
     t = plan.table
     writable = _writable_columns(t)
     sw = _server_write_columns(t)
+    conflict_path = plan.upsert_path or plan.upsert_field
+    if conflict_path is None:
+        raise ValueError(f"collection '{plan.collection_name}' has no upsert field")
     cols = ", ".join(
         [f'"{t.geometry.name}"']
         + [f'"{c.name}"' for c in writable]
@@ -330,7 +334,7 @@ def _fn_upsert(plan: CollectionPlan) -> str:
         + [_prop_read(c) for c in writable]
         + [c.server_write_expr for c in sw]
     )
-    conflict_columns = ", ".join(f'"{name}"' for name in plan.upsert_key)
+    conflict_columns = upsert_sql_expression(conflict_path)
     sets = [f'"{t.geometry.name}" = excluded."{t.geometry.name}"']
     sets += [f'"{c.name}" = excluded."{c.name}"' for c in writable]
     sets += [f'"{c.name}" = {c.server_write_expr}' for c in sw]

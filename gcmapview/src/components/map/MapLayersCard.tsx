@@ -126,7 +126,7 @@ export function MapLayersCard({
         <CardTitle>Layers</CardTitle>
         <CardDescription>
           Height colour: blue 0 m → red 300 m+
-          {!is3d ? ' · Imported Bygning/Bane layers are read-only' : ''}
+          {!is3d ? ' · Imported Bygning/FKB-Bane layers are read-only' : ''}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">

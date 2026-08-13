@@ -235,6 +235,7 @@ def _prepare_feature(
         raise DocumentValidationError(errors)
 
     feature_id = identity_values[0]
+    upstream_properties = profile.properties_for_upstream(properties, collection)
     return PreparedFeature(
         collection=collection,
         feature_id=feature_id,
@@ -242,7 +243,7 @@ def _prepare_feature(
             "type": "Feature",
             "id": feature_id,
             "geometry": transformed_geometry,
-            "properties": properties,
+            "properties": upstream_properties,
         },
     )
 

@@ -21,14 +21,18 @@ System overview (Mermaid): [`ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Development
 
-The root `Makefile` provides shortcuts for starting PostGIS and working with the
-frontend:
+The root `Makefile` provides shortcuts for the local compose stack, the
+frontend, and gcimport:
 
 ```bash
 make docker-up         # Start the local compose stack: PostGIS, apply-schema, geocomponents, and gcimport
+make docker-down       # Stop the local compose stack
+make docker-delete-db-volume  # Delete the local geocomponents Postgres volume
 make frontend-install  # Install frontend dependencies without running scripts
 make frontend-build    # Build the frontend
 make frontend-run      # Run the frontend development server
+make frontend-lint     # Lint the frontend
+make frontend-format   # Format the frontend
 make gcimport-install  # Install gcimport dependencies
 make gcimport-test     # Run gcimport tests
 make gcimport-run      # Run gcimport on port 8001

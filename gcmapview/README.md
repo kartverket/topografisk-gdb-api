@@ -8,12 +8,12 @@ wide deployment.
 
 ## Routes
 
-- `/` — map with editable Cadastre layers plus read-only Bane and Bygning layers
-- `/import` — upload a JSON-FG or classic GeoJSON FeatureCollection to `gcimport`; the UI auto-detects Bane vs Bygning when possible, and still lets the user override the profile
+- `/` — map with editable Cadastre layers plus read-only FKB-Bane and Bygning layers
+- `/import` — upload a JSON-FG or classic GeoJSON FeatureCollection to `gcimport`; the UI auto-detects FKB-Bane vs Bygning when possible, and still lets the user override the profile
 
 Current read-only import-backed layers on the map:
 
-- Bane: `jernbaneplattformkant`, `spormidt`
+- FKB-Bane: `jernbaneplattformkant`, `spormidt`
 - Bygning: `bygning`, `bygning_omrade`, `bygning_senterlinje`, `bygning_posisjon`
 
 In development, Vite proxies:
