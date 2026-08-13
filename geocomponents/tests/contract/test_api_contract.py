@@ -359,7 +359,7 @@ def test_bane_upsert_is_idempotent_by_business_key(client, dataset_name):
         f"{first.json()['id']}?f=json"
     ).json()
     assert item["properties"]["informasjon"] == "replaced"
-    assert item["properties"]["eksternpeker"] == "platform-1"
+    assert item["properties"]["identifikasjon"]["lokalid"] == "platform-1"
 
 
 def test_golden_conformance_includes_part4_even_though_dataset_has_topology(client):
