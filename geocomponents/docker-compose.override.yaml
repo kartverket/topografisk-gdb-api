@@ -69,6 +69,16 @@ services:
       api:
         condition: service_healthy
 
+  gcmapview:
+    build: ../gcmapview
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+      gcimport:
+        condition: service_started
+
   gccore-migrate:
     build: ../gccore
     command: ["migrate-db"]

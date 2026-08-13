@@ -1,10 +1,12 @@
 .PHONY: docker-up frontend-install frontend-build frontend-run gcimport-install gcimport-test gcimport-run gccore-install gccore-test gccore-run gcjobs-install gcjobs-test gcjobs-run
 
+DOCKER_COMPOSE := $(shell command -v docker-compose >/dev/null 2>&1 && echo docker-compose || echo 'docker compose')
+
 docker-up:
-	cd geocomponents && docker compose up
+	cd geocomponents && $(DOCKER_COMPOSE) up
 
 docker-down:
-	cd geocomponents && docker compose down
+	cd geocomponents && $(DOCKER_COMPOSE) down
 
 docker-delete-db-volume:
 	docker volume rm "geocomponents_pgdata"

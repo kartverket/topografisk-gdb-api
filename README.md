@@ -29,7 +29,7 @@ The root `Makefile` provides shortcuts for the local compose stack, the
 frontend, and gcimport:
 
 ```bash
-make docker-up         # Start the local compose stack: PostGIS, apply-schema, geocomponents, and gcimport
+make docker-up         # Start the local compose stack: PostGIS, geocomponents, gcimport, gcmapview, gccore, and gcjobs
 make docker-down       # Stop the local compose stack
 make docker-delete-db-volume  # Delete the local geocomponents Postgres volume
 make frontend-install  # Install frontend dependencies without running scripts
@@ -76,6 +76,7 @@ With `make docker-up`, the local ports are:
 - `http://localhost:8001/docs` for gcimport Swagger
 - `http://localhost:8002/docs` for gccore Swagger
 - `http://localhost:8003/docs` for gcjobs Swagger
+- `http://localhost:8080` for gcmapview
 
 The default import profile is `bane`; override it with `?profile=bygning` for
 Bygning uploads. Example:

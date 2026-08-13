@@ -37,3 +37,12 @@ VITE_GEOCOMPONENTS_API_URL=http://localhost:8000 \
 VITE_GCIMPORT_API_URL=http://localhost:8001 \
 npm run dev
 ```
+
+## Docker
+
+`make docker-up` also starts a containerized `gcmapview` at
+`http://localhost:8080`.
+
+Inside Docker, Nginx serves the built app, falls back to `index.html` for
+client-side routes, and proxies `/geocomponents-api` to `geocomponents` plus
+`/gcimport-api` to `gcimport`.
