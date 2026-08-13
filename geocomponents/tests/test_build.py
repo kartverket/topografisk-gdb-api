@@ -54,6 +54,13 @@ def _bane_plan():
     return build_schema_plan(bane)
 
 
+def _fkb_bane_plan():
+    fkb_bane = next(
+        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "fkb_bane"
+    )
+    return build_schema_plan(fkb_bane)
+
+
 def _bygning_plan():
     bygning = next(
         d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bygning"
@@ -160,16 +167,32 @@ def test_bane_geometry_columns_include_height():
     assert '"geometry" geometry(MultiLineStringZ, 5973)' in ddl
 
 
+def test_fkb_bane_geometry_and_business_key_match_import_profile():
+    plan = _fkb_bane_plan()
+    for collection_name in ("jernbaneplattformkant", "spormidt"):
+        coll = next(c for c in plan.collections if c.collection_name == collection_name)
+        assert coll.table.geometry.has_z
+        assert coll.table.geometry.postgis_type == "MultiLineStringZ"
+        assert coll.upsert_field == "identifikasjon.lokalid"
+        assert coll.upsert_path == "identifikasjon.lokalid"
+    ddl = "\n".join(postgis.table_statements(plan))
+    assert '"geometry" geometry(MultiLineStringZ, 5973)' in ddl
+    assert (
+        'on fkb_bane.jernbaneplattformkant (("identifikasjon" #>> \'{lokalid}\')) '
+        "nulls not distinct"
+    ) in ddl
+
+
 def test_bygning_geometry_and_business_key_are_built_correctly():
     plan = _bygning_plan()
     coll = next(c for c in plan.collections if c.collection_name == "bygning")
     assert coll.table.geometry.has_z
     assert coll.table.geometry.postgis_type == "MultiLineStringZ"
+    assert coll.upsert_field == "lokalid"
+    assert coll.upsert_path == "lokalid"
     ddl = "\n".join(postgis.table_statements(plan))
     assert '"geometry" geometry(MultiLineStringZ, 5972)' in ddl
-    assert (
-        'on bygning.bygning ("lokalid", "identifikasjon_navnerom") nulls not distinct'
-    ) in ddl
+    assert 'on bygning.bygning ("lokalid") nulls not distinct' in ddl
 
 
 def test_bygning_omrade_geometry_and_business_key_are_built_correctly():
@@ -177,12 +200,11 @@ def test_bygning_omrade_geometry_and_business_key_are_built_correctly():
     coll = next(c for c in plan.collections if c.collection_name == "bygning_omrade")
     assert coll.table.geometry.has_z
     assert coll.table.geometry.postgis_type == "MultiPolygonZ"
+    assert coll.upsert_field == "lokalid"
+    assert coll.upsert_path == "lokalid"
     ddl = "\n".join(postgis.table_statements(plan))
     assert '"geometry" geometry(MultiPolygonZ, 5972)' in ddl
-    assert (
-        'on bygning.bygning_omrade ("lokalid", "identifikasjon_navnerom") '
-        "nulls not distinct"
-    ) in ddl
+    assert 'on bygning.bygning_omrade ("lokalid") nulls not distinct' in ddl
 
 
 def test_bygning_senterlinje_geometry_and_business_key_are_built_correctly():
@@ -192,12 +214,11 @@ def test_bygning_senterlinje_geometry_and_business_key_are_built_correctly():
     )
     assert coll.table.geometry.has_z
     assert coll.table.geometry.postgis_type == "MultiLineStringZ"
+    assert coll.upsert_field == "lokalid"
+    assert coll.upsert_path == "lokalid"
     ddl = "\n".join(postgis.table_statements(plan))
     assert '"geometry" geometry(MultiLineStringZ, 5972)' in ddl
-    assert (
-        'on bygning.bygning_senterlinje ("lokalid", "identifikasjon_navnerom") '
-        "nulls not distinct"
-    ) in ddl
+    assert 'on bygning.bygning_senterlinje ("lokalid") nulls not distinct' in ddl
 
 
 def test_bygning_posisjon_geometry_and_business_key_are_built_correctly():
@@ -205,12 +226,11 @@ def test_bygning_posisjon_geometry_and_business_key_are_built_correctly():
     coll = next(c for c in plan.collections if c.collection_name == "bygning_posisjon")
     assert coll.table.geometry.has_z
     assert coll.table.geometry.postgis_type == "PointZ"
+    assert coll.upsert_field == "lokalid"
+    assert coll.upsert_path == "lokalid"
     ddl = "\n".join(postgis.table_statements(plan))
     assert '"geometry" geometry(PointZ, 5972)' in ddl
-    assert (
-        'on bygning.bygning_posisjon ("lokalid", "identifikasjon_navnerom") '
-        "nulls not distinct"
-    ) in ddl
+    assert 'on bygning.bygning_posisjon ("lokalid") nulls not distinct' in ddl
 
 
 # --------------------------------------------------------------------------
@@ -338,6 +358,27 @@ def test_standalone_outward_identifier_sets_id_inject_key_and_strip():
     )
     assert col.id_inject_key == "lokalid"
     assert "lokalid" in col.strip_keys
+
+
+def test_scalar_outward_identifier_server_managed_uses_referenced_property_value():
+    ds = _make_dataset(
+        fields=[
+            ResolvedField("eksternpeker", "text"),
+            ResolvedField(
+                "identifikasjon",
+                "jsonb",
+                sub_fields=(
+                    ResolvedField("lokalid", "text"),
+                    ResolvedField("navnerom", "text"),
+                ),
+            ),
+        ],
+        outward_identifier_path="identifikasjon.lokalid",
+        server_managed_paths={"eksternpeker": "outward_identifier"},
+    )
+    plan = build_schema_plan(ds)
+    col = next(c for c in plan.collections[0].table.columns if c.name == "eksternpeker")
+    assert col.server_write_expr == "(feature->'properties'->'identifikasjon'->>'lokalid')"
     # The server_managed versjonid injection must still be present.
     assert ("versjonid", "now()::text") in col.write_inject
     assert "versjonid" in col.strip_keys

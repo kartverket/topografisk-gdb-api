@@ -137,7 +137,7 @@ def _collection_resource(dataset: str, coll: ResolvedCollection, dsn: str) -> di
                 # Geometry type/srid so the provider can describe its own schema.
                 "geometry_type": coll.geometry_type,
                 "srid": coll.srid,
-                "upsert_key": list(coll.upsert_key),
+                "upsert_field": coll.upsert_field,
                 **(
                     {
                         "storage_crs": storage_crs,
@@ -423,7 +423,7 @@ def _build_starlette_app(api_: API) -> Starlette:
 
     def _upsertable(cid) -> bool:
         res = _resource(cid)
-        return bool(res and res["providers"][0].get("upsert_key"))
+        return bool(res and res["providers"][0].get("upsert_field"))
 
     async def landing(request: Request):
         return await _execute(api_, core_api.landing_page, request)

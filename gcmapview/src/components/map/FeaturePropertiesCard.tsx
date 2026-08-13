@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Filter, FilterX, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,6 +20,138 @@ type FeaturePropertiesCardProps = {
   onClearFeatureFilter?: () => void;
   onHoverPositionIndex?: (index: number | undefined) => void;
 };
+
+type ExpandableSectionHeaderProps = {
+  label: string;
+  badges?: ReactNode;
+};
+
+function ExpandableSectionHeader({ label, badges }: ExpandableSectionHeaderProps) {
+  return (
+    <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden">
+      <span className="flex size-4 shrink-0 items-center justify-center border border-border text-[11px] leading-none group-open:hidden">
+        +
+      </span>
+      <span className="hidden size-4 shrink-0 items-center justify-center border border-border text-[11px] leading-none group-open:flex">
+        -
+      </span>
+      <span className="inline-flex min-w-0 items-center gap-2">
+        <span>{label}</span>
+        {badges}
+      </span>
+    </summary>
+  );
+}
+
+function isJsonPropertyValue(value: unknown): value is Record<string, unknown> | unknown[] {
+  return typeof value === 'object' && value !== null;
+}
+
+function propertyEntries(value: Record<string, unknown> | unknown[]) {
+  if (Array.isArray(value)) {
+    return value.map((item, index) => [`[${index}]`, item] as const);
+  }
+
+  return Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
+}
+
+type RenderPropertyEntryOptions = {
+  featureProperties: Record<string, unknown>;
+  activeFeatureFilter?: ActiveFeatureFilter;
+  onApplyFeatureFilter?: (featureFilter: ActiveFeatureFilter) => void;
+  onClearFeatureFilter?: () => void;
+  nested?: boolean;
+  path?: string;
+};
+
+function renderPropertyEntry(
+  key: string,
+  value: unknown,
+  {
+    featureProperties,
+    activeFeatureFilter,
+    onApplyFeatureFilter,
+    onClearFeatureFilter,
+    nested = false,
+    path = key
+  }: RenderPropertyEntryOptions
+) {
+  if (isJsonPropertyValue(value)) {
+    const entries = propertyEntries(value);
+
+    return (
+      <details
+        key={path}
+        open
+        className="group">
+        <ExpandableSectionHeader
+          label={key}
+          badges={
+            <Badge
+              variant="outline"
+              className="font-mono text-[11px]">
+              {entries.length}
+            </Badge>
+          }
+        />
+        {entries.length === 0 ? (
+          <p className="mt-2 text-xs text-muted-foreground">Empty {Array.isArray(value) ? 'array' : 'object'}</p>
+        ) : (
+          <div className="mt-2 grid gap-2 pl-6">
+            {entries.map(([childKey, childValue]) =>
+              renderPropertyEntry(childKey, childValue, {
+                featureProperties,
+                activeFeatureFilter,
+                onApplyFeatureFilter,
+                onClearFeatureFilter,
+                nested: true,
+                path: `${path}.${childKey}`
+              })
+            )}
+          </div>
+        )}
+      </details>
+    );
+  }
+
+  const isFilterableKey =
+    !nested && FILTERABLE_FEATURE_PROPERTY_KEYS.includes(key as (typeof FILTERABLE_FEATURE_PROPERTY_KEYS)[number]);
+  const filterValue = isFilterableKey ? filterableFeaturePropertyValue(featureProperties, key) : undefined;
+  const isActiveFilter = Boolean(
+    filterValue && activeFeatureFilter?.propertyKey === key && activeFeatureFilter.value === filterValue
+  );
+
+  return (
+    <div
+      key={path}
+      className="min-w-0">
+      <dt className="font-medium text-muted-foreground">{key}</dt>
+      {filterValue ? (
+        <dd className="m-0 flex items-start justify-between gap-2">
+          <span className="min-w-0 break-words font-mono text-[12px] text-foreground">
+            {formatPropertyValue(value)}
+          </span>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant={isActiveFilter ? 'secondary' : 'ghost'}
+            className="size-6 shrink-0"
+            aria-label={isActiveFilter ? `Clear ${key} filter ${filterValue}` : `Filter by ${key} ${filterValue}`}
+            title={isActiveFilter ? `Clear ${key} filter ${filterValue}` : `Filter by ${key} ${filterValue}`}
+            onClick={() =>
+              isActiveFilter
+                ? onClearFeatureFilter?.()
+                : onApplyFeatureFilter?.({ propertyKey: key, value: filterValue })
+            }>
+            {isActiveFilter ? <FilterX /> : <Filter />}
+          </Button>
+        </dd>
+      ) : (
+        <dd className="m-0 break-words font-mono text-[12px] text-foreground">{formatPropertyValue(value)}</dd>
+      )}
+    </div>
+  );
+}
 
 export function FeaturePropertiesCard({
   feature,
@@ -64,36 +197,38 @@ export function FeaturePropertiesCard({
       <CardContent className="space-y-2 overflow-y-auto pt-2">
         <Separator />
         {feature.positions.length > 0 || isSourceLoading ? (
-          <details className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
-            <summary className="cursor-pointer text-sm font-medium text-foreground">
-              <span className="inline-flex items-center gap-2">
-                Positions
-                {isSourceLoading ? (
-                  <Badge
-                    variant="outline"
-                    className="font-mono text-[11px]">
-                    loading
-                  </Badge>
-                ) : (
-                  <Badge
-                    variant="outline"
-                    className="font-mono text-[11px]">
-                    {feature.positions.length}
-                  </Badge>
-                )}
-                {feature.positionsCoordinateSystem ? (
-                  <Badge
-                    variant="secondary"
-                    className="font-mono text-[11px]">
-                    {feature.positionsCoordinateSystem}
-                  </Badge>
-                ) : null}
-              </span>
-            </summary>
+          <details className="group">
+            <ExpandableSectionHeader
+              label="Positions"
+              badges={
+                <>
+                  {isSourceLoading ? (
+                    <Badge
+                      variant="outline"
+                      className="font-mono text-[11px]">
+                      loading
+                    </Badge>
+                  ) : (
+                    <Badge
+                      variant="outline"
+                      className="font-mono text-[11px]">
+                      {feature.positions.length}
+                    </Badge>
+                  )}
+                  {feature.positionsCoordinateSystem ? (
+                    <Badge
+                      variant="secondary"
+                      className="font-mono text-[11px]">
+                      {feature.positionsCoordinateSystem}
+                    </Badge>
+                  ) : null}
+                </>
+              }
+            />
             {isSourceLoading ? (
-              <p className="mt-2 text-xs text-muted-foreground">Loading source coordinates…</p>
+              <p className="mt-2 pl-6 text-xs text-muted-foreground">Loading source coordinates…</p>
             ) : (
-              <div className="mt-2 overflow-x-auto">
+              <div className="mt-2 overflow-x-auto pl-6">
                 <table className="min-w-full border-separate border-spacing-y-1 text-left text-[12px] font-mono">
                   <thead>
                     <tr className="text-muted-foreground">
@@ -126,52 +261,14 @@ export function FeaturePropertiesCard({
           <p className="text-sm text-muted-foreground">No properties</p>
         ) : (
           <dl className="m-0 grid gap-2 text-sm">
-            {entries.map(([key, value]) => {
-              const isFilterableKey = FILTERABLE_FEATURE_PROPERTY_KEYS.includes(
-                key as (typeof FILTERABLE_FEATURE_PROPERTY_KEYS)[number]
-              );
-              const filterValue = isFilterableKey ? filterableFeaturePropertyValue(feature.properties, key) : undefined;
-              const isActiveFilter = Boolean(
-                filterValue && activeFeatureFilter?.propertyKey === key && activeFeatureFilter.value === filterValue
-              );
-
-              return (
-                <div
-                  key={key}
-                  className="min-w-0">
-                  <dt className="font-medium text-muted-foreground">{key}</dt>
-                  {filterValue ? (
-                    <dd className="m-0 flex items-start justify-between gap-2">
-                      <span className="min-w-0 break-words font-mono text-[12px] text-foreground">
-                        {formatPropertyValue(value)}
-                      </span>
-                      <Button
-                        type="button"
-                        size="icon-sm"
-                        variant={isActiveFilter ? 'secondary' : 'ghost'}
-                        className="size-6 shrink-0"
-                        aria-label={
-                          isActiveFilter ? `Clear ${key} filter ${filterValue}` : `Filter by ${key} ${filterValue}`
-                        }
-                        title={
-                          isActiveFilter ? `Clear ${key} filter ${filterValue}` : `Filter by ${key} ${filterValue}`
-                        }
-                        onClick={() =>
-                          isActiveFilter
-                            ? onClearFeatureFilter?.()
-                            : onApplyFeatureFilter?.({ propertyKey: key, value: filterValue })
-                        }>
-                        {isActiveFilter ? <FilterX /> : <Filter />}
-                      </Button>
-                    </dd>
-                  ) : (
-                    <dd className="m-0 break-words font-mono text-[12px] text-foreground">
-                      {formatPropertyValue(value)}
-                    </dd>
-                  )}
-                </div>
-              );
-            })}
+            {entries.map(([key, value]) =>
+              renderPropertyEntry(key, value, {
+                featureProperties: feature.properties,
+                activeFeatureFilter,
+                onApplyFeatureFilter,
+                onClearFeatureFilter
+              })
+            )}
           </dl>
         )}
       </CardContent>

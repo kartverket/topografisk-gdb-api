@@ -33,6 +33,18 @@ _SCALAR_SERVER_WRITE: dict[str, str] = {
 }
 
 
+def _feature_property_text_expr(dot_path: str) -> str:
+    parts = dot_path.split(".")
+    if len(parts) == 1:
+        return f"(feature->'properties'->>'{parts[0]}')"
+
+    head, *tail = parts
+    expr = f"feature->'properties'->'{head}'"
+    for part in tail[:-1]:
+        expr = f"({expr}->'{part}')"
+    return f"({expr}->>'{tail[-1]}')"
+
+
 def _standard_columns() -> list[ColumnPlan]:
     return [
         ColumnPlan(
@@ -46,6 +58,7 @@ def _standard_columns() -> list[ColumnPlan]:
 def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: PLR0912
     columns: list[ColumnPlan] = _standard_columns()
     indexes: list[IndexPlan] = []
+    upsert_path = coll.upsert_path
 
     for fld in coll.fields:
         if fld.sql_type == "jsonb":
@@ -60,10 +73,13 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
                 parts = path.split(".", 1)
                 if len(parts) == 2 and parts[0] == fld.name:  # noqa: PLR2004
                     sub_key = parts[1]
-                    strip_keys.append(sub_key)
                     if rule == "outward_identifier":
+                        if path == upsert_path:
+                            continue
+                        strip_keys.append(sub_key)
                         id_inject_key = sub_key
                     elif rule == "timestamp_iso":
+                        strip_keys.append(sub_key)
                         write_inject.append((sub_key, "now()::text"))
 
             # The standalone `outward_identifier:` key is stored separately from
@@ -73,9 +89,10 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
                 oi_parts = coll.outward_identifier_path.split(".", 1)
                 if len(oi_parts) == 2 and oi_parts[0] == fld.name:  # noqa: PLR2004
                     sub_key = oi_parts[1]
-                    if sub_key not in strip_keys:
-                        strip_keys.append(sub_key)
-                    id_inject_key = sub_key
+                    if coll.outward_identifier_path != upsert_path:
+                        if sub_key not in strip_keys:
+                            strip_keys.append(sub_key)
+                        id_inject_key = sub_key
 
             # Functional indexes for directly indexable sub-fields.
             # SafeIdentifier guarantees no single quotes in key names.
@@ -99,7 +116,18 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
             server_write_expr: str | None = None
             if fld.name in coll.server_managed_paths:
                 token = coll.server_managed_paths[fld.name]
-                server_write_expr = _SCALAR_SERVER_WRITE.get(token)
+                if token == "outward_identifier":
+                    if coll.outward_identifier_path is None:
+                        msg = (
+                            f"collection '{coll.name}' uses server_managed outward_identifier "
+                            f"for field '{fld.name}' without an outward_identifier path"
+                        )
+                        raise ValueError(msg)
+                    server_write_expr = _feature_property_text_expr(
+                        coll.outward_identifier_path
+                    )
+                else:
+                    server_write_expr = _SCALAR_SERVER_WRITE.get(token)
             columns.append(
                 ColumnPlan(
                     fld.name,
@@ -155,7 +183,8 @@ def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
                 collection_name=coll.name,
                 table=table,
                 functions=functions,
-                upsert_key=coll.upsert_key,
+                upsert_field=coll.upsert_field,
+                upsert_path=coll.upsert_path,
             )
         )
     return SchemaPlan(schema_name=schema, collections=tuple(collections))

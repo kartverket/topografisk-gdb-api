@@ -163,6 +163,38 @@ def _resolve_dot_path(
     return found
 
 
+def _upsert_alias_paths(
+    fields: tuple[ResolvedField, ...],
+    *,
+    outward_identifier_path: str | None,
+) -> dict[str, str]:
+    alias_paths: dict[str, str] = {field.name: field.name for field in fields}
+    for field in fields:
+        for sub_field in field.sub_fields:
+            alias_paths.setdefault(
+                f"{field.name}_{sub_field.name}", f"{field.name}.{sub_field.name}"
+            )
+    if outward_identifier_path:
+        alias_paths.setdefault(outward_identifier_path, outward_identifier_path)
+        alias_paths.setdefault(
+            outward_identifier_path.rsplit(".", 1)[-1], outward_identifier_path
+        )
+    return alias_paths
+
+
+def _resolved_upsert_field(
+    coll: CollectionDef,
+    resolved_fields: tuple[ResolvedField, ...],
+) -> str | None:
+    if coll.outward_identifier:
+        return coll.outward_identifier
+
+    if any(field.name == "lokalid" for field in resolved_fields):
+        return "lokalid"
+
+    return None
+
+
 def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
     types = {t.name: t for t in commons.field_types}
     # Dataset-local codelists take precedence over commons codelists.
@@ -193,33 +225,6 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
             seen.add(fld.name)
             resolved_fields.append(_resolve_field(fld, types, codelists, where=where))
 
-        unknown_upsert_fields = set(coll.upsert_key) - seen
-        if unknown_upsert_fields:
-            raise DescriptionError(
-                f"{where}: upsert_key references unknown field(s) "
-                f"{sorted(unknown_upsert_fields)}"
-            )
-        auto_increment_fields = {
-            fld.name for fld in merged_fields if fld.auto_increment
-        }
-        invalid_upsert_fields = set(coll.upsert_key) & auto_increment_fields
-        if invalid_upsert_fields:
-            raise DescriptionError(
-                f"{where}: upsert_key cannot use auto-increment field(s) "
-                f"{sorted(invalid_upsert_fields)}"
-            )
-
-        resolved_rels: list[ResolvedRelationship] = []
-        for rel in coll.relationships:
-            if rel.target not in collection_names:
-                raise DescriptionError(
-                    f"{where}: relationship '{rel.name}' targets unknown "
-                    f"collection '{rel.target}' (cross-dataset refs not allowed)"
-                )
-            resolved_rels.append(ResolvedRelationship(rel.name, rel.target))
-
-        # Validate outward_identifier and server_managed dot-paths against
-        # the resolved field tree before storing them on the collection.
         resolved_tuple = tuple(resolved_fields)
         if coll.outward_identifier:
             _resolve_dot_path(
@@ -236,6 +241,46 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
                 kind="server_managed",
             )
 
+        resolved_upsert_field = _resolved_upsert_field(coll, resolved_tuple)
+        upsert_alias_paths = _upsert_alias_paths(
+            resolved_tuple,
+            outward_identifier_path=coll.outward_identifier,
+        )
+        if (
+            resolved_upsert_field is not None
+            and resolved_upsert_field not in upsert_alias_paths
+        ):
+            raise DescriptionError(
+                f"{where}: resolved upsert field references unknown field "
+                f"'{resolved_upsert_field}'"
+            )
+        auto_increment_fields = {
+            fld.name for fld in merged_fields if fld.auto_increment
+        }
+        if (
+            resolved_upsert_field is not None
+            and upsert_alias_paths[resolved_upsert_field] in auto_increment_fields
+        ):
+            raise DescriptionError(
+                f"{where}: resolved upsert field cannot use auto-increment field "
+                f"'{resolved_upsert_field}'"
+            )
+
+        upsert_path = (
+            upsert_alias_paths[resolved_upsert_field]
+            if resolved_upsert_field is not None
+            else None
+        )
+
+        resolved_rels: list[ResolvedRelationship] = []
+        for rel in coll.relationships:
+            if rel.target not in collection_names:
+                raise DescriptionError(
+                    f"{where}: relationship '{rel.name}' targets unknown "
+                    f"collection '{rel.target}' (cross-dataset refs not allowed)"
+                )
+            resolved_rels.append(ResolvedRelationship(rel.name, rel.target))
+
         resolved_collections.append(
             ResolvedCollection(
                 name=coll.name,
@@ -247,7 +292,8 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
                 has_z=coll.geometry.has_z,
                 fields=resolved_tuple,
                 relationships=tuple(resolved_rels),
-                upsert_key=tuple(coll.upsert_key),
+                upsert_field=resolved_upsert_field,
+                upsert_path=upsert_path,
                 outward_identifier_path=coll.outward_identifier,
                 server_managed_paths=dict(coll.server_managed),
             )

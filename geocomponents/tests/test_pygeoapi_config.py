@@ -76,7 +76,7 @@ def test_bygning_config_exposes_editable_multilinestring_collection():
     assert provider["editable"] is True
     assert provider["geometry_type"] == "MultiLineString"
     assert provider["srid"] == 5972
-    assert provider["upsert_key"] == ["lokalid", "identifikasjon_navnerom"]
+    assert provider["upsert_field"] == "lokalid"
     assert provider["storage_crs"] == "http://www.opengis.net/def/crs/EPSG/0/5972"
     assert provider["crs"] == [
         "http://www.opengis.net/def/crs/OGC/1.3/CRS84",
@@ -98,7 +98,7 @@ def test_bygning_config_exposes_editable_multipolygon_collection():
     assert provider["editable"] is True
     assert provider["geometry_type"] == "MultiPolygon"
     assert provider["srid"] == 5972
-    assert provider["upsert_key"] == ["lokalid", "identifikasjon_navnerom"]
+    assert provider["upsert_field"] == "lokalid"
     assert provider["storage_crs"] == "http://www.opengis.net/def/crs/EPSG/0/5972"
     assert provider["crs"] == [
         "http://www.opengis.net/def/crs/OGC/1.3/CRS84",
@@ -120,7 +120,7 @@ def test_bygning_config_exposes_editable_centerline_collection():
     assert provider["editable"] is True
     assert provider["geometry_type"] == "MultiLineString"
     assert provider["srid"] == 5972
-    assert provider["upsert_key"] == ["lokalid", "identifikasjon_navnerom"]
+    assert provider["upsert_field"] == "lokalid"
     assert provider["storage_crs"] == "http://www.opengis.net/def/crs/EPSG/0/5972"
     assert provider["crs"] == [
         "http://www.opengis.net/def/crs/OGC/1.3/CRS84",
@@ -142,13 +142,30 @@ def test_bygning_config_exposes_editable_point_collection():
     assert provider["editable"] is True
     assert provider["geometry_type"] == "Point"
     assert provider["srid"] == 5972
-    assert provider["upsert_key"] == ["lokalid", "identifikasjon_navnerom"]
+    assert provider["upsert_field"] == "lokalid"
     assert provider["storage_crs"] == "http://www.opengis.net/def/crs/EPSG/0/5972"
     assert provider["crs"] == [
         "http://www.opengis.net/def/crs/OGC/1.3/CRS84",
         "http://www.opengis.net/def/crs/EPSG/0/5972",
     ]
     assert provider["always_xy"] is True
+
+
+def test_fkb_bane_config_exposes_derived_eksternpeker_upsert_field():
+    fkb_bane = next(
+        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "fkb_bane"
+    )
+    cfg = build_config(
+        fkb_bane,
+        "http://example.org/datasets/fkb_bane/ogc_api",
+        dsn="postgresql://x",
+    )
+    provider = cfg["resources"]["jernbaneplattformkant"]["providers"][0]
+    assert provider["editable"] is True
+    assert provider["geometry_type"] == "MultiLineString"
+    assert provider["srid"] == 5973
+    assert provider["upsert_field"] == "identifikasjon.lokalid"
+    assert provider["storage_crs"] == "http://www.opengis.net/def/crs/EPSG/0/5973"
 
 
 def test_wgs84_collections_keep_default_crs_behaviour():

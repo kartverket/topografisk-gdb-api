@@ -172,21 +172,18 @@ class CollectionDef(BaseModel):
     geometry: GeometryDef = Field(default_factory=GeometryDef)
     fields: list[FieldDef] = Field(default_factory=list)
     relationships: list[RelationshipDef] = Field(default_factory=list)
-    upsert_key: list[SafeIdentifier] = Field(default_factory=list)
     # Dot-path to the JSONB sub-field whose value is injected from the feature
     # id on read and stripped on write (e.g. "identifikasjon.lokalid").
     outward_identifier: str | None = None
     # Maps dot-paths to server-managed token values.  Allowed tokens:
-    # "outward_identifier" — inject id::text on read, strip on write.
+    # "outward_identifier" — for JSONB targets, inject id::text on read and
+    #                         strip on write; for scalar targets, copy the
+    #                         referenced outward_identifier value on write.
     # "timestamp_iso"      — inject now()::text on write.
     server_managed: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_collection(self):
-        if len(self.upsert_key) != len(set(self.upsert_key)):
-            raise ValueError("upsert_key fields must be unique")
-        if self.upsert_key and self.feature_model != "simple":
-            raise ValueError("upsert_key is only supported for simple collections")
         invalid_tokens = {
             v
             for v in self.server_managed.values()
@@ -260,7 +257,8 @@ class ResolvedCollection:
     srid: int
     fields: tuple[ResolvedField, ...]
     relationships: tuple[ResolvedRelationship, ...]
-    upsert_key: tuple[str, ...] = field(default_factory=tuple)
+    upsert_field: str | None = None
+    upsert_path: str | None = None
     has_z: bool = False
     # Dot-path to the outward-identifier sub-field (e.g. "identifikasjon.lokalid").
     outward_identifier_path: str | None = None
@@ -282,7 +280,7 @@ class ResolvedCollection:
 
     @property
     def supports_upsert(self) -> bool:
-        return self.supports_crud and bool(self.upsert_key)
+        return self.supports_crud and self.upsert_field is not None
 
 
 @dataclass(frozen=True)

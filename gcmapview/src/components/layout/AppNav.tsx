@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from 'react-router';
 import { Cuboid, Map, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useMapDimension } from '../map/MapDimensionContext';
+import { useMapDimension } from '../map/useMapDimension';
 
 export function AppNav() {
   const location = useLocation();

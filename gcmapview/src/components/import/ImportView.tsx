@@ -10,12 +10,12 @@ import { cn } from '@/lib/utils';
 import { inferImportProfile, type ImportProfile, type ImportResult, uploadJsonFg } from '../../api/gcimportApi';
 
 const PROFILE_META: Record<ImportProfile, { title: string; crs: string; detail: string; footer: string }> = {
-  bane: {
-    title: 'Bane',
+  fkb_bane: {
+    title: 'FKB-Bane',
     crs: 'EPSG:5973',
     detail:
       'Jernbaneplattformkant and Spormidt are preserved as MultiLineString geometry and upserted by lokalid + identifikasjon_navnerom.',
-    footer: 'Upserts are idempotent by Bane business key.'
+    footer: 'Upserts are idempotent by the FKB-Bane business key.'
   },
   bygning: {
     title: 'Bygning',
@@ -30,7 +30,7 @@ export function ImportView() {
   const inputRef = useRef<HTMLInputElement>(null);
   const selectionVersionRef = useRef(0);
   const [file, setFile] = useState<File | null>(null);
-  const [profile, setProfile] = useState<ImportProfile>('bane');
+  const [profile, setProfile] = useState<ImportProfile>('fkb_bane');
   const [detectedProfile, setDetectedProfile] = useState<ImportProfile | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState('');
@@ -92,7 +92,7 @@ export function ImportView() {
       <CardContent className="space-y-4">
         <div className="space-y-2">
           <div className="flex flex-wrap gap-2">
-            {(['bane', 'bygning'] as const).map(option => (
+            {(['fkb_bane', 'bygning'] as const).map(option => (
               <Button
                 key={option}
                 type="button"

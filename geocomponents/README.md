@@ -341,7 +341,7 @@ for the API.
 | `PUT /collections/{c}/items/{id}`    | `ogc.feature_replace` | `dataset, collection, fid uuid, feature jsonb`                           | `boolean` — true when a matching feature was replaced                   |
 | `PATCH /collections/{c}/items/{id}`  | `ogc.feature_update`  | `dataset, collection, fid uuid, feature jsonb`                           | `boolean` — true when updated; only fields present in the input change  |
 | `DELETE /collections/{c}/items/{id}` | `ogc.feature_delete`  | `dataset, collection, fid uuid`                                          | `boolean` — true when a matching feature was deleted                    |
-| `POST /collections/{c}/items:upsert` | `ogc.feature_upsert` | `dataset, collection, feature jsonb` | stable `uuid`; available when the collection declares `upsert_key` |
+| `POST /collections/{c}/items:upsert` | `ogc.feature_upsert` | `dataset, collection, feature jsonb` | stable `uuid`; available when the collection resolves an upsert key |
 
 Endpoints are relative to a dataset mount, e.g.
 `/datasets/cadastre/ogc_api/collections/parcels/items`.
@@ -351,8 +351,9 @@ The `dataset` and `collection` arguments come from the description
 routes `ogc.feature_items('cadastre', 'parcels', …)` to a per-collection
 function `cadastre._parcels_items(…)` generated from the description. Change
 the storage layout, update the dispatcher; the API keeps calling the same
-functions. Collections with an `upsert_key` also receive a unique index and an
-atomic insert-or-replace function keyed by those fields.
+functions. Collections with a resolved upsert key also receive a unique index
+and an atomic insert-or-replace function keyed by that field. The key comes
+from `outward_identifier`, or defaults to `lokalid` when present.
 
 You can call them directly:
 

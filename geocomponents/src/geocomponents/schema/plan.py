@@ -46,6 +46,15 @@ def internal_function(schema: str, collection: str, operation: str) -> str:
     return f"{schema}._{collection}_{operation}"
 
 
+def upsert_sql_expression(path: str) -> str:
+    """Render one upsert key path as a SQL conflict/index expression."""
+    parts = path.split(".")
+    if len(parts) == 1:
+        return f'"{parts[0]}"'
+    head, *tail = parts
+    return f'("{head}" #>> \'' + '{' + ','.join(tail) + '}' + "')"
+
+
 @dataclass(frozen=True)
 class IndexPlan:
     """One index to emit after the table DDL."""
@@ -129,7 +138,8 @@ class CollectionPlan:
     collection_name: str
     table: TablePlan
     functions: dict[str, str]  # operation -> internal function name (private)
-    upsert_key: tuple[str, ...] = ()
+    upsert_field: str | None = None
+    upsert_path: str | None = None
 
     @property
     def id_field(self) -> str:

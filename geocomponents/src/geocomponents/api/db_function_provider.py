@@ -111,7 +111,7 @@ class DbFunctionProvider(BaseProvider):
         self.geom_field = provider_def.get("geom_field", "geometry")
         self.geometry_type = provider_def.get("geometry_type", "Point")
         self.srid = provider_def.get("srid", 4326)
-        self.upsert_key = tuple(provider_def.get("upsert_key", ()))
+        self.upsert_field = provider_def.get("upsert_field")
         # numberMatched is optional (a full count); default on, configurable.
         self.with_matched = provider_def.get("with_matched", True)
         # Static field metadata (no DB hit) for queryables / schema.
@@ -226,7 +226,7 @@ class DbFunctionProvider(BaseProvider):
             return str(cur.fetchone()[0])
 
     def upsert(self, item) -> str:
-        if not self.upsert_key:
+        if self.upsert_field is None:
             raise ProviderQueryError("collection has no configured upsert key")
         feature = _as_feature_dict(item)
         with _rethrow_pg_raise(), self._connect() as conn, conn.cursor() as cur:
