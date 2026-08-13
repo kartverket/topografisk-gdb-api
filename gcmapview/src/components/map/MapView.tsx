@@ -28,12 +28,6 @@ import {
 } from '../../map/featureInspect';
 import { useLayerVisibilityStore } from '../../store/layerVisibilityStore';
 import { useMapViewStore } from '../../store/mapViewStore';
-import {
-  clearBuildingDebugMarkers,
-  createBuildingDebugMarkerState,
-  setBuildingDebugMarkerVisibility,
-  updateBuildingDebugMarkers
-} from './buildingDebugMarkers';
 import { applyObjtypeLabelVisibility, OBJTYPE_LABEL_MIN_ZOOM, upsertObjtypeLabelLayer } from './objtypeLabels';
 import { FeaturePropertiesCard } from './FeaturePropertiesCard';
 import { MapLayersCard } from './MapLayersCard';
@@ -107,7 +101,6 @@ function isTerrainEnabled(is3d: boolean, adjustElevatedHeights: boolean) {
 export function MapView() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map>(null);
-  const buildingMarkerStateRef = useRef(createBuildingDebugMarkerState());
   const pendingReloadTimeoutRef = useRef<number | undefined>(undefined);
   const pendingElevatedRefreshTimeoutRef = useRef<number | undefined>(undefined);
   const reloadVisibleDataRef = useRef<(() => Promise<void>) | undefined>(undefined);
@@ -316,12 +309,6 @@ export function MapView() {
       buildingCentroidsFeatureCollection(renderedFeatureCollections.buildings)
     );
     upsertObjtypeLabelLayer(map, renderedFeatureCollections, visibility);
-    updateBuildingDebugMarkers(
-      buildingMarkerStateRef.current,
-      map,
-      renderedFeatureCollections.buildings,
-      !is3dRef.current && useLayerVisibilityStore.getState().visibility.buildings
-    );
   }
 
   useEffect(() => {
@@ -330,7 +317,6 @@ export function MapView() {
     }
 
     let cancelled = false;
-    const buildingMarkerState = buildingMarkerStateRef.current;
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
       style: mapStyle,
@@ -367,7 +353,6 @@ export function MapView() {
         latestVectorDataRef.current = emptyVisibleFeatureCollections;
         await clearVectorSources(map);
         upsertObjtypeLabelLayer(map, emptyVisibleFeatureCollections, useLayerVisibilityStore.getState().visibility);
-        updateBuildingDebugMarkers(buildingMarkerStateRef.current, map, emptyFeatureCollection, false);
         if (!cancelled && requestId === visibleRequestId) {
           setError(undefined);
           closeSelectedFeatureInspectorRef.current();
@@ -453,7 +438,6 @@ export function MapView() {
       );
       upsertObjtypeLabelLayer(map, emptyVisibleFeatureCollections, useLayerVisibilityStore.getState().visibility);
       applyObjtypeLabelVisibility(map, !is3dRef.current && map.getZoom() > OBJTYPE_LABEL_MIN_ZOOM);
-      updateBuildingDebugMarkers(buildingMarkerState, map, emptyFeatureCollection, false);
       map.on('movestart', handleMoveStart);
       map.on('moveend', scheduleVisibleDataReload);
 
@@ -484,7 +468,6 @@ export function MapView() {
       map.off('movestart', handleMoveStart);
       map.off('moveend', scheduleVisibleDataReload);
       mapRef.current = null;
-      clearBuildingDebugMarkers(buildingMarkerState);
       resizeObserver.disconnect();
       map.remove();
     };
@@ -503,10 +486,6 @@ export function MapView() {
       isTerrainEnabled(is3d, adjustElevatedHeights)
     );
     applyObjtypeLabelVisibility(map, !is3d && map.getZoom() > OBJTYPE_LABEL_MIN_ZOOM);
-    setBuildingDebugMarkerVisibility(
-      buildingMarkerStateRef.current,
-      useLayerVisibilityStore.getState().visibility.buildings && !is3d
-    );
   }, [adjustElevatedHeights, is3d, isMapReady]);
 
   useEffect(() => {
@@ -530,7 +509,6 @@ export function MapView() {
     }
 
     applyMapLayerVisibility(map, is3d, layerVisibility, isTerrainEnabled(is3d, adjustElevatedHeights));
-    setBuildingDebugMarkerVisibility(buildingMarkerStateRef.current, layerVisibility.buildings && !is3d);
 
     const visibilityChanged = layerVisibilityChanged(previousLayerVisibilityRef.current, layerVisibility);
     previousLayerVisibilityRef.current = layerVisibility;
