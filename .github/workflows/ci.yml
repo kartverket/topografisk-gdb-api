@@ -152,7 +152,7 @@ jobs:
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
 
       - name: Build ${{ matrix.service }} image (load into local daemon for scanning)
-        uses: docker/build-push-action@cb941d0b895b09c17fa011d41c411b33c752cf28  # v6.16.0
+        uses: docker/build-push-action@2ca78c6bec76527009825f31aae0532b4d40d820  # v6.16.0
         with:
           context: ${{ matrix.context }}
           load: true
@@ -237,7 +237,7 @@ jobs:
 
       - name: Build and push ${{ matrix.service }} Docker image
         id: push
-        uses: docker/build-push-action@cb941d0b895b09c17fa011d41c411b33c752cf28  # v6.16.0
+        uses: docker/build-push-action@2ca78c6bec76527009825f31aae0532b4d40d820  # v6.16.0
         with:
           context: ${{ matrix.context }}
           push: true
@@ -247,7 +247,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
 
       - name: Generate ${{ matrix.service }} artifact attestation
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373  # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
           subject-name: ${{ env.REGISTRY }}/${{ matrix.image_name }}
           subject-digest: ${{ steps.push.outputs.digest }}
