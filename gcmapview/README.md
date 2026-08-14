@@ -47,9 +47,11 @@ environments, set them to the addresses the browser should call.
 `make docker-up` also starts a containerized `gcmapview` at
 `http://localhost:8080`.
 
-Inside Docker, Nginx serves the built app, falls back to `index.html` for
-client-side routes. API calls still go directly from the browser to the exposed
-backend addresses.
+Inside Docker, a small read-only Node server serves the built app, falls back
+to `index.html` for client-side routes, and renders `/runtime-config.js`
+directly from environment variables without writing into the container
+filesystem. API calls still go directly from the browser to the exposed backend
+addresses.
 
 To make the browser call public API addresses directly in a deployed
 environment, set these optional runtime variables instead:
@@ -72,6 +74,9 @@ GCIMPORT_API_URL=http://localhost:8001
 
 The container does not provide built-in fallback values for these. If they are
 missing, startup fails fast.
+
+The image is compatible with a read-only root filesystem because it does not
+rewrite web-server config or emit runtime assets during startup.
 
 For Kubernetes or another deployed environment, point these at public API
 addresses instead, for example:
