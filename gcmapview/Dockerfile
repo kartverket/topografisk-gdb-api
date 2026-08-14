@@ -14,13 +14,13 @@ COPY components.json index.html tsconfig.app.json tsconfig.json tsconfig.node.js
 
 RUN npm run build
 
-FROM nginx:1.29-alpine AS runtime
-RUN apk upgrade --no-cache
-COPY nginx.conf.template /etc/nginx/templates/default.conf.template
-COPY runtime-config.js.template /opt/gcmapview/runtime-config.js.template
-COPY docker-entrypoint.d/40-runtime-config.sh /docker-entrypoint.d/40-runtime-config.sh
-RUN chmod +x /docker-entrypoint.d/40-runtime-config.sh
-COPY --from=builder /app/dist /usr/share/nginx/html
+FROM node:22-alpine AS runtime
+RUN apk upgrade --no-cache \
+ && rm -rf /usr/local/lib/node_modules/npm \
+ && rm -f /usr/local/bin/npm /usr/local/bin/npx
+WORKDIR /app
+COPY server.mjs /app/server.mjs
+COPY --from=builder /app/dist /app/dist
 
 EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["node", "/app/server.mjs"]

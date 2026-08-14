@@ -74,6 +74,7 @@ services:
     environment:
       GEOCOMPONENTS_API_URL: http://localhost:8000
       GCIMPORT_API_URL: http://localhost:8001
+    read_only: true
     ports:
       - "8080:80"
     depends_on:
