@@ -12,6 +12,7 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 import orjson
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
 
 from gcimport.config import Settings
 from gcimport.geojson_to_jsonfg import ConversionError, convert_document
@@ -61,6 +62,12 @@ def create_app(
             f"{resolved_profile.title} profile"
         ),
         lifespan=lifespan,
+    )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     @application.post("/imports")

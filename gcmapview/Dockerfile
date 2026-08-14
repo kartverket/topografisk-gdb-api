@@ -3,11 +3,6 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 
-ARG VITE_GEOCOMPONENTS_API_URL=/geocomponents-api
-ARG VITE_GCIMPORT_API_URL=/gcimport-api
-ENV VITE_GEOCOMPONENTS_API_URL=$VITE_GEOCOMPONENTS_API_URL
-ENV VITE_GCIMPORT_API_URL=$VITE_GCIMPORT_API_URL
-
 COPY package.json package-lock.json ./
 RUN npm ci
 
@@ -20,7 +15,11 @@ COPY components.json index.html tsconfig.app.json tsconfig.json tsconfig.node.js
 RUN npm run build
 
 FROM nginx:1.29-alpine AS runtime
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+RUN apk upgrade --no-cache
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY runtime-config.js.template /opt/gcmapview/runtime-config.js.template
+COPY docker-entrypoint.d/40-runtime-config.sh /docker-entrypoint.d/40-runtime-config.sh
+RUN chmod +x /docker-entrypoint.d/40-runtime-config.sh
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 EXPOSE 80

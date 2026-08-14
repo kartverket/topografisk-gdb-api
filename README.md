@@ -32,6 +32,7 @@ frontend, and gcimport:
 make docker-up         # Start the local compose stack: PostGIS, geocomponents, gcimport, gcmapview, gccore, and gcjobs
 make docker-down       # Stop the local compose stack
 make docker-delete-db-volume  # Delete the local geocomponents Postgres volume
+make docker-trivy-scan # Build and Trivy-scan all Dockerfile-based services via Docker
 make frontend-install  # Install frontend dependencies without running scripts
 make frontend-build    # Build the frontend
 make frontend-run      # Run the frontend development server
@@ -47,6 +48,19 @@ make gcimport-install  # Install gcimport dependencies
 make gcimport-test     # Run gcimport tests
 make gcimport-run      # Run gcimport on port 8001
 ```
+
+To scan container images locally with the same Trivy severity filters as CI:
+
+```bash
+# Scan all Dockerfile-based services
+make docker-trivy-scan
+
+# Scan only one service image
+make docker-trivy-scan SERVICE=gcimport
+```
+
+This runs Trivy inside Docker, so no local `trivy` install is required. It
+expects a working local Docker daemon and access to the Docker socket.
 
 The repo uses [pre-commit](https://pre-commit.com/) at the root to run various file-hygiene checks at commits.
 The same hooks run in CI (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).

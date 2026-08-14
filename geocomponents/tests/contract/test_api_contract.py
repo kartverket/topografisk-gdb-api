@@ -49,6 +49,16 @@ def _api(dataset_name: str) -> str:
 # ===========================================================================
 # Generic (derived from the descriptions)
 # ===========================================================================
+def test_gateway_cors_applies_to_mounted_dataset_routes(offline_client, datasets):
+    response = offline_client.get(
+        f"{_api(datasets[0].name)}/?f=json",
+        headers={"origin": "https://example.no"},
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    assert response.headers["access-control-allow-origin"] == "*"
+
+
 def test_landing_and_collections_listed_for_every_dataset(client, datasets):
     for d in datasets:
         api = _api(d.name)

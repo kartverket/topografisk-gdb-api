@@ -1,6 +1,10 @@
-const defaultApiBaseUrl = '/gcimport-api';
+import { gcimportRuntimeApiUrl, resolveApiBaseUrl } from './runtimeConfig';
 
-export const gcimportApiBaseUrl = (import.meta.env.VITE_GCIMPORT_API_URL ?? defaultApiBaseUrl).replace(/\/$/, '');
+export const gcimportApiBaseUrl = resolveApiBaseUrl(
+  gcimportRuntimeApiUrl(),
+  import.meta.env.GCIMPORT_API_URL,
+  'GCIMPORT_API_URL'
+);
 
 export type ImportProfile = 'fkb_bane' | 'bygning';
 
