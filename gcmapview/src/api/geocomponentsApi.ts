@@ -1,8 +1,9 @@
-const defaultApiBaseUrl = '/geocomponents-api';
+import { geocomponentsRuntimeApiUrl, resolveApiBaseUrl } from './runtimeConfig';
 
-export const geocomponentsApiBaseUrl = (import.meta.env.VITE_GEOCOMPONENTS_API_URL ?? defaultApiBaseUrl).replace(
-  /\/$/,
-  ''
+export const geocomponentsApiBaseUrl = resolveApiBaseUrl(
+  geocomponentsRuntimeApiUrl(),
+  import.meta.env.GEOCOMPONENTS_API_URL,
+  'GEOCOMPONENTS_API_URL'
 );
 
 const cadastreApiUrl = `${geocomponentsApiBaseUrl}/datasets/cadastre/ogc_api`;

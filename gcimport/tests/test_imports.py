@@ -412,6 +412,23 @@ def _test_client(
     return TestClient(app)
 
 
+def test_imports_preflight_allows_any_origin() -> None:
+    with _test_client(
+        httpx.MockTransport(lambda request: httpx.Response(200))
+    ) as client:
+        response = client.options(
+            "/imports",
+            headers={
+                "origin": "https://example.no",
+                "access-control-request-method": "POST",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "*"
+    assert "POST" in response.headers["access-control-allow-methods"]
+
+
 def test_imports_place_and_fallback_geometry() -> None:
     requests: list[httpx.Request] = []
 

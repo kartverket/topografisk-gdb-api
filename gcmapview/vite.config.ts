@@ -5,24 +5,11 @@ import tailwindcss from '@tailwindcss/vite';
 
 // https://vite.dev/config/
 export default defineConfig({
+  envPrefix: ['VITE_', 'GEOCOMPONENTS_', 'GCIMPORT_'],
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, '.')
-    }
-  },
-  server: {
-    proxy: {
-      '/geocomponents-api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-        rewrite: path => path.replace(/^\/geocomponents-api/, '')
-      },
-      '/gcimport-api': {
-        target: 'http://localhost:8001',
-        changeOrigin: true,
-        rewrite: path => path.replace(/^\/gcimport-api/, '')
-      }
     }
   }
 });

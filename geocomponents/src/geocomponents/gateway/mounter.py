@@ -13,6 +13,7 @@ the API framework by injecting a different provider; this file is unchanged.
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from geocomponents.api.base import DatasetApiProvider
@@ -35,6 +36,12 @@ def build_gateway(
     """
     base_url = base_url.rstrip("/")
     app = FastAPI(title="geocomponents gateway")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     mounts: list[DatasetMount] = []
     for dataset in datasets:

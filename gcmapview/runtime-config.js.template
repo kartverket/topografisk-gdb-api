@@ -1,0 +1,4 @@
+window.__GCMAPVIEW_CONFIG__ = {
+  geocomponentsApiUrl: "${GEOCOMPONENTS_API_URL}",
+  gcimportApiUrl: "${GCIMPORT_API_URL}"
+};
