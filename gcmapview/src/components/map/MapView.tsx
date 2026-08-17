@@ -69,12 +69,12 @@ const mapStyle: maplibregl.StyleSpecification = {
     'Roboto Variable': robotoLatinVariableUrl
   },
   sources: {
-    osm: {
+    kartverketTopo: {
       type: 'raster',
-      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      tiles: ['https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png'],
       tileSize: 256,
-      maxzoom: 17,
-      attribution: '&copy; OpenStreetMap contributors'
+      maxzoom: 18,
+      attribution: '&copy; Kartverket'
     },
     [terrainSourceId]: {
       type: 'raster-dem',
@@ -87,9 +87,9 @@ const mapStyle: maplibregl.StyleSpecification = {
   },
   layers: [
     {
-      id: 'osm',
+      id: 'kartverket-topo',
       type: 'raster',
-      source: 'osm'
+      source: 'kartverketTopo'
     }
   ]
 };
