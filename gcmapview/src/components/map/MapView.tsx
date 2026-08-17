@@ -26,7 +26,7 @@ import {
   inspectFeaturesAtPoint,
   type ActiveFeatureFilter
 } from '../../map/featureInspect';
-import { useLayerVisibilityStore } from '../../store/layerVisibilityStore';
+import { filterUnavailableLayers, useLayerVisibilityStore } from '../../store/layerVisibilityStore';
 import { useMapViewStore } from '../../store/mapViewStore';
 import { applyObjtypeLabelVisibility, OBJTYPE_LABEL_MIN_ZOOM, upsertObjtypeLabelLayer } from './objtypeLabels';
 import { FeaturePropertiesCard } from './FeaturePropertiesCard';
@@ -117,8 +117,12 @@ export function MapView() {
   activeFeatureFilterRef.current = activeFeatureFilter;
   const latestVectorDataRef = useRef<VisibleFeatureCollections>(emptyVisibleFeatureCollections);
   const layerVisibility = useLayerVisibilityStore(state => state.visibility);
+  const availableLayerIds = useLayerVisibilityStore(state => state.availableLayerIds);
+  const isLoadingAvailableLayers = useLayerVisibilityStore(state => state.isLoadingAvailableLayers);
+  const resolveAvailableLayerIds = useLayerVisibilityStore(state => state.resolveAvailableLayerIds);
   const setLayerVisibility = useLayerVisibilityStore(state => state.setVisibility);
-  const previousLayerVisibilityRef = useRef(layerVisibility);
+  const filteredLayerVisibility = filterUnavailableLayers(layerVisibility, availableLayerIds);
+  const previousLayerVisibilityRef = useRef(filteredLayerVisibility);
   const favoriteViews = useMapViewStore(state => state.favoriteViews);
   const activeFavoriteName = useMapViewStore(state => state.activeFavoriteName);
   const saveFavoriteView = useMapViewStore(state => state.saveFavoriteView);
@@ -141,6 +145,15 @@ export function MapView() {
   const closeSelectedFeatureInspectorRef = useRef<() => void>(() => {});
   const setSelectedFeatureRef = useRef(setSelectedFeature);
   setSelectedFeatureRef.current = setSelectedFeature;
+
+  function currentFilteredLayerVisibility() {
+    const state = useLayerVisibilityStore.getState();
+    return filterUnavailableLayers(state.visibility, state.availableLayerIds);
+  }
+
+  useEffect(() => {
+    void resolveAvailableLayerIds();
+  }, [resolveAvailableLayerIds]);
 
   useEffect(() => {
     if (!selectedFeature) {
@@ -410,7 +423,7 @@ export function MapView() {
       if (!vectorZoomActive) {
         latestVectorDataRef.current = emptyVisibleFeatureCollections;
         await clearVectorSources(map);
-        upsertObjtypeLabelLayer(map, emptyVisibleFeatureCollections, useLayerVisibilityStore.getState().visibility);
+        upsertObjtypeLabelLayer(map, emptyVisibleFeatureCollections, currentFilteredLayerVisibility());
         if (!cancelled && requestId === visibleRequestId) {
           setError(undefined);
           closeSelectedFeatureInspectorRef.current();
@@ -422,7 +435,8 @@ export function MapView() {
       }
 
       try {
-        const currentVisibility = useLayerVisibilityStore.getState().visibility;
+        await useLayerVisibilityStore.getState().resolveAvailableLayerIds();
+        const currentVisibility = currentFilteredLayerVisibility();
         const {
           bbox,
           parcels,
@@ -490,11 +504,11 @@ export function MapView() {
         emptyFeatureCollection,
         emptyFeatureCollection,
         emptyFeatureCollection,
-        useLayerVisibilityStore.getState().visibility,
+        currentFilteredLayerVisibility(),
         adjustElevatedHeightsRef.current,
         false
       );
-      upsertObjtypeLabelLayer(map, emptyVisibleFeatureCollections, useLayerVisibilityStore.getState().visibility);
+      upsertObjtypeLabelLayer(map, emptyVisibleFeatureCollections, currentFilteredLayerVisibility());
       applyObjtypeLabelVisibility(map, !is3dRef.current && map.getZoom() > OBJTYPE_LABEL_MIN_ZOOM);
       map.on('movestart', handleMoveStart);
       map.on('moveend', scheduleVisibleDataReload);
@@ -537,12 +551,7 @@ export function MapView() {
       return;
     }
 
-    applyMapDimensionMode(
-      map,
-      is3d,
-      useLayerVisibilityStore.getState().visibility,
-      isTerrainEnabled(is3d, adjustElevatedHeights)
-    );
+    applyMapDimensionMode(map, is3d, currentFilteredLayerVisibility(), isTerrainEnabled(is3d, adjustElevatedHeights));
     applyObjtypeLabelVisibility(map, !is3d && map.getZoom() > OBJTYPE_LABEL_MIN_ZOOM);
   }, [adjustElevatedHeights, is3d, isMapReady]);
 
@@ -555,7 +564,7 @@ export function MapView() {
     void applyRenderedVisibleData(
       map,
       latestVectorDataRef.current,
-      useLayerVisibilityStore.getState().visibility,
+      currentFilteredLayerVisibility(),
       activeFeatureFilter
     );
   }, [activeFeatureFilter, isMapReady]);
@@ -566,10 +575,10 @@ export function MapView() {
       return;
     }
 
-    applyMapLayerVisibility(map, is3d, layerVisibility, isTerrainEnabled(is3d, adjustElevatedHeights));
+    applyMapLayerVisibility(map, is3d, filteredLayerVisibility, isTerrainEnabled(is3d, adjustElevatedHeights));
 
-    const visibilityChanged = layerVisibilityChanged(previousLayerVisibilityRef.current, layerVisibility);
-    previousLayerVisibilityRef.current = layerVisibility;
+    const visibilityChanged = layerVisibilityChanged(previousLayerVisibilityRef.current, filteredLayerVisibility);
+    previousLayerVisibilityRef.current = filteredLayerVisibility;
 
     if (pendingElevatedRefreshTimeoutRef.current !== undefined) {
       window.clearTimeout(pendingElevatedRefreshTimeoutRef.current);
@@ -598,12 +607,12 @@ export function MapView() {
         latest.bygning,
         latest.bygningSenterlinje,
         latest.bygningOmrade,
-        layerVisibility,
+        filteredLayerVisibility,
         adjustElevatedHeights && is3d,
         is3d
       );
     }, DEFERRED_ELEVATED_SOURCE_DELAY_MS);
-  }, [adjustElevatedHeights, layerVisibility, isMapReady, is3d]);
+  }, [adjustElevatedHeights, filteredLayerVisibility, isMapReady, is3d]);
 
   async function createRandomBuilding() {
     const map = mapRef.current;
@@ -660,7 +669,7 @@ export function MapView() {
         bygningOmrade,
         bygningSenterlinje,
         bygningPosisjon
-      } = await getVisibleFeatureCollections(map, layerVisibility);
+      } = await getVisibleFeatureCollections(map, filteredLayerVisibility);
       logLoadedCoordinates('parcels after create', parcels);
       logLoadedCoordinates('buildings after create', buildings);
       latestVectorDataRef.current = {
@@ -673,7 +682,7 @@ export function MapView() {
         bygningSenterlinje,
         bygningPosisjon
       };
-      await applyRenderedVisibleData(map, latestVectorDataRef.current, layerVisibility);
+      await applyRenderedVisibleData(map, latestVectorDataRef.current, filteredLayerVisibility);
       const createdStatus = `Created ${buildingsToCreate.length} building${buildingsToCreate.length === 1 ? '' : 's'} with a ${area * 15} m2 parcel after ${placementAttempts} placement attempt${placementAttempts === 1 ? '' : 's'}. ${buildings.features.length} buildings loaded.`;
       setStatus(createdStatus);
       map.once('idle', () => {
@@ -731,7 +740,7 @@ export function MapView() {
         bygningOmrade: reloadedBygningOmrade,
         bygningSenterlinje: reloadedBygningSenterlinje,
         bygningPosisjon: reloadedBygningPosisjon
-      } = await getVisibleFeatureCollections(map, layerVisibility);
+      } = await getVisibleFeatureCollections(map, filteredLayerVisibility);
       logLoadedCoordinates('parcels after clear', reloadedParcels);
       logLoadedCoordinates('buildings after clear', reloadedBuildings);
       latestVectorDataRef.current = {
@@ -744,7 +753,7 @@ export function MapView() {
         bygningSenterlinje: reloadedBygningSenterlinje,
         bygningPosisjon: reloadedBygningPosisjon
       };
-      await applyRenderedVisibleData(map, latestVectorDataRef.current, layerVisibility);
+      await applyRenderedVisibleData(map, latestVectorDataRef.current, filteredLayerVisibility);
       const clearedStatus = `Cleared ${buildings.features.length} buildings and ${parcels.features.length} parcels.`;
       setStatus(clearedStatus);
       map.once('idle', () => {
@@ -814,7 +823,9 @@ export function MapView() {
         className="absolute right-4 bottom-[88px] z-[3] max-sm:top-20 max-sm:right-auto max-sm:bottom-auto max-sm:left-4">
         <MapLayersCard
           is3d={is3d}
-          visibility={layerVisibility}
+          availableLayerIds={availableLayerIds}
+          isLoadingAvailableLayers={isLoadingAvailableLayers}
+          visibility={filteredLayerVisibility}
           favoriteViews={favoriteViews}
           activeFavoriteName={activeFavoriteView?.name}
           onSaveFavoriteView={saveCurrentFavoriteView}

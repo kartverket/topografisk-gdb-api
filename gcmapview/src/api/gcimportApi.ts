@@ -3,7 +3,8 @@ import { gcimportRuntimeApiUrl, resolveApiBaseUrl } from './runtimeConfig';
 export const gcimportApiBaseUrl = resolveApiBaseUrl(
   gcimportRuntimeApiUrl(),
   import.meta.env.GCIMPORT_API_URL,
-  'GCIMPORT_API_URL'
+  'GCIMPORT_API_URL',
+  'http://localhost:8001'
 );
 
 export type ImportProfile = 'fkb_bane' | 'bygning';

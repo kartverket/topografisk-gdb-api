@@ -96,6 +96,8 @@ function LayerToggleRow({
 
 type MapLayersCardProps = {
   is3d: boolean;
+  availableLayerIds?: readonly MapLayerId[];
+  isLoadingAvailableLayers?: boolean;
   visibility: LayerVisibility;
   favoriteViews: FavoriteMapView[];
   activeFavoriteName?: string;
@@ -106,6 +108,8 @@ type MapLayersCardProps = {
 
 export function MapLayersCard({
   is3d,
+  availableLayerIds = MAP_LAYER_IDS,
+  isLoadingAvailableLayers = false,
   visibility,
   favoriteViews,
   activeFavoriteName,
@@ -145,7 +149,7 @@ export function MapLayersCard({
           </div>
         </div>
         <ul className="m-0 space-y-1 p-0 text-sm">
-          {MAP_LAYER_IDS.map(layerId => (
+          {availableLayerIds.map(layerId => (
             <LayerToggleRow
               key={layerId}
               layerId={layerId}
@@ -162,6 +166,12 @@ export function MapLayersCard({
             />
           ))}
         </ul>
+        {isLoadingAvailableLayers ? (
+          <p className="text-[11px] text-muted-foreground">Loading available layers...</p>
+        ) : null}
+        {!isLoadingAvailableLayers && availableLayerIds.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground">No datasets are currently exposing map layers.</p>
+        ) : null}
         <Separator />
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">

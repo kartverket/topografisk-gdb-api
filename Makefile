@@ -8,7 +8,7 @@ TRIVY_IMAGE ?= aquasec/trivy:latest
 TRIVY_CACHE_DIR ?= $(HOME)/.cache/trivy
 
 docker-up:
-	cd geocomponents && $(DOCKER_COMPOSE) up
+	cd geocomponents && $(DOCKER_COMPOSE) up --build
 
 docker-down:
 	cd geocomponents && $(DOCKER_COMPOSE) down
