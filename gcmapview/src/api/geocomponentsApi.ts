@@ -3,7 +3,8 @@ import { geocomponentsRuntimeApiUrl, resolveApiBaseUrl } from './runtimeConfig';
 export const geocomponentsApiBaseUrl = resolveApiBaseUrl(
   geocomponentsRuntimeApiUrl(),
   import.meta.env.GEOCOMPONENTS_API_URL,
-  'GEOCOMPONENTS_API_URL'
+  'GEOCOMPONENTS_API_URL',
+  'http://localhost:8000'
 );
 
 const cadastreApiUrl = `${geocomponentsApiBaseUrl}/datasets/cadastre/ogc_api`;
@@ -36,6 +37,18 @@ const collectionApiUrls: Record<CollectionId, string> = {
   bygning_senterlinje: bygningApiUrl,
   bygning_posisjon: bygningApiUrl
 };
+
+const collectionIds = Object.keys(collectionApiUrls) as CollectionId[];
+
+type DatasetIndexResponse = {
+  datasets?: Array<{
+    collections?: string[];
+  }>;
+};
+
+function isCollectionId(value: string): value is CollectionId {
+  return collectionIds.includes(value as CollectionId);
+}
 
 function collectionBaseUrl(collectionId: CollectionId) {
   return `${collectionApiUrls[collectionId]}/collections/${collectionId}`;
@@ -108,4 +121,24 @@ export function parcelItemUrl(id: string | number) {
 
 export function buildingItemUrl(id: string | number) {
   return `${cadastreApiUrl}/collections/buildings/items/${id}`;
+}
+
+export async function getDatasetCollectionIds() {
+  const response = await fetch(`${geocomponentsApiBaseUrl}/datasets`);
+  if (!response.ok) {
+    throw new Error(`Dataset index request failed with ${response.status}`);
+  }
+
+  const body = (await response.json()) as DatasetIndexResponse;
+  const availableCollectionIds = new Set<CollectionId>();
+
+  for (const dataset of body.datasets ?? []) {
+    for (const collectionId of dataset.collections ?? []) {
+      if (isCollectionId(collectionId)) {
+        availableCollectionIds.add(collectionId);
+      }
+    }
+  }
+
+  return availableCollectionIds;
 }

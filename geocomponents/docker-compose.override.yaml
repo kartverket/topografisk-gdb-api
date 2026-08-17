@@ -60,7 +60,7 @@ services:
   gcimport:
     build: ../gcimport
     environment:
-      GCIMPORT_API_URL: http://api:8000/datasets/fkb_bane/ogc_api
+      GEOCOMPONENTS_API_URL: http://api:8000
     ports:
       - "8001:8000"
     volumes:

@@ -21,8 +21,19 @@ function getRuntimeConfig() {
   return window.__GCMAPVIEW_CONFIG__;
 }
 
-export function resolveApiBaseUrl(runtimeValue: unknown, buildValue: string | undefined, variableName: string) {
-  const resolvedValue = normalizeApiBaseUrl(runtimeValue) ?? normalizeApiBaseUrl(buildValue);
+function devFallbackApiBaseUrl(value: string | undefined) {
+  if (!import.meta.env.DEV) return null;
+  return normalizeApiBaseUrl(value);
+}
+
+export function resolveApiBaseUrl(
+  runtimeValue: unknown,
+  buildValue: string | undefined,
+  variableName: string,
+  devFallbackValue?: string
+) {
+  const resolvedValue =
+    normalizeApiBaseUrl(runtimeValue) ?? normalizeApiBaseUrl(buildValue) ?? devFallbackApiBaseUrl(devFallbackValue);
   if (resolvedValue) return resolvedValue;
   throw new Error(`${variableName} must be configured`);
 }

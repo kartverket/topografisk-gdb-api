@@ -167,7 +167,7 @@ export function FeaturePropertiesCard({
   return (
     <Card
       size="sm"
-      className="absolute top-4 right-4 z-[3] max-h-[min(70vh,28rem)] w-[min(400px,calc(100%-2rem))] overflow-hidden bg-card/95 shadow-md max-sm:top-auto max-sm:right-4 max-sm:bottom-[88px] max-sm:left-4 max-sm:w-auto"
+      className="max-h-[min(70vh,28rem)] w-[min(400px,calc(100%-2rem))] overflow-hidden bg-card/95 shadow-md max-sm:w-auto"
       aria-label="Selected feature properties">
       <CardHeader className="pb-0">
         <CardTitle className="truncate pr-8 text-base">{feature.layerLabel}</CardTitle>

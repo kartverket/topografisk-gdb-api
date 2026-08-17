@@ -5,7 +5,7 @@ transforms their geometries to a dataset CRS, and upserts features through a
 geocomponents OGC API.
 
 Built-in profiles currently cover FKB-Bane and Bygning. Their feature types,
-required properties, identity fields, target CRS, and default API URLs are
+required properties, identity fields, target CRS, and dataset API paths are
 isolated under `src/gcimport/profiles/`. Add another `ImportProfile` to support
 another layer without changing the upload endpoint or upstream client.
 
@@ -16,12 +16,7 @@ another layer without changing the upload endpoint or upstream client.
 
 ## Configuration
 
-- `GCIMPORT_API_URL`: target dataset API URL (the FKB-Bane profile defaults to
-  `http://localhost:8000/datasets/fkb_bane/ogc_api`).
-- `GCIMPORT_API_URL_BYGNING`: optional explicit Bygning dataset API URL override
-  for `profile=bygning` uploads.
-- `GCIMPORT_PROFILE`: built-in profile name (`fkb_bane` or `bygning`; default:
-  `fkb_bane`).
+- `GEOCOMPONENTS_API_URL`: required geocomponents root URL.
 - `GCIMPORT_MAX_UPLOAD_BYTES`: maximum uploaded file size in bytes
   (default: `104857600`).
 - `GCIMPORT_TIMEOUT_SECONDS`: upstream request timeout in seconds
@@ -31,6 +26,7 @@ another layer without changing the upload endpoint or upstream client.
 
 ```sh
 uv sync
+export GEOCOMPONENTS_API_URL=http://localhost:8000
 uv run uvicorn gcimport.app:app --port 8001
 ```
 
@@ -42,14 +38,12 @@ Content-Type: multipart/form-data
 file: a UTF-8 FeatureCollection
 ```
 
-Optional query parameter:
+Required query parameter:
 
-- `profile=fkb_bane|bygning`: override the app default profile for this upload
+- `profile=fkb_bane|bygning`: select the built-in import profile for this upload
 
-When a request profile differs from the app default profile, gcimport retargets
-the configured upstream host to that profile's default dataset path. You can
-override that explicitly with `GCIMPORT_API_URL_<PROFILE>` variables, for
-example `GCIMPORT_API_URL_BYGNING`.
+gcimport always derives the dataset OGC API path from the selected profile.
+It keeps the configured geocomponents root and swaps only the dataset path.
 
 - `.json` / `.jsonfg`: JSON-FG (`featureType`, optional `place`, `coordRefSys`)
 - `.geojson`: classic GeoJSON with a `crs` member and `properties.objtype`;
@@ -58,8 +52,10 @@ example `GCIMPORT_API_URL_BYGNING`.
 Examples:
 
 ```sh
-curl -F 'file=@bane.jsonfg;type=application/json' http://localhost:8001/imports
-curl -F 'file=@bane.geojson;type=application/geo+json' http://localhost:8001/imports
+curl -F 'file=@bane.jsonfg;type=application/json' \
+  'http://localhost:8001/imports?profile=fkb_bane'
+curl -F 'file=@bane.geojson;type=application/geo+json' \
+  'http://localhost:8001/imports?profile=fkb_bane'
 ```
 
 For the FKB-Bane profile, `featureType` / `objtype` is matched case-insensitively to
@@ -83,7 +79,7 @@ curl -F 'file=@bygning.geojson;type=application/geo+json' \
 
 The complete document is validated and transformed before the first upstream
 request. Features are then posted individually as `application/geo+json` to
-`{GCIMPORT_API_URL}/collections/{collection}/items:upsert`. Because each write is
+`{GEOCOMPONENTS_API_URL}/datasets/.../ogc_api/collections/{collection}/items:upsert`. Because each write is
 an upsert keyed by the feature identity, retrying an individual call is
 idempotent.
 The response reports the stable UUID returned by the upstream dataset for every
@@ -113,6 +109,6 @@ uv run ruff format --check .
 ```sh
 docker build -t gcimport .
 docker run --rm -p 8000:8000 \
-  -e GCIMPORT_API_URL=http://geocomponents:8000/datasets/fkb_bane/ogc_api \
+  -e GEOCOMPONENTS_API_URL=http://geocomponents:8000 \
   gcimport
 ```

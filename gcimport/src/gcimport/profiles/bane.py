@@ -72,7 +72,7 @@ def _fkb_bane_upstream_properties(
 BANE_PROFILE = ImportProfile(
     name="fkb_bane",
     title="FKB-Bane",
-    default_api_url="http://localhost:8000/datasets/fkb_bane/ogc_api",
+    dataset_api_path="/datasets/fkb_bane/ogc_api",
     target_crs="EPSG:5973",
     geometry_type="MultiLineString",
     collections={

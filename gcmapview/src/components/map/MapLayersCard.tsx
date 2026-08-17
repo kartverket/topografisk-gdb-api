@@ -96,6 +96,8 @@ function LayerToggleRow({
 
 type MapLayersCardProps = {
   is3d: boolean;
+  availableLayerIds?: readonly MapLayerId[];
+  isLoadingAvailableLayers?: boolean;
   visibility: LayerVisibility;
   favoriteViews: FavoriteMapView[];
   activeFavoriteName?: string;
@@ -106,6 +108,8 @@ type MapLayersCardProps = {
 
 export function MapLayersCard({
   is3d,
+  availableLayerIds = MAP_LAYER_IDS,
+  isLoadingAvailableLayers = false,
   visibility,
   favoriteViews,
   activeFavoriteName,
@@ -120,7 +124,7 @@ export function MapLayersCard({
   return (
     <Card
       size="sm"
-      className="absolute right-4 bottom-[88px] z-[3] w-[240px] bg-card/95 shadow-md max-sm:top-20 max-sm:right-auto max-sm:bottom-auto max-sm:left-4"
+      className="w-[240px] bg-card/95 shadow-md"
       aria-label="Map layers">
       <CardHeader className="pb-0">
         <CardTitle>Layers</CardTitle>
@@ -145,7 +149,7 @@ export function MapLayersCard({
           </div>
         </div>
         <ul className="m-0 space-y-1 p-0 text-sm">
-          {MAP_LAYER_IDS.map(layerId => (
+          {availableLayerIds.map(layerId => (
             <LayerToggleRow
               key={layerId}
               layerId={layerId}
@@ -162,6 +166,12 @@ export function MapLayersCard({
             />
           ))}
         </ul>
+        {isLoadingAvailableLayers ? (
+          <p className="text-[11px] text-muted-foreground">Loading available layers...</p>
+        ) : null}
+        {!isLoadingAvailableLayers && availableLayerIds.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground">No datasets are currently exposing map layers.</p>
+        ) : null}
         <Separator />
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
