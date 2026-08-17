@@ -552,7 +552,7 @@ def test_dataset_rules_are_supplied_by_profile() -> None:
     profile = ImportProfile(
         name="roads",
         title="Roads",
-        default_api_url="https://example.test/datasets/roads/ogc_api",
+        dataset_api_path="/datasets/roads/ogc_api",
         target_crs="EPSG:4326",
         geometry_type="LineString",
         collections={"road": "roads"},

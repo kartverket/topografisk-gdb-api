@@ -16,7 +16,7 @@ class ImportProfile:
 
     name: str
     title: str
-    default_api_url: str
+    dataset_api_path: str
     target_crs: str
     geometry_type: str
     collections: Mapping[str, str | tuple[str, ...]]

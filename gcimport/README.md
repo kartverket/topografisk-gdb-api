@@ -5,7 +5,7 @@ transforms their geometries to a dataset CRS, and upserts features through a
 geocomponents OGC API.
 
 Built-in profiles currently cover FKB-Bane and Bygning. Their feature types,
-required properties, identity fields, target CRS, and default API URLs are
+required properties, identity fields, target CRS, and dataset API paths are
 isolated under `src/gcimport/profiles/`. Add another `ImportProfile` to support
 another layer without changing the upload endpoint or upstream client.
 
@@ -16,7 +16,7 @@ another layer without changing the upload endpoint or upstream client.
 
 ## Configuration
 
-- `GEOCOMPONENTS_API_URL`: geocomponents root URL (default: `http://localhost:8000`).
+- `GEOCOMPONENTS_API_URL`: required geocomponents root URL.
 - `GCIMPORT_MAX_UPLOAD_BYTES`: maximum uploaded file size in bytes
   (default: `104857600`).
 - `GCIMPORT_TIMEOUT_SECONDS`: upstream request timeout in seconds
@@ -26,6 +26,7 @@ another layer without changing the upload endpoint or upstream client.
 
 ```sh
 uv sync
+export GEOCOMPONENTS_API_URL=http://localhost:8000
 uv run uvicorn gcimport.app:app --port 8001
 ```
 

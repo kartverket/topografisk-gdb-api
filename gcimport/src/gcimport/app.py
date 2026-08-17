@@ -6,7 +6,6 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import PurePosixPath
 from typing import Annotated, Any
-from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
 import orjson
@@ -36,7 +35,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app_instance: FastAPI) -> AsyncIterator[None]:
-        runtime_settings = settings or Settings.from_env("http://localhost:8000")
+        runtime_settings = settings or Settings.from_env()
         app_instance.state.settings = runtime_settings
         if client is not None:
             app_instance.state.http_client = client
@@ -101,7 +100,7 @@ def create_app(
             return await import_features(
                 features,
                 client=application.state.http_client,
-                api_url=_api_url_for_profile(
+                api_url=_dataset_api_url(
                     runtime_settings.geocomponents_api_url,
                     request_profile,
                 ),
@@ -150,28 +149,8 @@ def _request_profile(
         ) from err
 
 
-def _api_url_for_profile(
-    configured_geocomponents_api_url: str,
-    request_profile: ImportProfile,
-) -> str:
-    return _dataset_api_url(
-        configured_geocomponents_api_url.rstrip("/"),
-        request_profile,
-    )
-
-
 def _dataset_api_url(root_api_url: str, profile: ImportProfile) -> str:
-    configured = urlsplit(root_api_url)
-    target = urlsplit(profile.default_api_url)
-    return urlunsplit(
-        (
-            configured.scheme,
-            configured.netloc,
-            urljoin(configured.path.rstrip("/") + "/", target.path.lstrip("/")),
-            target.query,
-            target.fragment,
-        )
-    ).rstrip("/")
+    return f"{root_api_url.rstrip('/')}/{profile.dataset_api_path.strip('/')}"
 
 
 async def _read_bounded(file: UploadFile, max_bytes: int) -> bytes:

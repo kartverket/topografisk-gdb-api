@@ -17,14 +17,11 @@ class Settings:
     request_timeout_seconds: float = 30.0
 
     @classmethod
-    def from_env(cls, default_api_url: str) -> Settings:
+    def from_env(cls) -> Settings:
         """Load and validate settings from the process environment."""
-        geocomponents_api_url = os.environ.get(
-            "GEOCOMPONENTS_API_URL",
-            default_api_url,
-        ).strip()
+        geocomponents_api_url = os.environ.get("GEOCOMPONENTS_API_URL", "").strip()
         if not geocomponents_api_url:
-            msg = "GEOCOMPONENTS_API_URL must not be empty"
+            msg = "GEOCOMPONENTS_API_URL must be set"
             raise ValueError(msg)
 
         max_upload_bytes = _positive_int(

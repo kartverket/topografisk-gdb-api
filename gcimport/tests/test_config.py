@@ -13,7 +13,7 @@ def test_from_env_reads_geocomponents_root_url(
         "http://topo-gdb-components.topo-gdb-components:8000/",
     )
 
-    settings = Settings.from_env("http://localhost:8000")
+    settings = Settings.from_env()
 
     assert (
         settings.geocomponents_api_url
@@ -26,11 +26,10 @@ def test_from_env_requires_non_empty_geocomponents_root_url(
 ) -> None:
     monkeypatch.setenv("GEOCOMPONENTS_API_URL", "   ")
 
-    with pytest.raises(ValueError, match="GEOCOMPONENTS_API_URL must not be empty"):
-        Settings.from_env("http://localhost:8000")
+    with pytest.raises(ValueError, match="GEOCOMPONENTS_API_URL must be set"):
+        Settings.from_env()
 
 
-def test_from_env_defaults_to_root_url() -> None:
-    settings = Settings.from_env("http://localhost:8000")
-
-    assert settings.geocomponents_api_url == "http://localhost:8000"
+def test_from_env_requires_geocomponents_root_url() -> None:
+    with pytest.raises(ValueError, match="GEOCOMPONENTS_API_URL must be set"):
+        Settings.from_env()
