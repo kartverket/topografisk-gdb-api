@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import robotoLatinVariableUrl from '@fontsource-variable/roboto/files/roboto-latin-wght-normal.woff2';
-import { AlertCircle, Eraser, Plus } from 'lucide-react';
+import { AlertCircle, Cuboid, Eraser, Plus } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -99,8 +99,11 @@ function isTerrainEnabled(is3d: boolean, adjustElevatedHeights: boolean) {
 }
 
 export function MapView() {
+  const mapSectionRef = useRef<HTMLElement>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map>(null);
+  const mapLayersPanelRef = useRef<HTMLDivElement>(null);
+  const featureInspectorPanelRef = useRef<HTMLDivElement>(null);
   const pendingReloadTimeoutRef = useRef<number | undefined>(undefined);
   const pendingElevatedRefreshTimeoutRef = useRef<number | undefined>(undefined);
   const reloadVisibleDataRef = useRef<(() => Promise<void>) | undefined>(undefined);
@@ -133,10 +136,65 @@ export function MapView() {
   const [isVectorZoomActive, setIsVectorZoomActive] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
+  const [placeInspectorLeftOfLayers, setPlaceInspectorLeftOfLayers] = useState(false);
   const { selectedFeature, setHoveredPositionIndex, setSelectedFeature } = useSelectedFeature({ mapRef, is3d });
   const closeSelectedFeatureInspectorRef = useRef<() => void>(() => {});
   const setSelectedFeatureRef = useRef(setSelectedFeature);
   setSelectedFeatureRef.current = setSelectedFeature;
+
+  useEffect(() => {
+    if (!selectedFeature) {
+      setPlaceInspectorLeftOfLayers(false);
+      return;
+    }
+
+    const mapSection = mapSectionRef.current;
+    const mapLayersPanel = mapLayersPanelRef.current;
+    const featureInspectorPanel = featureInspectorPanelRef.current;
+
+    if (!mapSection || !mapLayersPanel || !featureInspectorPanel) {
+      return;
+    }
+
+    let frame = 0;
+
+    const updateInspectorPlacement = () => {
+      frame = 0;
+      const sectionRect = mapSection.getBoundingClientRect();
+      const layersRect = mapLayersPanel.getBoundingClientRect();
+      const inspectorRect = featureInspectorPanel.getBoundingClientRect();
+      const overlapsVertically = inspectorRect.top < layersRect.bottom && layersRect.top < inspectorRect.bottom;
+      const availableWidthLeftOfLayers = layersRect.left - sectionRect.left - 16;
+      const canMoveLeft = window.innerWidth >= 640 && inspectorRect.width <= availableWidthLeftOfLayers;
+
+      setPlaceInspectorLeftOfLayers(overlapsVertically && canMoveLeft);
+    };
+
+    const scheduleInspectorPlacementUpdate = () => {
+      if (frame !== 0) {
+        return;
+      }
+
+      frame = window.requestAnimationFrame(updateInspectorPlacement);
+    };
+
+    scheduleInspectorPlacementUpdate();
+
+    const resizeObserver = new ResizeObserver(scheduleInspectorPlacementUpdate);
+    resizeObserver.observe(mapSection);
+    resizeObserver.observe(mapLayersPanel);
+    resizeObserver.observe(featureInspectorPanel);
+    window.addEventListener('resize', scheduleInspectorPlacementUpdate);
+
+    return () => {
+      if (frame !== 0) {
+        window.cancelAnimationFrame(frame);
+      }
+
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', scheduleInspectorPlacementUpdate);
+    };
+  }, [selectedFeature]);
 
   function cancelPendingMapWork() {
     if (pendingReloadTimeoutRef.current !== undefined) {
@@ -706,6 +764,7 @@ export function MapView() {
 
   return (
     <section
+      ref={mapSectionRef}
       className="relative min-h-0 w-full overflow-hidden rounded-[min(var(--radius-4xl),24px)] border border-border bg-card shadow-sm"
       aria-label="Cadastre, FKB-Bane, and Bygning map">
       <div
@@ -729,25 +788,56 @@ export function MapView() {
           <Eraser data-icon="inline-start" />
           {isClearing ? 'Clearing data...' : 'Clear parcels'}
         </Button>
+        <Button
+          size="sm"
+          variant={is3d ? 'default' : 'outline'}
+          aria-pressed={is3d}
+          title={is3d ? 'Switch to 2D map' : 'Switch to 3D map with height'}
+          onClick={() => setIs3d(value => !value)}>
+          <Cuboid data-icon="inline-start" />
+          {is3d ? '3D on' : '3D off'}
+        </Button>
+        {is3d ? (
+          <label className="flex items-center gap-2 rounded-md border border-border bg-card/80 px-3 py-1.5 text-sm shadow-sm">
+            <input
+              type="checkbox"
+              className="size-4 accent-foreground"
+              checked={!adjustElevatedHeights}
+              onChange={event => setAdjustElevatedHeights(!event.target.checked)}
+            />
+            <span>Terrain</span>
+          </label>
+        ) : null}
       </div>
-      <MapLayersCard
-        is3d={is3d}
-        visibility={layerVisibility}
-        favoriteViews={favoriteViews}
-        activeFavoriteName={activeFavoriteView?.name}
-        onSaveFavoriteView={saveCurrentFavoriteView}
-        onClearFavoriteView={clearStoredFavoriteView}
-        onSelectFavoriteView={selectStoredFavoriteView}
-      />
-      {selectedFeature ? (
-        <FeaturePropertiesCard
-          feature={selectedFeature}
-          activeFeatureFilter={activeFeatureFilter}
-          onApplyFeatureFilter={applyFeatureFilter}
-          onClearFeatureFilter={clearFeatureFilter}
-          onHoverPositionIndex={setHoveredPositionIndex}
-          onClose={closeSelectedFeatureInspector}
+      <div
+        ref={mapLayersPanelRef}
+        className="absolute right-4 bottom-[88px] z-[3] max-sm:top-20 max-sm:right-auto max-sm:bottom-auto max-sm:left-4">
+        <MapLayersCard
+          is3d={is3d}
+          visibility={layerVisibility}
+          favoriteViews={favoriteViews}
+          activeFavoriteName={activeFavoriteView?.name}
+          onSaveFavoriteView={saveCurrentFavoriteView}
+          onClearFavoriteView={clearStoredFavoriteView}
+          onSelectFavoriteView={selectStoredFavoriteView}
         />
+      </div>
+      {selectedFeature ? (
+        <div
+          ref={featureInspectorPanelRef}
+          className={cn(
+            'absolute top-4 z-[3] max-sm:right-4 max-sm:bottom-[88px] max-sm:left-4 max-sm:top-auto',
+            placeInspectorLeftOfLayers ? 'right-[272px]' : 'right-4'
+          )}>
+          <FeaturePropertiesCard
+            feature={selectedFeature}
+            activeFeatureFilter={activeFeatureFilter}
+            onApplyFeatureFilter={applyFeatureFilter}
+            onClearFeatureFilter={clearFeatureFilter}
+            onHoverPositionIndex={setHoveredPositionIndex}
+            onClose={closeSelectedFeatureInspector}
+          />
+        </div>
       ) : null}
       <div className="absolute bottom-4 left-4 z-[3] max-w-[min(720px,calc(100%-2rem))]">
         {error ? (

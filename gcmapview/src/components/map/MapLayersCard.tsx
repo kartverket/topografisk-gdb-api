@@ -120,7 +120,7 @@ export function MapLayersCard({
   return (
     <Card
       size="sm"
-      className="absolute right-4 bottom-[88px] z-[3] w-[240px] bg-card/95 shadow-md max-sm:top-20 max-sm:right-auto max-sm:bottom-auto max-sm:left-4"
+      className="w-[240px] bg-card/95 shadow-md"
       aria-label="Map layers">
       <CardHeader className="pb-0">
         <CardTitle>Layers</CardTitle>
