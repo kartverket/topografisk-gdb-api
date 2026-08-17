@@ -152,6 +152,8 @@ POST /imports?profile=fkb_bane|bygning
 Content-Type: multipart/form-data
 ```
 
+The `profile` query parameter is required on every upload request
+
 Behavior now:
 
 - `.geojson` uploads are converted to JSON-FG before validation.

@@ -12,16 +12,19 @@ DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 class Settings:
     """Runtime settings for the importer."""
 
-    api_url: str
+    geocomponents_api_url: str
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
     request_timeout_seconds: float = 30.0
 
     @classmethod
     def from_env(cls, default_api_url: str) -> Settings:
         """Load and validate settings from the process environment."""
-        api_url = os.environ.get("GCIMPORT_API_URL", default_api_url).strip()
-        if not api_url:
-            msg = "GCIMPORT_API_URL must not be empty"
+        geocomponents_api_url = os.environ.get(
+            "GEOCOMPONENTS_API_URL",
+            default_api_url,
+        ).strip()
+        if not geocomponents_api_url:
+            msg = "GEOCOMPONENTS_API_URL must not be empty"
             raise ValueError(msg)
 
         max_upload_bytes = _positive_int(
@@ -30,7 +33,7 @@ class Settings:
         )
         timeout = _positive_float("GCIMPORT_TIMEOUT_SECONDS", 30.0)
         return cls(
-            api_url=api_url.rstrip("/"),
+            geocomponents_api_url=geocomponents_api_url.rstrip("/"),
             max_upload_bytes=max_upload_bytes,
             request_timeout_seconds=timeout,
         )

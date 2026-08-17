@@ -93,7 +93,7 @@ env:
 The local compose file sets that up for `http://localhost:5173` and
 `http://localhost:8080`.
 
-This is separate from the `gcimport` service's own `GCIMPORT_API_URL`
-configuration. Inside the `gcimport` container, `GCIMPORT_API_URL` should still
-point at the internal `geocomponents` Service URL in Kubernetes. Only
+This is separate from the `gcimport` service's own `GEOCOMPONENTS_API_URL`
+configuration. Inside the `gcimport` container, `GEOCOMPONENTS_API_URL` should
+still point at the internal `geocomponents` Service URL in Kubernetes. Only
 `gcmapview` should use public browser-facing URLs.

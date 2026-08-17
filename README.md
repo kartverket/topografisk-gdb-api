@@ -92,11 +92,15 @@ With `make docker-up`, the local ports are:
 - `http://localhost:8003/docs` for gcjobs Swagger
 - `http://localhost:8080` for gcmapview
 
-The default import profile is `bane`; override it with `?profile=bygning` for
-Bygning uploads. Example:
+gcimport requires an explicit import profile on every upload request. Use
+`?profile=fkb_bane` for Bane uploads and `?profile=bygning` for Bygning
+uploads. Examples:
 
 ```bash
-curl -F 'file=@bane.json;type=application/json' http://localhost:8001/imports
+curl -F 'file=@bane.json;type=application/json' \
+  'http://localhost:8001/imports?profile=fkb_bane'
+curl -F 'file=@bygning.geojson;type=application/geo+json' \
+  'http://localhost:8001/imports?profile=bygning'
 ```
 
 # Technical details

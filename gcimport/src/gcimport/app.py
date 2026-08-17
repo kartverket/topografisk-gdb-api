@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import PurePosixPath
 from typing import Annotated, Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
 import orjson
@@ -22,27 +21,22 @@ from gcimport.importer import (
     import_features,
     prepare_document,
 )
-from gcimport.profiles import BANE_PROFILE, BUILTIN_PROFILES, ImportProfile, get_profile
+from gcimport.profiles import BUILTIN_PROFILES, ImportProfile, get_profile
 
 READ_CHUNK_BYTES = 64 * 1024
 CLASSIC_GEOJSON_SUFFIX = ".geojson"
-PROFILE_ENV_NAME = "GCIMPORT_PROFILE"
 
 
 def create_app(
     *,
     settings: Settings | None = None,
     client: httpx.AsyncClient | None = None,
-    profile: ImportProfile | None = None,
 ) -> FastAPI:
     """Create an app with optionally injected configuration and HTTP client."""
-    resolved_profile = profile or _profile_from_env()
 
     @asynccontextmanager
     async def lifespan(app_instance: FastAPI) -> AsyncIterator[None]:
-        runtime_settings = settings or Settings.from_env(
-            resolved_profile.default_api_url
-        )
+        runtime_settings = settings or Settings.from_env("http://localhost:8000")
         app_instance.state.settings = runtime_settings
         if client is not None:
             app_instance.state.http_client = client
@@ -58,8 +52,8 @@ def create_app(
     application = FastAPI(
         title="gcimport",
         description=(
-            f"JSON-FG / classic GeoJSON (.geojson) importer using the "
-            f"{resolved_profile.title} profile"
+            "JSON-FG / classic GeoJSON (.geojson) importer using an explicitly "
+            "selected built-in profile"
         ),
         lifespan=lifespan,
     )
@@ -73,10 +67,10 @@ def create_app(
     @application.post("/imports")
     async def create_import(
         file: Annotated[UploadFile, File()],
-        profile_name: Annotated[str | None, Query(alias="profile")] = None,
+        profile_name: Annotated[str, Query(alias="profile")],
     ) -> dict:
         runtime_settings: Settings = application.state.settings
-        request_profile = _request_profile(profile_name, resolved_profile)
+        request_profile = _request_profile(profile_name)
         body = await _read_bounded(file, runtime_settings.max_upload_bytes)
         try:
             document = orjson.loads(body)
@@ -108,8 +102,7 @@ def create_app(
                 features,
                 client=application.state.http_client,
                 api_url=_api_url_for_profile(
-                    runtime_settings.api_url,
-                    resolved_profile,
+                    runtime_settings.geocomponents_api_url,
                     request_profile,
                 ),
             )
@@ -144,21 +137,9 @@ def _normalize_upload(
     return convert_document(document, profile=profile)
 
 
-def _profile_from_env() -> ImportProfile:
-    profile_name = os.environ.get(PROFILE_ENV_NAME, BANE_PROFILE.name)
-    try:
-        return get_profile(profile_name)
-    except ValueError as err:
-        supported = ", ".join(sorted(BUILTIN_PROFILES))
-        raise ValueError(f"{PROFILE_ENV_NAME} must be one of: {supported}") from err
-
-
 def _request_profile(
-    profile_name: str | None,
-    default_profile: ImportProfile,
+    profile_name: str,
 ) -> ImportProfile:
-    if profile_name is None:
-        return default_profile
     try:
         return get_profile(profile_name)
     except ValueError as err:
@@ -170,25 +151,23 @@ def _request_profile(
 
 
 def _api_url_for_profile(
-    configured_api_url: str,
-    default_profile: ImportProfile,
+    configured_geocomponents_api_url: str,
     request_profile: ImportProfile,
 ) -> str:
-    if request_profile.name == default_profile.name:
-        return configured_api_url.rstrip("/")
+    return _dataset_api_url(
+        configured_geocomponents_api_url.rstrip("/"),
+        request_profile,
+    )
 
-    override_name = f"GCIMPORT_API_URL_{request_profile.name.upper()}"
-    override_value = os.environ.get(override_name)
-    if override_value is not None and override_value.strip():
-        return override_value.strip().rstrip("/")
 
-    configured = urlsplit(configured_api_url)
-    target = urlsplit(request_profile.default_api_url)
+def _dataset_api_url(root_api_url: str, profile: ImportProfile) -> str:
+    configured = urlsplit(root_api_url)
+    target = urlsplit(profile.default_api_url)
     return urlunsplit(
         (
             configured.scheme,
             configured.netloc,
-            target.path,
+            urljoin(configured.path.rstrip("/") + "/", target.path.lstrip("/")),
             target.query,
             target.fragment,
         )

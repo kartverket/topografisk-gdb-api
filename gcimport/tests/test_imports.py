@@ -14,9 +14,6 @@ from gcimport.profiles import ImportProfile
 from gcimport.profiles.bygning import (
     _AREA_SOURCE_OBJTYPES as _BUILDING_AREA_SOURCE_OBJTYPES,
 )
-from gcimport.profiles.bygning import (
-    BYGNING_PROFILE,
-)
 
 PLATFORM_UUID = "11111111-1111-4111-8111-111111111111"
 TRACK_UUID = "22222222-2222-4222-8222-222222222222"
@@ -377,9 +374,9 @@ def _building_position_geojson_document(
     }
 
 
-def _post(client: TestClient, document: Any) -> httpx.Response:
+def _post(client: TestClient, document: Any, *, profile: str) -> httpx.Response:
     return client.post(
-        "/imports",
+        f"/imports?profile={profile}",
         files={"file": ("bane.json", json.dumps(document), "application/json")},
     )
 
@@ -388,10 +385,11 @@ def _post_geojson(
     client: TestClient,
     document: Any,
     *,
+    profile: str,
     filename: str = "source.geojson",
 ) -> httpx.Response:
     return client.post(
-        "/imports",
+        f"/imports?profile={profile}",
         files={"file": (filename, json.dumps(document), "application/geo+json")},
     )
 
@@ -404,7 +402,7 @@ def _test_client(
     upstream_client = httpx.AsyncClient(transport=handler)
     app = create_app(
         settings=Settings(
-            api_url="https://bane.example/api",
+            geocomponents_api_url="https://bane.example",
             max_upload_bytes=max_upload_bytes,
         ),
         client=upstream_client,
@@ -458,7 +456,7 @@ def test_imports_place_and_fallback_geometry() -> None:
     }
 
     with _test_client(httpx.MockTransport(handler)) as client:
-        response = _post(client, _document([first, second]))
+        response = _post(client, _document([first, second]), profile="fkb_bane")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -469,8 +467,8 @@ def test_imports_place_and_fallback_geometry() -> None:
         ],
     }
     assert [request.url.path for request in requests] == [
-        "/api/collections/jernbaneplattformkant/items:upsert",
-        "/api/collections/spormidt/items:upsert",
+        "/datasets/fkb_bane/ogc_api/collections/jernbaneplattformkant/items:upsert",
+        "/datasets/fkb_bane/ogc_api/collections/spormidt/items:upsert",
     ]
     for request in requests:
         assert request.headers["content-type"] == "application/geo+json"
@@ -489,8 +487,8 @@ def test_retry_returns_the_same_upstream_uuid() -> None:
         return httpx.Response(200, json={"id": PLATFORM_UUID})
 
     with _test_client(httpx.MockTransport(handler)) as client:
-        first = _post(client, _document([_feature()]))
-        retry = _post(client, _document([_feature()]))
+        first = _post(client, _document([_feature()]), profile="fkb_bane")
+        retry = _post(client, _document([_feature()]), profile="fkb_bane")
 
     assert first.status_code == retry.status_code == 200
     assert first.json() == retry.json()
@@ -512,7 +510,7 @@ def test_imports_bane_linestring_place_for_compatibility() -> None:
     }
 
     with _test_client(httpx.MockTransport(handler)) as client:
-        response = _post(client, _document([feature]))
+        response = _post(client, _document([feature]), profile="fkb_bane")
 
     assert response.status_code == 200
     payload = json.loads(requests[0].content)
@@ -535,7 +533,7 @@ def test_imports_fkb_bane_nested_upstream_properties() -> None:
     )
 
     with _test_client(httpx.MockTransport(handler)) as client:
-        response = _post(client, _document([feature]))
+        response = _post(client, _document([feature]), profile="fkb_bane")
 
     assert response.status_code == 200
     payload = json.loads(requests[0].content)
@@ -591,9 +589,8 @@ def test_imports_built_in_bygning_profile_with_multilinestring() -> None:
 
     upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     app = create_app(
-        settings=Settings(api_url="https://bygning.example/api"),
+        settings=Settings(geocomponents_api_url="https://bygning.example"),
         client=upstream_client,
-        profile=BYGNING_PROFILE,
     )
 
     with TestClient(app) as client:
@@ -604,6 +601,7 @@ def test_imports_built_in_bygning_profile_with_multilinestring() -> None:
                 "coordRefSys": "EPSG:5972",
                 "features": [_building_feature()],
             },
+            profile="bygning",
         )
 
     assert response.status_code == 200
@@ -612,7 +610,7 @@ def test_imports_built_in_bygning_profile_with_multilinestring() -> None:
         "features": [{"collection": "bygning", "id": PLATFORM_UUID}],
     }
     assert [request.url.path for request in requests] == [
-        "/api/collections/bygning/items:upsert"
+        "/datasets/bygning/ogc_api/collections/bygning/items:upsert"
     ]
     payload = json.loads(requests[0].content)
     assert payload["geometry"]["type"] == "MultiLineString"
@@ -627,9 +625,8 @@ def test_imports_built_in_bygning_omrade_profile_with_multipolygon() -> None:
 
     upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     app = create_app(
-        settings=Settings(api_url="https://bygning.example/api"),
+        settings=Settings(geocomponents_api_url="https://bygning.example"),
         client=upstream_client,
-        profile=BYGNING_PROFILE,
     )
 
     with TestClient(app) as client:
@@ -640,6 +637,7 @@ def test_imports_built_in_bygning_omrade_profile_with_multipolygon() -> None:
                 "coordRefSys": "EPSG:5972",
                 "features": [_building_area_feature()],
             },
+            profile="bygning",
         )
 
     assert response.status_code == 200
@@ -648,7 +646,7 @@ def test_imports_built_in_bygning_omrade_profile_with_multipolygon() -> None:
         "features": [{"collection": "bygning_omrade", "id": PLATFORM_UUID}],
     }
     assert [request.url.path for request in requests] == [
-        "/api/collections/bygning_omrade/items:upsert"
+        "/datasets/bygning/ogc_api/collections/bygning_omrade/items:upsert"
     ]
     payload = json.loads(requests[0].content)
     assert payload["geometry"]["type"] == "MultiPolygon"
@@ -663,9 +661,8 @@ def test_imports_built_in_bygning_senterlinje_profile_with_multilinestring() -> 
 
     upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     app = create_app(
-        settings=Settings(api_url="https://bygning.example/api"),
+        settings=Settings(geocomponents_api_url="https://bygning.example"),
         client=upstream_client,
-        profile=BYGNING_PROFILE,
     )
 
     with TestClient(app) as client:
@@ -676,6 +673,7 @@ def test_imports_built_in_bygning_senterlinje_profile_with_multilinestring() -> 
                 "coordRefSys": "EPSG:5972",
                 "features": [_building_centerline_feature()],
             },
+            profile="bygning",
         )
 
     assert response.status_code == 200
@@ -684,7 +682,7 @@ def test_imports_built_in_bygning_senterlinje_profile_with_multilinestring() -> 
         "features": [{"collection": "bygning_senterlinje", "id": PLATFORM_UUID}],
     }
     assert [request.url.path for request in requests] == [
-        "/api/collections/bygning_senterlinje/items:upsert"
+        "/datasets/bygning/ogc_api/collections/bygning_senterlinje/items:upsert"
     ]
     payload = json.loads(requests[0].content)
     assert payload["geometry"]["type"] == "MultiLineString"
@@ -699,9 +697,8 @@ def test_imports_built_in_bygning_position_profile_with_point() -> None:
 
     upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     app = create_app(
-        settings=Settings(api_url="https://bygning.example/api"),
+        settings=Settings(geocomponents_api_url="https://bygning.example"),
         client=upstream_client,
-        profile=BYGNING_PROFILE,
     )
 
     with TestClient(app) as client:
@@ -712,6 +709,7 @@ def test_imports_built_in_bygning_position_profile_with_point() -> None:
                 "coordRefSys": "EPSG:5972",
                 "features": [_building_position_feature()],
             },
+            profile="bygning",
         )
 
     assert response.status_code == 200
@@ -720,90 +718,40 @@ def test_imports_built_in_bygning_position_profile_with_point() -> None:
         "features": [{"collection": "bygning_posisjon", "id": PLATFORM_UUID}],
     }
     assert [request.url.path for request in requests] == [
-        "/api/collections/bygning_posisjon/items:upsert"
+        "/datasets/bygning/ogc_api/collections/bygning_posisjon/items:upsert"
     ]
     payload = json.loads(requests[0].content)
     assert payload["geometry"]["type"] == "Point"
 
 
-def test_create_app_can_read_profile_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    requests: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return httpx.Response(200, json={"id": PLATFORM_UUID})
-
-    monkeypatch.setenv("GCIMPORT_PROFILE", "bygning")
-
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    app = create_app(
-        settings=Settings(api_url="https://bygning.example/api"),
-        client=upstream_client,
-    )
-
-    with TestClient(app) as client:
-        response = _post(
-            client,
-            {
-                "type": "FeatureCollection",
-                "coordRefSys": "EPSG:5972",
-                "features": [_building_feature()],
-            },
-        )
-
-    assert response.status_code == 200
-    assert [request.url.path for request in requests] == [
-        "/api/collections/bygning/items:upsert"
-    ]
-
-
-def test_request_profile_can_override_default_profile() -> None:
-    requests: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return httpx.Response(200, json={"id": PLATFORM_UUID})
-
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    app = create_app(
-        settings=Settings(api_url="https://shared.example/datasets/bane/ogc_api"),
-        client=upstream_client,
-    )
-
-    with TestClient(app) as client:
+def test_rejects_missing_profile_query_parameter() -> None:
+    with _test_client(
+        httpx.MockTransport(lambda _request: httpx.Response(204))
+    ) as client:
         response = client.post(
-            "/imports?profile=bygning",
+            "/imports",
             files={
                 "file": (
-                    "source.geojson",
-                    json.dumps(_building_geojson_document()),
-                    "application/geo+json",
+                    "bane.json",
+                    json.dumps(_document([_feature()])),
+                    "application/json",
                 )
             },
         )
 
-    assert response.status_code == 200
-    assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/collections/bygning/items:upsert"
-    ]
+    assert response.status_code == 422
 
 
-def test_request_profile_prefers_explicit_profile_api_override(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_request_profile_selects_bygning_target_dataset() -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         return httpx.Response(200, json={"id": PLATFORM_UUID})
 
-    monkeypatch.setenv(
-        "GCIMPORT_API_URL_BYGNING",
-        "https://override.example/datasets/bygning/ogc_api",
-    )
     upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     app = create_app(
-        settings=Settings(api_url="https://shared.example/datasets/bane/ogc_api"),
+        settings=Settings(geocomponents_api_url="https://shared.example"),
         client=upstream_client,
     )
 
@@ -837,7 +785,7 @@ def test_request_profile_can_import_bygning_area_geojson_through_bygning_profile
 
     upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     app = create_app(
-        settings=Settings(api_url="https://shared.example/datasets/bane/ogc_api"),
+        settings=Settings(geocomponents_api_url="https://shared.example"),
         client=upstream_client,
     )
 
@@ -874,7 +822,7 @@ def test_request_profile_can_import_bygning_position_geojson_through_bygning_pro
 
     upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     app = create_app(
-        settings=Settings(api_url="https://shared.example/datasets/bane/ogc_api"),
+        settings=Settings(geocomponents_api_url="https://shared.example"),
         client=upstream_client,
     )
 
@@ -907,7 +855,7 @@ def test_request_profile_can_import_bygning_senterlinje_geojson_through_bygning_
 
     upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     app = create_app(
-        settings=Settings(api_url="https://shared.example/datasets/bane/ogc_api"),
+        settings=Settings(geocomponents_api_url="https://shared.example"),
         client=upstream_client,
     )
 
@@ -938,7 +886,7 @@ def test_request_profile_can_import_mixed_bygning_geojson() -> None:
 
     upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     app = create_app(
-        settings=Settings(api_url="https://shared.example/datasets/bane/ogc_api"),
+        settings=Settings(geocomponents_api_url="https://shared.example"),
         client=upstream_client,
     )
 
@@ -1015,17 +963,20 @@ def test_imports_bygning_geojson_without_falling_back_to_bane() -> None:
 
     upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     app = create_app(
-        settings=Settings(api_url="https://bygning.example/api"),
+        settings=Settings(geocomponents_api_url="https://bygning.example"),
         client=upstream_client,
-        profile=BYGNING_PROFILE,
     )
 
     with TestClient(app) as client:
-        response = _post_geojson(client, _building_geojson_document())
+        response = _post_geojson(
+            client,
+            _building_geojson_document(),
+            profile="bygning",
+        )
 
     assert response.status_code == 200
     assert [request.url.path for request in requests] == [
-        "/api/collections/bygning/items:upsert"
+        "/datasets/bygning/ogc_api/collections/bygning/items:upsert"
     ]
     payload = json.loads(requests[0].content)
     assert payload["geometry"]["type"] == "MultiLineString"
@@ -1040,17 +991,20 @@ def test_imports_bygning_omrade_geojson_without_falling_back_to_bane() -> None:
 
     upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     app = create_app(
-        settings=Settings(api_url="https://bygning.example/api"),
+        settings=Settings(geocomponents_api_url="https://bygning.example"),
         client=upstream_client,
-        profile=BYGNING_PROFILE,
     )
 
     with TestClient(app) as client:
-        response = _post_geojson(client, _building_area_geojson_document())
+        response = _post_geojson(
+            client,
+            _building_area_geojson_document(),
+            profile="bygning",
+        )
 
     assert response.status_code == 200
     assert [request.url.path for request in requests] == [
-        "/api/collections/bygning_omrade/items:upsert"
+        "/datasets/bygning/ogc_api/collections/bygning_omrade/items:upsert"
     ]
     payload = json.loads(requests[0].content)
     assert payload["geometry"]["type"] == "MultiPolygon"
@@ -1073,9 +1027,8 @@ def test_merges_duplicate_bygning_segments_with_same_business_key() -> None:
 
     upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     app = create_app(
-        settings=Settings(api_url="https://bygning.example/api"),
+        settings=Settings(geocomponents_api_url="https://bygning.example"),
         client=upstream_client,
-        profile=BYGNING_PROFILE,
     )
 
     with TestClient(app) as client:
@@ -1087,6 +1040,7 @@ def test_merges_duplicate_bygning_segments_with_same_business_key() -> None:
                     _building_geojson_duplicate_segment_2(),
                 ]
             ),
+            profile="bygning",
         )
 
     assert response.status_code == 200
@@ -1136,7 +1090,7 @@ def test_validation_happens_before_upstream_calls(
     mutate(invalid)
 
     with _test_client(httpx.MockTransport(handler)) as client:
-        response = _post(client, _document([valid, invalid]))
+        response = _post(client, _document([valid, invalid]), profile="fkb_bane")
 
     assert response.status_code == 422
     assert expected_error in " ".join(response.json()["detail"]["errors"])
@@ -1147,7 +1101,11 @@ def test_spormidt_requires_extra_fields() -> None:
     with _test_client(
         httpx.MockTransport(lambda _request: httpx.Response(204))
     ) as client:
-        response = _post(client, _document([_feature(feature_type="spormidt")]))
+        response = _post(
+            client,
+            _document([_feature(feature_type="spormidt")]),
+            profile="fkb_bane",
+        )
 
     assert response.status_code == 422
     errors = " ".join(response.json()["detail"]["errors"])
@@ -1164,7 +1122,11 @@ def test_rejects_duplicate_identity_before_upstream_calls() -> None:
         return httpx.Response(204)
 
     with _test_client(httpx.MockTransport(handler)) as client:
-        response = _post(client, _document([_feature(), _feature()]))
+        response = _post(
+            client,
+            _document([_feature(), _feature()]),
+            profile="fkb_bane",
+        )
 
     assert response.status_code == 422
     assert "duplicate" in " ".join(response.json()["detail"]["errors"])
@@ -1178,7 +1140,7 @@ def test_place_requires_inherited_crs() -> None:
     with _test_client(
         httpx.MockTransport(lambda _request: httpx.Response(204))
     ) as client:
-        response = _post(client, document)
+        response = _post(client, document, profile="fkb_bane")
 
     assert response.status_code == 422
     assert "place requires coordRefSys" in " ".join(response.json()["detail"]["errors"])
@@ -1189,7 +1151,7 @@ def test_rejects_invalid_json() -> None:
         httpx.MockTransport(lambda _request: httpx.Response(204))
     ) as client:
         response = client.post(
-            "/imports",
+            "/imports?profile=fkb_bane",
             files={"file": ("bane.json", b"{", "application/json")},
         )
 
@@ -1202,7 +1164,7 @@ def test_rejects_oversized_upload() -> None:
         max_upload_bytes=5,
     ) as client:
         response = client.post(
-            "/imports",
+            "/imports?profile=fkb_bane",
             files={"file": ("bane.json", b"123456", "application/json")},
         )
 
@@ -1215,7 +1177,7 @@ def test_reports_upstream_failure_as_bad_gateway() -> None:
     )
 
     with _test_client(transport) as client:
-        response = _post(client, _document([_feature()]))
+        response = _post(client, _document([_feature()]), profile="fkb_bane")
 
     assert response.status_code == 502
     assert response.json()["detail"] == {
@@ -1232,7 +1194,7 @@ def test_rejects_successful_upstream_response_without_uuid() -> None:
     )
 
     with _test_client(transport) as client:
-        response = _post(client, _document([_feature()]))
+        response = _post(client, _document([_feature()]), profile="fkb_bane")
 
     assert response.status_code == 502
     assert "UUID string id" in response.json()["detail"]["reason"]
@@ -1293,7 +1255,7 @@ def test_imports_classic_geojson_when_filename_ends_with_geojson() -> None:
 
     with _test_client(httpx.MockTransport(handler)) as client:
         response = client.post(
-            "/imports",
+            "/imports?profile=fkb_bane",
             files={
                 "file": (
                     "bane.geojson",
@@ -1321,7 +1283,7 @@ def test_classic_geojson_extension_is_case_insensitive() -> None:
 
     with _test_client(httpx.MockTransport(handler)) as client:
         response = client.post(
-            "/imports",
+            "/imports?profile=fkb_bane",
             files={
                 "file": (
                     "Bane.GEOJSON",
@@ -1343,7 +1305,7 @@ def test_imports_classic_geojson_with_alias_property_names() -> None:
 
     with _test_client(httpx.MockTransport(handler)) as client:
         response = client.post(
-            "/imports",
+            "/imports?profile=fkb_bane",
             files={
                 "file": (
                     "bane.geojson",
@@ -1373,7 +1335,7 @@ def test_rejects_invalid_classic_geojson_before_upstream_calls() -> None:
 
     with _test_client(httpx.MockTransport(handler)) as client:
         response = client.post(
-            "/imports",
+            "/imports?profile=fkb_bane",
             files={
                 "file": (
                     "bane.geojson",
@@ -1394,7 +1356,7 @@ def test_json_uploads_are_not_auto_converted() -> None:
         httpx.MockTransport(lambda _request: httpx.Response(204))
     ) as client:
         response = client.post(
-            "/imports",
+            "/imports?profile=fkb_bane",
             files={
                 "file": (
                     "bane.json",
