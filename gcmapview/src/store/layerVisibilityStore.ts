@@ -15,14 +15,14 @@ export const MAP_LAYER_IDS = [
 export type MapLayerId = (typeof MAP_LAYER_IDS)[number];
 
 export const MAP_LAYER_LABELS: Record<MapLayerId, string> = {
-  parcels: 'Cadastre parcels',
-  buildings: 'Cadastre buildings',
-  platformEdges: 'FKB-Bane platform edges',
-  trackCentres: 'FKB-Bane track centres',
-  bygning: 'Bygning linework',
-  bygningOmrade: 'Bygning area',
-  bygningSenterlinje: 'Bygning centerline',
-  bygningPosisjon: 'Bygning position'
+  parcels: 'Matrikkelparseller',
+  buildings: 'Matrikkelbygninger',
+  platformEdges: 'FKB-Bane plattformkanter',
+  trackCentres: 'FKB-Bane spormidt',
+  bygning: 'Bygning linjeverk',
+  bygningOmrade: 'Bygning område',
+  bygningSenterlinje: 'Bygning senterlinje',
+  bygningPosisjon: 'Bygning posisjon'
 };
 
 export const MAP_LAYER_COLLECTION_IDS: Record<MapLayerId, CollectionId> = {

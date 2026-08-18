@@ -9,7 +9,7 @@ export function AppNav() {
     <div className="flex flex-wrap items-center gap-2">
       <nav
         className="flex gap-2"
-        aria-label="Main navigation">
+        aria-label="Hovednavigasjon">
         <Button
           variant={location.pathname === '/' ? 'default' : 'outline'}
           size="sm"
@@ -21,7 +21,7 @@ export function AppNav() {
             />
           }>
           <Map data-icon="inline-start" />
-          Map
+          Kart
         </Button>
         <Button
           variant={location.pathname === '/import' ? 'default' : 'outline'}
@@ -29,7 +29,7 @@ export function AppNav() {
           nativeButton={false}
           render={<NavLink to="/import" />}>
           <Upload data-icon="inline-start" />
-          Import
+          Importer
         </Button>
       </nav>
     </div>
