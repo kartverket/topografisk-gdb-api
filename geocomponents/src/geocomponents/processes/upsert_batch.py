@@ -52,9 +52,7 @@ PROCESS_METADATA = {
                         "items": {
                             "type": "object",
                             "required": ["id"],
-                            "properties": {
-                                "id": {"type": "string", "format": "uuid"}
-                            },
+                            "properties": {"id": {"type": "string", "format": "uuid"}},
                         },
                     },
                 },
