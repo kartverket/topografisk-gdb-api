@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import robotoLatinVariableUrl from '@fontsource-variable/roboto/files/roboto-latin-wght-normal.woff2';
-import { AlertCircle, Cuboid, Eraser, Plus } from 'lucide-react';
+import { AlertCircle, Eraser, Plus } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -62,6 +62,9 @@ import { useSelectedFeature } from './useSelectedFeature';
 const OTTA_CENTER: [number, number] = [9.54, 61.77];
 const OTTA_ZOOM = 15;
 const DEFERRED_ELEVATED_SOURCE_DELAY_MS = 120;
+const backgroundMapLayerIds = ['kartverket-topo', 'kartverket-toporaster', 'kartverket-topograatone'] as const;
+
+export type BackgroundMapId = 'topo' | 'toporaster' | 'topograatone' | 'none';
 
 const mapStyle: maplibregl.StyleSpecification = {
   version: 8,
@@ -72,6 +75,20 @@ const mapStyle: maplibregl.StyleSpecification = {
     kartverketTopo: {
       type: 'raster',
       tiles: ['https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png'],
+      tileSize: 256,
+      maxzoom: 18,
+      attribution: '&copy; Kartverket'
+    },
+    kartverketToporaster: {
+      type: 'raster',
+      tiles: ['https://cache.kartverket.no/v1/wmts/1.0.0/toporaster/default/webmercator/{z}/{y}/{x}.png'],
+      tileSize: 256,
+      maxzoom: 18,
+      attribution: '&copy; Kartverket'
+    },
+    kartverketTopograatone: {
+      type: 'raster',
+      tiles: ['https://cache.kartverket.no/v1/wmts/1.0.0/topograatone/default/webmercator/{z}/{y}/{x}.png'],
       tileSize: 256,
       maxzoom: 18,
       attribution: '&copy; Kartverket'
@@ -90,12 +107,42 @@ const mapStyle: maplibregl.StyleSpecification = {
       id: 'kartverket-topo',
       type: 'raster',
       source: 'kartverketTopo'
+    },
+    {
+      id: 'kartverket-toporaster',
+      type: 'raster',
+      source: 'kartverketToporaster',
+      layout: {
+        visibility: 'none'
+      }
+    },
+    {
+      id: 'kartverket-topograatone',
+      type: 'raster',
+      source: 'kartverketTopograatone',
+      layout: {
+        visibility: 'none'
+      }
     }
   ]
 };
 
 function isTerrainEnabled(is3d: boolean, adjustElevatedHeights: boolean) {
   return is3d && !adjustElevatedHeights;
+}
+
+function applyBackgroundMap(map: maplibregl.Map, backgroundMap: BackgroundMapId) {
+  for (const layerId of backgroundMapLayerIds) {
+    if (!map.getLayer(layerId)) {
+      continue;
+    }
+
+    const isVisible =
+      (backgroundMap === 'topo' && layerId === 'kartverket-topo') ||
+      (backgroundMap === 'toporaster' && layerId === 'kartverket-toporaster') ||
+      (backgroundMap === 'topograatone' && layerId === 'kartverket-topograatone');
+    map.setLayoutProperty(layerId, 'visibility', isVisible ? 'visible' : 'none');
+  }
 }
 
 export function MapView() {
@@ -134,10 +181,13 @@ export function MapView() {
     center: activeFavoriteView?.center ?? OTTA_CENTER,
     zoom: activeFavoriteView?.zoom ?? OTTA_ZOOM
   });
-  const [status, setStatus] = useState('Loading map...');
+  const [status, setStatus] = useState('Laster kart...');
   const [error, setError] = useState<string>();
   const [isMapReady, setIsMapReady] = useState(false);
   const [isVectorZoomActive, setIsVectorZoomActive] = useState(false);
+  const [backgroundMap, setBackgroundMap] = useState<BackgroundMapId>('topo');
+  const backgroundMapRef = useRef<BackgroundMapId>(backgroundMap);
+  backgroundMapRef.current = backgroundMap;
   const [isCreating, setIsCreating] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [placeInspectorLeftOfLayers, setPlaceInspectorLeftOfLayers] = useState(false);
@@ -145,6 +195,14 @@ export function MapView() {
   const closeSelectedFeatureInspectorRef = useRef<() => void>(() => {});
   const setSelectedFeatureRef = useRef(setSelectedFeature);
   setSelectedFeatureRef.current = setSelectedFeature;
+
+  function toggleMapDimension() {
+    if (!is3d) {
+      setAdjustElevatedHeights(true);
+    }
+
+    setIs3d(value => !value);
+  }
 
   function currentFilteredLayerVisibility() {
     const state = useLayerVisibilityStore.getState();
@@ -262,15 +320,15 @@ export function MapView() {
       return;
     }
 
-    const suggestedName = activeFavoriteName ?? `Favorite ${favoriteViews.length + 1}`;
-    const rawName = window.prompt('Name for favorite location:', suggestedName);
+    const suggestedName = activeFavoriteName ?? `Favoritt ${favoriteViews.length + 1}`;
+    const rawName = window.prompt('Navn på favorittsted:', suggestedName);
     if (rawName === null) {
       return;
     }
 
     const favoriteName = rawName.trim();
     if (!favoriteName) {
-      setStatus('Favorite location was not saved because no name was provided.');
+      setStatus('Favorittstedet ble ikke lagret fordi det manglet navn.');
       return;
     }
 
@@ -287,7 +345,7 @@ export function MapView() {
       adjustElevatedHeights
     });
     setStatus(
-      `${existed ? 'Updated' : 'Saved'} favorite "${favoriteName}" at ${savedCenter[0].toFixed(5)}, ${savedCenter[1].toFixed(5)} (z=${savedZoom.toFixed(2)}) with current layers.`
+      `${existed ? 'Oppdaterte' : 'Lagret'} favoritt «${favoriteName}» på ${savedCenter[0].toFixed(5)}, ${savedCenter[1].toFixed(5)} (z=${savedZoom.toFixed(2)}) med gjeldende lag.`
     );
   }
 
@@ -297,7 +355,7 @@ export function MapView() {
     }
 
     removeFavoriteView(activeFavoriteView.name);
-    setStatus(`Removed favorite "${activeFavoriteView.name}".`);
+    setStatus(`Slettet favoritt «${activeFavoriteView.name}».`);
   }
 
   function selectStoredFavoriteView(name: string) {
@@ -310,11 +368,11 @@ export function MapView() {
       setError(undefined);
       applyFavoriteViewSettings(selectedFavoriteView);
       map.easeTo({ center: selectedFavoriteView.center, zoom: selectedFavoriteView.zoom, duration: 700 });
-      setStatus(`Selected favorite "${name}", restored its layers, and moved to it.`);
+      setStatus(`Valgte favoritt «${name}», gjenopprettet lagene og flyttet kartet dit.`);
       return;
     }
 
-    setStatus(`Selected favorite "${name}".`);
+    setStatus(`Valgte favoritt «${name}».`);
   }
 
   function applyFeatureFilter(featureFilter: ActiveFeatureFilter) {
@@ -326,7 +384,7 @@ export function MapView() {
 
     setError(undefined);
     setActiveFeatureFilter({ propertyKey, value });
-    setStatus(`Filtering visible layers by ${propertyKey} "${value}".`);
+    setStatus(`Filtrerer synlige lag på ${propertyKey} «${value}».`);
   }
 
   function clearFeatureFilter() {
@@ -337,7 +395,7 @@ export function MapView() {
     const clearedFeatureFilter = activeFeatureFilterRef.current;
     setError(undefined);
     setActiveFeatureFilter(undefined);
-    setStatus(`Cleared ${clearedFeatureFilter.propertyKey} filter "${clearedFeatureFilter.value}".`);
+    setStatus(`Fjernet filteret ${clearedFeatureFilter.propertyKey} «${clearedFeatureFilter.value}».`);
   }
 
   function closeSelectedFeatureInspector() {
@@ -400,8 +458,8 @@ export function MapView() {
 
     map.on('error', event => {
       console.error('[gcmapview] MapLibre error', event.error);
-      setError(event.error?.message ?? 'Unknown MapLibre error');
-      setStatus('MapLibre failed while loading the map style or layers');
+      setError(event.error?.message ?? 'Ukjent MapLibre-feil');
+      setStatus('MapLibre feilet under lasting av kartstil eller lag');
     });
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
@@ -428,7 +486,7 @@ export function MapView() {
           setError(undefined);
           closeSelectedFeatureInspectorRef.current();
           setStatus(
-            `Zoom in above level ${MIN_VECTOR_ZOOM} to load vector data (current z=${map.getZoom().toFixed(1)}).`
+            `Zoom inn over nivå ${MIN_VECTOR_ZOOM} for å laste vektordata (nåværende z=${map.getZoom().toFixed(1)}).`
           );
         }
         return;
@@ -465,12 +523,12 @@ export function MapView() {
         await applyRenderedVisibleData(map, latestVectorDataRef.current, currentVisibility);
         setError(undefined);
         setStatus(
-          `Loaded ${parcels.features.length} parcels, ${buildings.features.length} buildings, ${platformEdges.features.length} platform edges, ${trackCentres.features.length} track centres, ${bygning.features.length} Bygning line features, ${bygningOmrade.features.length} Bygning area features, ${bygningSenterlinje.features.length} Bygning centerline features, and ${bygningPosisjon.features.length} Bygning position features for bbox ${bbox.map(value => value.toFixed(5)).join(',')}.${activeFeatureFilterRef.current ? ` Rendering only ${activeFeatureFilterRef.current.propertyKey} "${activeFeatureFilterRef.current.value}".` : ''}${isBuildingZoom(map) ? '' : ` Building layers load from zoom ${MIN_BUILDING_ZOOM}.`}`
+          `Lastet ${parcels.features.length} parseller, ${buildings.features.length} bygninger, ${platformEdges.features.length} plattformkanter, ${trackCentres.features.length} spormidt, ${bygning.features.length} Bygning-linjefeaturer, ${bygningOmrade.features.length} Bygning-områdefeaturer, ${bygningSenterlinje.features.length} Bygning-senterlinjefeaturer og ${bygningPosisjon.features.length} Bygning-posisjonsfeaturer for bbox ${bbox.map(value => value.toFixed(5)).join(',')}.${activeFeatureFilterRef.current ? ` Viser bare ${activeFeatureFilterRef.current.propertyKey} «${activeFeatureFilterRef.current.value}».` : ''}${isBuildingZoom(map) ? '' : ` Bygningslag lastes fra zoom ${MIN_BUILDING_ZOOM}.`}`
         );
       } catch (cause) {
         if (!cancelled && requestId === visibleRequestId) {
-          setError(cause instanceof Error ? cause.message : 'Unknown error');
-          setStatus('Could not reload visible map data');
+          setError(cause instanceof Error ? cause.message : 'Ukjent feil');
+          setStatus('Kunne ikke laste synlige kartdata på nytt');
         }
       }
     }
@@ -490,10 +548,12 @@ export function MapView() {
     }
 
     function handleMoveStart() {
+      visibleRequestId += 1;
       cancelPendingMapWork();
     }
 
     map.once('load', () => {
+      applyBackgroundMap(map, backgroundMapRef.current);
       addNativeFeatureSourcesAndLayers(
         map,
         emptyFeatureCollection,
@@ -528,7 +588,7 @@ export function MapView() {
 
       setIsMapReady(true);
       setIsVectorZoomActive(isVectorZoom(map));
-      setStatus(`Zoom in above level ${MIN_VECTOR_ZOOM} to load vector data.`);
+      setStatus(`Zoom inn over nivå ${MIN_VECTOR_ZOOM} for å laste vektordata.`);
       void reloadVisibleData();
     });
 
@@ -544,6 +604,15 @@ export function MapView() {
       map.remove();
     };
   }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady) {
+      return;
+    }
+
+    applyBackgroundMap(map, backgroundMap);
+  }, [backgroundMap, isMapReady]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -620,7 +689,7 @@ export function MapView() {
       return;
     }
     if (!isVectorZoom(map)) {
-      setError(`Zoom in above level ${MIN_VECTOR_ZOOM} before creating parcels`);
+      setError(`Zoom inn over nivå ${MIN_VECTOR_ZOOM} før du oppretter parseller`);
       return;
     }
 
@@ -683,17 +752,17 @@ export function MapView() {
         bygningPosisjon
       };
       await applyRenderedVisibleData(map, latestVectorDataRef.current, filteredLayerVisibility);
-      const createdStatus = `Created ${buildingsToCreate.length} building${buildingsToCreate.length === 1 ? '' : 's'} with a ${area * 15} m2 parcel after ${placementAttempts} placement attempt${placementAttempts === 1 ? '' : 's'}. ${buildings.features.length} buildings loaded.`;
+      const createdStatus = `Opprettet ${buildingsToCreate.length} bygning${buildingsToCreate.length === 1 ? '' : 'er'} med en parsell på ${area * 15} m2 etter ${placementAttempts} plasseringsforsøk. ${buildings.features.length} bygninger lastet.`;
       setStatus(createdStatus);
       map.once('idle', () => {
         const nativeState = logNativeRenderingState(map);
         setStatus(
-          `${createdStatus} Native source features P:${nativeState.parcelSourceFeatures} B:${nativeState.buildingSourceFeatures}; rendered P:${nativeState.parcelRenderedFeatures} B:${nativeState.buildingRenderedFeatures}.`
+          `${createdStatus} Native kildefeaturer P:${nativeState.parcelSourceFeatures} B:${nativeState.buildingSourceFeatures}; rendret P:${nativeState.parcelRenderedFeatures} B:${nativeState.buildingRenderedFeatures}.`
         );
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unknown error');
-      setStatus('Could not create building');
+      setError(cause instanceof Error ? cause.message : 'Ukjent feil');
+      setStatus('Kunne ikke opprette bygning');
     } finally {
       setIsCreating(false);
     }
@@ -705,7 +774,7 @@ export function MapView() {
       return;
     }
     if (!isVectorZoom(map)) {
-      setError(`Zoom in above level ${MIN_VECTOR_ZOOM} before clearing data`);
+      setError(`Zoom inn over nivå ${MIN_VECTOR_ZOOM} før du tømmer data`);
       return;
     }
 
@@ -754,18 +823,18 @@ export function MapView() {
         bygningPosisjon: reloadedBygningPosisjon
       };
       await applyRenderedVisibleData(map, latestVectorDataRef.current, filteredLayerVisibility);
-      const clearedStatus = `Cleared ${buildings.features.length} buildings and ${parcels.features.length} parcels.`;
+      const clearedStatus = `Tømte ${buildings.features.length} bygninger og ${parcels.features.length} parseller.`;
       setStatus(clearedStatus);
       map.once('idle', () => {
         const nativeState = logNativeRenderingState(map);
         setStatus(
-          `${clearedStatus} Native source features P:${nativeState.parcelSourceFeatures} B:${nativeState.buildingSourceFeatures}; rendered P:${nativeState.parcelRenderedFeatures} B:${nativeState.buildingRenderedFeatures}.`
+          `${clearedStatus} Native kildefeaturer P:${nativeState.parcelSourceFeatures} B:${nativeState.buildingSourceFeatures}; rendret P:${nativeState.parcelRenderedFeatures} B:${nativeState.buildingRenderedFeatures}.`
         );
       });
       setIsMapReady(true);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unknown error');
-      setStatus('Could not clear data');
+      setError(cause instanceof Error ? cause.message : 'Ukjent feil');
+      setStatus('Kunne ikke tømme data');
     } finally {
       setIsClearing(false);
     }
@@ -775,7 +844,7 @@ export function MapView() {
     <section
       ref={mapSectionRef}
       className="relative min-h-0 w-full overflow-hidden rounded-[min(var(--radius-4xl),24px)] border border-border bg-card shadow-sm"
-      aria-label="Cadastre, FKB-Bane, and Bygning map">
+      aria-label="Matrikkel-, FKB-Bane- og Bygning-kart">
       <div
         ref={mapContainerRef}
         className="absolute inset-0 h-full w-full"
@@ -786,7 +855,7 @@ export function MapView() {
           disabled={!isMapReady || !isVectorZoomActive || isCreating || isClearing}
           onClick={createRandomBuilding}>
           <Plus data-icon="inline-start" />
-          {isCreating ? 'Creating parcel...' : 'Create random parcel'}
+          {isCreating ? 'Oppretter parsell...' : 'Opprett tilfeldig parsell'}
         </Button>
         <Button
           size="sm"
@@ -795,39 +864,24 @@ export function MapView() {
           disabled={!isMapReady || !isVectorZoomActive || isCreating || isClearing}
           onClick={clearData}>
           <Eraser data-icon="inline-start" />
-          {isClearing ? 'Clearing data...' : 'Clear parcels'}
+          {isClearing ? 'Tømmer data...' : 'Tøm parseller'}
         </Button>
-        <Button
-          size="sm"
-          variant={is3d ? 'default' : 'outline'}
-          aria-pressed={is3d}
-          title={is3d ? 'Switch to 2D map' : 'Switch to 3D map with height'}
-          onClick={() => setIs3d(value => !value)}>
-          <Cuboid data-icon="inline-start" />
-          {is3d ? '3D on' : '3D off'}
-        </Button>
-        {is3d ? (
-          <label className="flex items-center gap-2 rounded-md border border-border bg-card/80 px-3 py-1.5 text-sm shadow-sm">
-            <input
-              type="checkbox"
-              className="size-4 accent-foreground"
-              checked={!adjustElevatedHeights}
-              onChange={event => setAdjustElevatedHeights(!event.target.checked)}
-            />
-            <span>Terrain</span>
-          </label>
-        ) : null}
       </div>
       <div
         ref={mapLayersPanelRef}
-        className="absolute right-4 bottom-[88px] z-[3] max-sm:top-20 max-sm:right-auto max-sm:bottom-auto max-sm:left-4">
+        className="absolute right-12 bottom-[88px] z-[3] max-sm:top-20 max-sm:right-auto max-sm:bottom-auto max-sm:left-4">
         <MapLayersCard
-          is3d={is3d}
+          backgroundMap={backgroundMap}
           availableLayerIds={availableLayerIds}
+          is3d={is3d}
           isLoadingAvailableLayers={isLoadingAvailableLayers}
+          terrainEnabled={is3d && !adjustElevatedHeights}
           visibility={filteredLayerVisibility}
           favoriteViews={favoriteViews}
           activeFavoriteName={activeFavoriteView?.name}
+          onSelectBackgroundMap={setBackgroundMap}
+          onToggle3d={toggleMapDimension}
+          onToggleTerrain={() => setAdjustElevatedHeights(value => !value)}
           onSaveFavoriteView={saveCurrentFavoriteView}
           onClearFavoriteView={clearStoredFavoriteView}
           onSelectFavoriteView={selectStoredFavoriteView}

@@ -15,7 +15,7 @@ function App() {
               <Link
                 to="/"
                 className="rounded-sm outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring/50">
-                Geocomponents map
+                Geocomponents-kart
               </Link>
             </h1>
           </div>

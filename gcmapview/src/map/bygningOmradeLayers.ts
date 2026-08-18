@@ -253,7 +253,7 @@ export function addBygningOmradeSourceAndLayers(map: maplibregl.Map, bygningOmra
     filter: ['==', ['geometry-type'], 'Polygon'],
     paint: {
       'fill-color': bygningOmradeFillColor,
-      'fill-opacity': 0.18,
+      'fill-opacity': 0.68,
       'fill-outline-color': '#000000'
     }
   });
