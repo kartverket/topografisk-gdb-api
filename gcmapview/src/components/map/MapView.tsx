@@ -860,7 +860,7 @@ export function MapView() {
       </div>
       <div
         ref={mapLayersPanelRef}
-        className="absolute right-4 bottom-[88px] z-[3] max-sm:top-20 max-sm:right-auto max-sm:bottom-auto max-sm:left-4">
+        className="absolute right-8 bottom-[88px] z-[3] max-sm:top-20 max-sm:right-auto max-sm:bottom-auto max-sm:left-4">
         <MapLayersCard
           backgroundMap={backgroundMap}
           availableLayerIds={availableLayerIds}

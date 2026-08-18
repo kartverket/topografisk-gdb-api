@@ -109,13 +109,6 @@ function LayerToggleRow({
             />
           )}
           <span className="min-w-0 flex-1 text-sm leading-snug">{MAP_LAYER_LABELS[layerId]}</span>
-          {(readOnly ?? isReadOnly) ? (
-            <Badge
-              variant="outline"
-              className="shrink-0">
-              Låst
-            </Badge>
-          ) : null}
           {visible ? (
             <Eye
               className="size-3.5 shrink-0 text-muted-foreground"
