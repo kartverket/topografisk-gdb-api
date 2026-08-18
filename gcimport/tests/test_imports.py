@@ -496,6 +496,89 @@ def test_retry_returns_the_same_upstream_uuid() -> None:
     assert calls == 2
 
 
+def test_imports_batch_same_collection_features() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.url.path.endswith("/processes/upsert-batch/execution")
+        payload = json.loads(request.content)
+        assert payload["inputs"]["collection"] == "jernbaneplattformkant"
+        assert len(payload["inputs"]["features"]) == 2
+        return httpx.Response(
+            200,
+            json={
+                "collection": "jernbaneplattformkant",
+                "total": 2,
+                "features": [{"id": PLATFORM_UUID}, {"id": TRACK_UUID}],
+            },
+        )
+
+    second = _feature(
+        properties=_properties(
+            lokalid="feature-2",
+            identifikasjon_navnerom="test-2",
+        )
+    )
+
+    with _test_client(httpx.MockTransport(handler)) as client:
+        response = _post(
+            client,
+            _document([_feature(), second]),
+            profile="fkb_bane",
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "total": 2,
+        "features": [
+            {"collection": "jernbaneplattformkant", "id": PLATFORM_UUID},
+            {"collection": "jernbaneplattformkant", "id": TRACK_UUID},
+        ],
+    }
+    assert [request.url.path for request in requests] == [
+        "/datasets/fkb_bane/ogc_api/processes/upsert-batch/execution"
+    ]
+
+
+def test_imports_falls_back_when_batch_route_is_unavailable() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/processes/upsert-batch/execution"):
+            return httpx.Response(404)
+        return httpx.Response(200, json={"id": PLATFORM_UUID})
+
+    second = _feature(
+        properties=_properties(
+            lokalid="feature-2",
+            identifikasjon_navnerom="test-2",
+        )
+    )
+
+    with _test_client(httpx.MockTransport(handler)) as client:
+        response = _post(
+            client,
+            _document([_feature(), second]),
+            profile="fkb_bane",
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "total": 2,
+        "features": [
+            {"collection": "jernbaneplattformkant", "id": PLATFORM_UUID},
+            {"collection": "jernbaneplattformkant", "id": PLATFORM_UUID},
+        ],
+    }
+    assert [request.url.path for request in requests] == [
+        "/datasets/fkb_bane/ogc_api/processes/upsert-batch/execution",
+        "/datasets/fkb_bane/ogc_api/collections/jernbaneplattformkant/items:upsert",
+        "/datasets/fkb_bane/ogc_api/collections/jernbaneplattformkant/items:upsert",
+    ]
+
+
 def test_imports_bane_linestring_place_for_compatibility() -> None:
     requests: list[httpx.Request] = []
 

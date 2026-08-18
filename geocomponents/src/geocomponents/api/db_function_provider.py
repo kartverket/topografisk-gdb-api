@@ -54,6 +54,14 @@ def _as_feature_dict(item) -> dict:
     return item
 
 
+def _as_feature_list(items) -> list[dict]:
+    if isinstance(items, (bytes, bytearray, str)):
+        items = orjson.loads(items)
+    if not isinstance(items, list):
+        raise ProviderQueryError("request body must be a JSON array of features")
+    return [_as_feature_dict(item) for item in items]
+
+
 def _example_geometry(geometry_type: str) -> dict:
     """A small valid example geometry so the docs show real coordinates.
 
@@ -235,6 +243,20 @@ class DbFunctionProvider(BaseProvider):
                 (self.dataset, self.collection, orjson.dumps(feature).decode()),
             )
             return str(cur.fetchone()[0])
+
+    def upsert_many(self, items) -> list[str]:
+        if self.upsert_field is None:
+            raise ProviderQueryError("collection has no configured upsert key")
+        features = _as_feature_list(items)
+        if not features:
+            return []
+        with _rethrow_pg_raise(), self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "select ogc.feature_upsert(%s, %s, feature) "
+                "from jsonb_array_elements(%s::jsonb) as payload(feature)",
+                (self.dataset, self.collection, orjson.dumps(features).decode()),
+            )
+            return [str(identifier) for (identifier,) in cur.fetchall()]
 
     def update(self, identifier, item) -> bool:
         # OGC PUT == full replace.

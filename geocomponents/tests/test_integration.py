@@ -290,6 +290,36 @@ def test_bygning_upsert_roundtrip(db, datasets):
     assert listed_z == 302.19
 
 
+def test_bygning_batch_upsert_process_roundtrip(db, datasets):
+    client = _client(db, datasets)
+
+    second = dict(BYGNING)
+    second["properties"] = dict(BYGNING["properties"])
+    second["properties"]["lokalid"] = "building-integration-2"
+
+    response = client.post(
+        f"{BYGNING_API}/processes/upsert-batch/execution",
+        content=orjson.dumps(
+            {"inputs": {"collection": "bygning", "features": [BYGNING, second]}}
+        ).decode(),
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    payload = response.json()
+    assert len(payload["features"]) == 2
+
+    first_item = client.get(
+        f"{BYGNING_API}/collections/bygning/items/{payload['features'][0]['id']}?f=json"
+    ).json()
+    second_item = client.get(
+        f"{BYGNING_API}/collections/bygning/items/{payload['features'][1]['id']}?f=json"
+    ).json()
+
+    assert first_item["properties"]["lokalid"] == "building-integration-1"
+    assert second_item["properties"]["lokalid"] == "building-integration-2"
+
+
 def test_bygning_omrade_upsert_roundtrip(db, datasets):
     client = _client(db, datasets)
 

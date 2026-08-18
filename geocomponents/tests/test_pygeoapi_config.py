@@ -32,6 +32,42 @@ def test_resources_are_collections_plus_declared_processes():
     assert cfg["resources"]["hello"]["type"] == "process"
 
 
+def test_fkb_bane_config_exposes_batch_upsert_process():
+    fkb_bane = next(
+        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "fkb_bane"
+    )
+    cfg = build_config(
+        fkb_bane,
+        "http://example.org/datasets/fkb_bane/ogc_api",
+        dsn="postgresql://x",
+    )
+    process = cfg["resources"]["upsert-batch"]
+    assert process["type"] == "process"
+    assert (
+        process["processor"]["provider_defs"]["jernbaneplattformkant"]["collection"]
+        == "jernbaneplattformkant"
+    )
+
+
+def test_bygning_config_exposes_batch_upsert_process():
+    bygning = next(
+        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bygning"
+    )
+    cfg = build_config(
+        bygning,
+        "http://example.org/datasets/bygning/ogc_api",
+        dsn="postgresql://x",
+    )
+    process = cfg["resources"]["upsert-batch"]
+    assert process["type"] == "process"
+    assert sorted(process["processor"]["provider_defs"]) == [
+        "bygning",
+        "bygning_omrade",
+        "bygning_posisjon",
+        "bygning_senterlinje",
+    ]
+
+
 def test_processes_are_only_the_declared_ones():
     hydro = next(d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "hydro")
     cfg = build_config(hydro, PUBLIC_URL, dsn="postgresql://x")

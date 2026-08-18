@@ -1,6 +1,8 @@
 name: bygning
 title: Bygning
 description: Bygningsobjekter fra FKB-Bygning.
+processes:
+  - upsert-batch
 
 collections:
   - name: bygning

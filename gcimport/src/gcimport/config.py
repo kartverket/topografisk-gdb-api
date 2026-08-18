@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass
 
 DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+DEFAULT_UPSERT_BATCH_SIZE = 250
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,7 @@ class Settings:
     geocomponents_api_url: str
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
     request_timeout_seconds: float = 30.0
+    upsert_batch_size: int = DEFAULT_UPSERT_BATCH_SIZE
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -29,10 +31,15 @@ class Settings:
             DEFAULT_MAX_UPLOAD_BYTES,
         )
         timeout = _positive_float("GCIMPORT_TIMEOUT_SECONDS", 30.0)
+        upsert_batch_size = _positive_int(
+            "GCIMPORT_UPSERT_BATCH_SIZE",
+            DEFAULT_UPSERT_BATCH_SIZE,
+        )
         return cls(
             geocomponents_api_url=geocomponents_api_url.rstrip("/"),
             max_upload_bytes=max_upload_bytes,
             request_timeout_seconds=timeout,
+            upsert_batch_size=upsert_batch_size,
         )
 
 

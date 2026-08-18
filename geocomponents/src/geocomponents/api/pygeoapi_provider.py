@@ -152,6 +152,21 @@ def _collection_resource(dataset: str, coll: ResolvedCollection, dsn: str) -> di
     }
 
 
+def _process_resource(dataset: ResolvedDataset, process_id: str, dsn: str) -> dict:
+    resource = {
+        "type": "process",
+        "processor": {"name": PROCESS_REGISTRY[process_id]},
+    }
+    if process_id == "upsert-batch":
+        provider_defs = {
+            coll.name: _collection_resource(dataset.name, coll, dsn)["providers"][0]
+            for coll in dataset.collections
+            if coll.supports_upsert
+        }
+        resource["processor"]["provider_defs"] = provider_defs
+    return resource
+
+
 def build_config(dataset: ResolvedDataset, public_url: str, dsn: str) -> dict:
     resources: dict[str, dict] = {
         coll.name: _collection_resource(dataset.name, coll, dsn)
@@ -159,10 +174,7 @@ def build_config(dataset: ResolvedDataset, public_url: str, dsn: str) -> dict:
     }
     # OGC API - Processes: only the processes this dataset declares.
     for process_id in dataset.processes:
-        resources[process_id] = {
-            "type": "process",
-            "processor": {"name": PROCESS_REGISTRY[process_id]},
-        }
+        resources[process_id] = _process_resource(dataset, process_id, dsn)
 
     return {
         "server": {

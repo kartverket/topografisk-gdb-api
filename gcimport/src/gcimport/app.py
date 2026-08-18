@@ -104,6 +104,7 @@ def create_app(
                     runtime_settings.geocomponents_api_url,
                     request_profile,
                 ),
+                upsert_batch_size=runtime_settings.upsert_batch_size,
             )
         except UpstreamImportError as err:
             raise HTTPException(

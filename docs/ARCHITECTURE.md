@@ -158,7 +158,7 @@ Behavior now:
 
 - `.geojson` uploads are converted to JSON-FG before validation.
 - JSON is validated before the first upstream request.
-- Features are posted individually as `application/geo+json` to `.../collections/{collection}/items:upsert`.
+- Features are grouped by collection and sent in configurable chunks to `.../processes/upsert-batch/execution`; if that process is unavailable, gcimport falls back to per-feature `.../collections/{collection}/items:upsert`.
 - The response reports the stable UUID returned by the upstream API for each imported feature.
 
 ---

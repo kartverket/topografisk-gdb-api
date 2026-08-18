@@ -389,6 +389,47 @@ def test_golden_process_execution_echoes(client):
     assert "Dataset echoes: world" in r.text
 
 
+def test_fkb_bane_batch_upsert_process_executes(client):
+    r = client.post(
+        f"{_api('fkb_bane')}/processes/upsert-batch/execution",
+        content=orjson.dumps(
+            {
+                "inputs": {
+                    "collection": "jernbaneplattformkant",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "MultiLineString",
+                                "coordinates": [[[100000, 7000000], [100010, 7000010]]],
+                            },
+                            "properties": {
+                                "lokalid": "platform-process-1",
+                                "identifikasjon_navnerom": "test",
+                                "identifikasjon": {
+                                    "lokalid": "platform-process-1",
+                                    "navnerom": "test",
+                                },
+                                "oppdateringsdato": "2026-08-05T12:00:00Z",
+                                "datafangstdato": "2026-08-05T12:00:00Z",
+                                "kvalitet_datafangstmetode": "fot",
+                                "kvalitet": {"datafangstmetode": "fot"},
+                                "medium": "T",
+                            },
+                        }
+                    ],
+                }
+            }
+        ).decode(),
+        headers={"content-type": "application/json"},
+    )
+    assert r.status_code == HTTPStatus.OK
+    payload = r.json()
+    assert payload["collection"] == "jernbaneplattformkant"
+    assert payload["total"] == 1
+    assert len(payload["features"]) == 1
+
+
 # ===========================================================================
 # POST /items media-type discipline (Comment 6)
 # ===========================================================================
