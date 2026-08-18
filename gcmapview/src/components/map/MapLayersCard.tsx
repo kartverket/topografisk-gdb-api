@@ -1,4 +1,4 @@
-import { Compass, Cuboid, Eye, EyeOff, Map, Mountain } from 'lucide-react';
+import { Compass, Cuboid, Eye, EyeOff, Map, Mountain, ScanLine } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -39,7 +39,7 @@ const backgroundMapOptions: Array<{
     id: 'topograatone',
     label: 'Topo gråtone',
     title: 'Vis Kartverkets topografiske gråtonelag',
-    icon: Compass
+    icon: ScanLine
   },
   {
     id: 'none',
@@ -52,12 +52,10 @@ const backgroundMapOptions: Array<{
 function LayerToggleRow({
   layerId,
   visible,
-  readOnly,
   onToggle
 }: {
   layerId: MapLayerId;
   visible: boolean;
-  readOnly?: boolean;
   onToggle: () => void;
 }) {
   const isLine =
@@ -65,13 +63,6 @@ function LayerToggleRow({
     layerId === 'trackCentres' ||
     layerId === 'bygning' ||
     layerId === 'bygningSenterlinje';
-  const isReadOnly =
-    layerId === 'platformEdges' ||
-    layerId === 'trackCentres' ||
-    layerId === 'bygning' ||
-    layerId === 'bygningOmrade' ||
-    layerId === 'bygningSenterlinje' ||
-    layerId === 'bygningPosisjon';
 
   return (
     <li>
@@ -191,11 +182,7 @@ export function MapLayersCard({
                           type="button"
                           size="icon-xs"
                           variant={backgroundMap === option.id ? 'default' : 'ghost'}
-                          className={cn(
-                            'rounded-full',
-                            option.id === 'topograatone' ? 'text-muted-foreground' : '',
-                            ''
-                          )}
+                          className={cn('rounded-full')}
                           aria-pressed={backgroundMap === option.id}
                           aria-label={option.label}
                           onClick={() => onSelectBackgroundMap(option.id)}
@@ -282,14 +269,6 @@ export function MapLayersCard({
                 key={layerId}
                 layerId={layerId}
                 visible={visibility[layerId]}
-                readOnly={
-                  layerId === 'platformEdges' ||
-                  layerId === 'trackCentres' ||
-                  layerId === 'bygning' ||
-                  layerId === 'bygningOmrade' ||
-                  layerId === 'bygningSenterlinje' ||
-                  layerId === 'bygningPosisjon'
-                }
                 onToggle={() => toggleLayer(layerId)}
               />
             ))}

@@ -196,6 +196,14 @@ export function MapView() {
   const setSelectedFeatureRef = useRef(setSelectedFeature);
   setSelectedFeatureRef.current = setSelectedFeature;
 
+  function toggleMapDimension() {
+    if (!is3d) {
+      setAdjustElevatedHeights(true);
+    }
+
+    setIs3d(value => !value);
+  }
+
   function currentFilteredLayerVisibility() {
     const state = useLayerVisibilityStore.getState();
     return filterUnavailableLayers(state.visibility, state.availableLayerIds);
@@ -540,6 +548,7 @@ export function MapView() {
     }
 
     function handleMoveStart() {
+      visibleRequestId += 1;
       cancelPendingMapWork();
     }
 
@@ -860,7 +869,7 @@ export function MapView() {
       </div>
       <div
         ref={mapLayersPanelRef}
-        className="absolute right-8 bottom-[88px] z-[3] max-sm:top-20 max-sm:right-auto max-sm:bottom-auto max-sm:left-4">
+        className="absolute right-12 bottom-[88px] z-[3] max-sm:top-20 max-sm:right-auto max-sm:bottom-auto max-sm:left-4">
         <MapLayersCard
           backgroundMap={backgroundMap}
           availableLayerIds={availableLayerIds}
@@ -871,7 +880,7 @@ export function MapView() {
           favoriteViews={favoriteViews}
           activeFavoriteName={activeFavoriteView?.name}
           onSelectBackgroundMap={setBackgroundMap}
-          onToggle3d={() => setIs3d(value => !value)}
+          onToggle3d={toggleMapDimension}
           onToggleTerrain={() => setAdjustElevatedHeights(value => !value)}
           onSaveFavoriteView={saveCurrentFavoriteView}
           onClearFavoriteView={clearStoredFavoriteView}
