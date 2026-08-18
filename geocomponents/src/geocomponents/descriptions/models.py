@@ -151,6 +151,7 @@ class GeometryDef(BaseModel):
     type: GeometryType = "Point"
     srid: int = 4326
     has_z: bool = False
+    required: bool = True
 
 
 class RelationshipDef(BaseModel):
@@ -260,6 +261,7 @@ class ResolvedCollection:
     upsert_field: str | None = None
     upsert_path: str | None = None
     has_z: bool = False
+    geometry_required: bool = True
     # Dot-path to the outward-identifier sub-field (e.g. "identifikasjon.lokalid").
     outward_identifier_path: str | None = None
     # Server-managed dot-paths -> token values (mirrors CollectionDef.server_managed).

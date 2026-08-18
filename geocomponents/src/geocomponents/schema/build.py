@@ -150,10 +150,11 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
         )
 
     geometry = GeometryColumnPlan(
-        coll.geometry_field,
-        coll.geometry_type,
-        coll.srid,
+        name=coll.geometry_field,
+        geometry_type=coll.geometry_type,
+        srid=coll.srid,
         has_z=coll.has_z,
+        nullable=not coll.geometry_required,  # False when geometry is required
     )
     return TablePlan(
         schema=schema,

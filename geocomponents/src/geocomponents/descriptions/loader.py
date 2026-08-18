@@ -291,6 +291,7 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
                 geometry_type=coll.geometry.type,
                 srid=coll.geometry.srid,
                 has_z=coll.geometry.has_z,
+                geometry_required=coll.geometry.required,
                 fields=resolved_tuple,
                 relationships=tuple(resolved_rels),
                 upsert_field=resolved_upsert_field,

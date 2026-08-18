@@ -91,6 +91,7 @@ class GeometryColumnPlan:
     geometry_type: str
     srid: int
     has_z: bool = False
+    nullable: bool = False
 
     @property
     def postgis_type(self) -> str:
