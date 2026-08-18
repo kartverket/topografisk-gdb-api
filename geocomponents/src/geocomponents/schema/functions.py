@@ -234,15 +234,32 @@ def _enum_checks(writable: list[ColumnPlan], *, guarded_by_presence: bool) -> li
     return checks
 
 
-def _geom_check(table: TablePlan, *, guarded_by_presence: bool) -> str:
-    """IF block that raises P0001 when the incoming geometry is not valid."""
+def _geom_checks(table: TablePlan, *, guarded_by_presence: bool) -> list[str]:
+    """IF blocks that raises P0001 when the incoming geometry is not valid."""
+    checks: list[str] = []
+    # nullable null check
+    if table.geometry.nullable:
+        first_condition = "coalesce(jsonb_typeof(feature->'geometry'), 'null') not in ('object', 'null)"
+    else:
+        first_condition = (
+            "coalesce(jsonb_typeof(feature->'geometry'), 'null') not in ('object')"
+        )
+    if guarded_by_presence:
+        first_condition = f"feature ? 'geometry' and {first_condition}"
+    checks.append(
+        f"  if {first_condition} then\n"
+        f"    raise exception 'missing geometry' using errcode = 'P0001';\n"
+        f"  end if;"
+    )
+
+    # valid geometry check
     inner = f"not ST_IsValid({_geom_from_feature(table)})"
-    cond = f"feature ? 'geometry' and {inner}" if guarded_by_presence else inner
-    return (
-        f"  if {cond} then\n"
+    checks.append(
+        f"  if jsonb_typeof(feature->'geometry') = 'object' and {inner} then\n"
         f"    raise exception 'invalid geometry' using errcode = 'P0001';\n"
         f"  end if;"
     )
+    return checks
 
 
 def _fn_item(plan: CollectionPlan) -> str:
@@ -301,7 +318,7 @@ def _fn_create(plan: CollectionPlan) -> str:
     )
     validations = [
         *_enum_checks(writable, guarded_by_presence=False),
-        _geom_check(t, guarded_by_presence=False),
+        *_geom_checks(t, guarded_by_presence=False),
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""
     return f"""\
@@ -342,7 +359,7 @@ def _fn_upsert(plan: CollectionPlan) -> str:
     set_clause = ",\n      ".join(sets)
     validations = [
         *_enum_checks(writable, guarded_by_presence=False),
-        _geom_check(t, guarded_by_presence=False),
+        *_geom_checks(t, guarded_by_presence=False),
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""
     return f"""\
@@ -371,7 +388,7 @@ def _fn_replace(plan: CollectionPlan) -> str:
     set_clause = ",\n      ".join(sets)
     validations = [
         *_enum_checks(writable, guarded_by_presence=False),
-        _geom_check(t, guarded_by_presence=False),
+        *_geom_checks(t, guarded_by_presence=False),
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""
     return f"""\
@@ -406,7 +423,7 @@ def _fn_update(plan: CollectionPlan) -> str:
     set_clause = ",\n      ".join(sets)
     validations = [
         *_enum_checks(writable, guarded_by_presence=True),
-        _geom_check(t, guarded_by_presence=True),
+        *_geom_checks(t, guarded_by_presence=True),
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""
     return f"""\

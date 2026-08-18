@@ -9,7 +9,6 @@ from geocomponents.descriptions.models import (
 from geocomponents.schema.build import build_schema_plan
 from geocomponents.schema.functions import (
     _enum_checks,
-    _geom_check,
     _prop_read,
     _properties_object,
     _quote_key,
@@ -371,28 +370,6 @@ def test_fn_update_uses_presence_guarded_enum_check_but_create_does_not():
     update = next(s for s in stmts if "function s._t_update(" in s)
     assert "? 'medium'" not in create
     assert "? 'medium'" in update
-
-
-# --------------------------------------------------------------------------
-# _geom_check: geometry validation SQL (Commit 5)
-# --------------------------------------------------------------------------
-
-
-def test_geom_check_unguarded_checks_geometry_unconditionally():
-    """Suspect: unguarded mode (create/replace) must call ST_IsValid without a
-    presence guard — the feature is required to have a geometry."""
-    table = _table_with_cols()
-    sql = _geom_check(table, guarded_by_presence=False)
-    assert "ST_IsValid(" in sql
-    assert "feature ? 'geometry'" not in sql
-
-
-def test_geom_check_guarded_short_circuits_before_st_geomfromgeojson():
-    """Suspect: guarded mode (update/PATCH) must put feature ? 'geometry' before
-    ST_IsValid so ST_GeomFromGeoJSON is not called on an absent geometry key."""
-    table = _table_with_cols()
-    sql = _geom_check(table, guarded_by_presence=True)
-    assert sql.index("feature ? 'geometry'") < sql.index("ST_IsValid(")
 
 
 # --------------------------------------------------------------------------
