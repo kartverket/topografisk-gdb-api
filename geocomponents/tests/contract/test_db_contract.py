@@ -32,6 +32,8 @@ _GEOM = {
         "coordinates": [[[[10, 55], [10, 56], [11, 56], [11, 55], [10, 55]]]],
     },
 }
+_DEFAULT_GEOMETRY = object()
+_OMIT_GEOMETRY = object()
 
 
 def _value(sql_type, variant=0):
@@ -59,7 +61,7 @@ def _field_value(f, variant=0):
     return _value(f.sql_type, variant)
 
 
-def _sample_feature(coll):
+def _sample_feature(coll, *, geometry=_DEFAULT_GEOMETRY, properties=None):
     props = {
         f.name: _field_value(f)
         for f in coll.fields
@@ -67,11 +69,19 @@ def _sample_feature(coll):
     }
     if any(f.name == "source" for f in coll.fields):
         props["source"] = "orig"
-    return {
+    if properties:
+        props.update(properties)
+    feature = {
         "type": "Feature",
-        "geometry": _GEOM[coll.geometry_type],
         "properties": props,
     }
+    if geometry is not _OMIT_GEOMETRY:
+        feature["geometry"] = (
+            _GEOM[coll.geometry_type]
+            if geometry is _DEFAULT_GEOMETRY
+            else geometry
+        )
+    return feature
 
 
 # -- thin wrappers over the contract surface --------------------------------
@@ -94,6 +104,32 @@ def _create(cur, ds, coll, feature):
         (ds, coll, orjson.dumps(feature).decode()),
     )
     return cur.fetchone()[0]
+
+
+def _replace(cur, ds, coll, fid, feature):
+    cur.execute(
+        "select ogc.feature_replace(%s,%s,%s,%s)",
+        (ds, coll, fid, orjson.dumps(feature).decode()),
+    )
+    return cur.fetchone()[0]
+
+
+def _update(cur, ds, coll, fid, feature):
+    cur.execute(
+        "select ogc.feature_update(%s,%s,%s,%s)",
+        (ds, coll, fid, orjson.dumps(feature).decode()),
+    )
+    return cur.fetchone()[0]
+
+
+def _collection(datasets, dataset_name, collection_name):
+    for dataset in datasets:
+        if dataset.name != dataset_name:
+            continue
+        for collection in dataset.collections:
+            if collection.name == collection_name:
+                return collection
+    raise AssertionError(f"missing collection {dataset_name}.{collection_name}")
 
 
 # ===========================================================================
@@ -178,6 +214,103 @@ def test_topology_collections_reject_writes_at_the_db(datasets, conn):
                     _create(cur, d.name, coll.name, _sample_feature(coll))
                 # Reads still work.
                 assert _items(cur, d.name, coll.name)["type"] == "FeatureCollection"
+
+
+def test_create_without_geometry_is_rejected(datasets, conn):
+    coll = _collection(datasets, "cadastre", "parcels")
+    feature = _sample_feature(coll, geometry=_OMIT_GEOMETRY)
+
+    with conn.cursor() as cur, pytest.raises(
+        psycopg.errors.RaiseException
+    ) as excinfo:
+        # autocommit: the failed statement is its own transaction.
+        _create(cur, "cadastre", "parcels", feature)
+
+    assert excinfo.value.sqlstate == "P0001"
+
+
+def test_create_with_null_geometry_is_rejected(datasets, conn):
+    coll = _collection(datasets, "cadastre", "parcels")
+    feature = _sample_feature(coll, geometry=None)
+
+    with conn.cursor() as cur, pytest.raises(
+        psycopg.errors.RaiseException
+    ) as excinfo:
+        _create(cur, "cadastre", "parcels", feature)
+
+    assert excinfo.value.sqlstate == "P0001"
+
+
+def test_create_with_invalid_geometry_payload_is_rejected(datasets, conn):
+    coll = _collection(datasets, "cadastre", "parcels")
+    feature = _sample_feature(coll, geometry="nonsense")
+
+    with conn.cursor() as cur, pytest.raises(
+        psycopg.errors.RaiseException
+    ) as excinfo:
+        _create(cur, "cadastre", "parcels", feature)
+
+    assert excinfo.value.sqlstate == "P0001"
+
+
+def test_replace_without_geometry_is_rejected(datasets, conn):
+    coll = _collection(datasets, "cadastre", "parcels")
+
+    with conn.cursor() as cur, pytest.raises(
+        psycopg.errors.RaiseException
+    ) as excinfo:
+        fid = _create(cur, "cadastre", "parcels", _sample_feature(coll))
+        replacement = _sample_feature(
+            coll,
+            geometry=_OMIT_GEOMETRY,
+            properties={"label": "replaced"},
+        )
+        _replace(cur, "cadastre", "parcels", fid, replacement)
+
+    assert excinfo.value.sqlstate == "P0001"
+
+
+def test_update_without_geometry_keeps_existing_geometry(datasets, conn):
+    coll = _collection(datasets, "cadastre", "parcels")
+
+    with conn.cursor() as cur:
+        fid = _create(cur, "cadastre", "parcels", _sample_feature(coll))
+        before = _item(cur, "cadastre", "parcels", fid)
+        assert before is not None
+
+        _update(
+            cur,
+            "cadastre",
+            "parcels",
+            fid,
+            {"properties": {"label": "patched-without-geometry"}},
+        )
+
+        after = _item(cur, "cadastre", "parcels", fid)
+        assert after is not None
+        assert after["geometry"] == before["geometry"]
+        assert after["properties"]["label"] == "patched-without-geometry"
+
+
+def test_update_with_null_geometry_is_rejected(datasets, conn):
+    coll = _collection(datasets, "cadastre", "parcels")
+
+    with conn.cursor() as cur, pytest.raises(
+        psycopg.errors.RaiseException
+    ) as excinfo:
+        fid = _create(cur, "cadastre", "parcels", _sample_feature(coll))
+        _update(
+            cur,
+            "cadastre",
+            "parcels",
+            fid,
+            {
+                "geometry": None,
+                "properties": {"label": "patched-null-geometry"},
+            },
+        )
+
+    assert excinfo.value.sqlstate == "P0001"
 
 
 # ===========================================================================
