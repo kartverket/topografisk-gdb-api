@@ -49,6 +49,16 @@ def _api(dataset_name: str) -> str:
 # ===========================================================================
 # Generic (derived from the descriptions)
 # ===========================================================================
+def test_gateway_cors_applies_to_mounted_dataset_routes(offline_client, datasets):
+    response = offline_client.get(
+        f"{_api(datasets[0].name)}/?f=json",
+        headers={"origin": "https://example.no"},
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    assert response.headers["access-control-allow-origin"] == "*"
+
+
 def test_landing_and_collections_listed_for_every_dataset(client, datasets):
     for d in datasets:
         api = _api(d.name)
@@ -203,8 +213,8 @@ def test_openapi_post_items_documents_only_a_geojson_create(offline_client):
 
 
 def test_openapi_advertises_upsert_only_for_configured_collections(offline_client):
-    bane_oas = offline_client.get(f"{_api('bane')}/openapi?f=json").json()
-    assert "/collections/jernbaneplattformkant/items:upsert" in bane_oas["paths"]
+    fkb_bane_oas = offline_client.get(f"{_api('fkb_bane')}/openapi?f=json").json()
+    assert "/collections/jernbaneplattformkant/items:upsert" in fkb_bane_oas["paths"]
     cadastre_oas = offline_client.get(f"{_api('cadastre')}/openapi?f=json").json()
     assert not any(path.endswith("items:upsert") for path in cadastre_oas["paths"])
 
@@ -314,8 +324,9 @@ def test_golden_bbox_filter(client):
         client.delete(f"{api}/collections/parcels/items/{fid}")
 
 
-def test_bane_upsert_is_idempotent_by_business_key(client):
-    url = f"{_api('bane')}/collections/jernbaneplattformkant/items:upsert"
+@pytest.mark.parametrize("dataset_name", ["fkb_bane"])
+def test_bane_upsert_is_idempotent_by_business_key(client, dataset_name):
+    url = f"{_api(dataset_name)}/collections/jernbaneplattformkant/items:upsert"
     feature = {
         "type": "Feature",
         "geometry": {
@@ -325,8 +336,14 @@ def test_bane_upsert_is_idempotent_by_business_key(client):
         "properties": {
             "lokalid": "platform-1",
             "identifikasjon_navnerom": "test",
+            "identifikasjon": {
+                "lokalid": "platform-1",
+                "navnerom": "test",
+            },
             "oppdateringsdato": "2026-08-05T12:00:00Z",
             "datafangstdato": "2026-08-05T12:00:00Z",
+            "kvalitet_datafangstmetode": "fot",
+            "kvalitet": {"datafangstmetode": "fot"},
             "medium": "T",
             "informasjon": "first",
         },
@@ -348,10 +365,11 @@ def test_bane_upsert_is_idempotent_by_business_key(client):
     assert second.json()["id"] == first.json()["id"]
 
     item = client.get(
-        f"{_api('bane')}/collections/jernbaneplattformkant/items/"
+        f"{_api(dataset_name)}/collections/jernbaneplattformkant/items/"
         f"{first.json()['id']}?f=json"
     ).json()
     assert item["properties"]["informasjon"] == "replaced"
+    assert item["properties"]["identifikasjon"]["lokalid"] == "platform-1"
 
 
 def test_golden_conformance_includes_part4_even_though_dataset_has_topology(client):

@@ -1,11 +1,16 @@
-const defaultApiBaseUrl = '/gcimport-api';
+import { gcimportRuntimeApiUrl, resolveApiBaseUrl } from './runtimeConfig';
 
-export const gcimportApiBaseUrl = (import.meta.env.VITE_GCIMPORT_API_URL ?? defaultApiBaseUrl).replace(/\/$/, '');
+export const gcimportApiBaseUrl = resolveApiBaseUrl(
+  gcimportRuntimeApiUrl(),
+  import.meta.env.GCIMPORT_API_URL,
+  'GCIMPORT_API_URL',
+  'http://localhost:8001'
+);
 
-export type ImportProfile = 'bane' | 'bygning';
+export type ImportProfile = 'fkb_bane' | 'bygning';
 
 const profileTokens: Record<ImportProfile, ReadonlySet<string>> = {
-  bane: new Set(['jernbaneplattformkant', 'spormidt']),
+  fkb_bane: new Set(['jernbaneplattformkant', 'spormidt']),
   bygning: new Set([
     'annenbygning',
     'bygning',
@@ -44,7 +49,7 @@ function inferProfileFromToken(value: unknown): ImportProfile | null {
   if (typeof value !== 'string') return null;
   const token = value.trim().toLowerCase();
   if (!token) return null;
-  if (profileTokens.bane.has(token)) return 'bane';
+  if (profileTokens.fkb_bane.has(token)) return 'fkb_bane';
   if (profileTokens.bygning.has(token)) return 'bygning';
   return null;
 }

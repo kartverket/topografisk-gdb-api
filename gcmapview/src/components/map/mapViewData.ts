@@ -72,8 +72,8 @@ export const emptyVisibleFeatureCollections: VisibleFeatureCollections = {
 export const MIN_VECTOR_ZOOM = 10;
 export const MIN_BUILDING_ZOOM = 15;
 
-const BUILDING_COLOR = '#000000';
-const BUILDING_FILL_COLOR = '#a541c3';
+const BUILDING_COLOR = '#ff0000';
+const BUILDING_FILL_COLOR = '#9914d2';
 const MISSING_HEIGHT_Z = -99_999;
 
 export function isVectorZoom(map: maplibregl.Map) {
@@ -334,7 +334,7 @@ export function addNativeFeatureSourcesAndLayers(
     filter: ['==', ['geometry-type'], 'Polygon'],
     paint: {
       'fill-color': BUILDING_FILL_COLOR,
-      'fill-opacity': 0.55,
+      'fill-opacity': 0.90,
       'fill-outline-color': BUILDING_COLOR
     }
   });

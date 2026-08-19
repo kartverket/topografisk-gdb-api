@@ -17,6 +17,7 @@ import yaml
 from geocomponents.descriptions.models import (
     BUILTIN_SQL_TYPES,
     CodeList,
+    CollectionDef,
     Commons,
     DatasetDef,
     FieldDef,
@@ -66,20 +67,41 @@ def _resolve_field(
     *,
     where: str,
 ) -> ResolvedField:
+    """Resolve one FieldDef into a DB-neutral ResolvedField."""
+    if fld.type == "object":
+        # Recurse into sub-fields; compose the where path so error messages
+        # name the full field path (e.g. "… / field 'kvalitet' / field 'x'").
+        child_where = f"{where} / field '{fld.name}'"
+        sub = tuple(
+            _resolve_field(sf, types, codelists, where=child_where) for sf in fld.fields
+        )
+        return ResolvedField(
+            fld.name,
+            "jsonb",
+            fld.required,
+            sub_fields=sub,
+            enum=tuple(fld.enum),
+            indexable=fld.indexable,
+        )
+
     if fld.codelist is not None:
         if fld.codelist not in codelists:
             raise DescriptionError(
                 f"{where}: field '{fld.name}' references unknown code list "
                 f"'{fld.codelist}'"
             )
-        # Code-list columns are plain text for now; DB-side enforcement is a
-        # deferred 'validation in the DB' concern.
+        # Code-list columns are plain text; code values are stored so the
+        # function generator can emit DB-level validation.
+        cl = codelists[fld.codelist]
         return ResolvedField(
             fld.name,
             "text",
             fld.required,
             codelist=fld.codelist,
             auto_increment=fld.auto_increment,
+            enum=tuple(fld.enum),
+            indexable=fld.indexable,
+            codelist_values=tuple(v.code for v in cl.values),
         )
 
     if fld.type_ref is not None:
@@ -92,6 +114,8 @@ def _resolve_field(
             types[fld.type_ref].sql_type,
             fld.required,
             auto_increment=fld.auto_increment,
+            enum=tuple(fld.enum),
+            indexable=fld.indexable,
         )
 
     if fld.type is not None:
@@ -105,6 +129,8 @@ def _resolve_field(
             BUILTIN_SQL_TYPES[fld.type],
             fld.required,
             auto_increment=fld.auto_increment,
+            enum=tuple(fld.enum),
+            indexable=fld.indexable,
         )
 
     # FieldDef enforces "exactly one of type / type_ref / codelist" at parse time,
@@ -114,9 +140,67 @@ def _resolve_field(
     )
 
 
+def _resolve_dot_path(
+    fields: tuple[ResolvedField, ...],
+    dot_path: str,
+    *,
+    where: str,
+    kind: str,
+) -> ResolvedField:
+    """Walk a dot-path through a resolved field tree; raise DescriptionError if any segment is missing."""
+    parts = dot_path.split(".")
+    current = fields
+    found: ResolvedField | None = None
+    for part in parts:
+        found = next((f for f in current if f.name == part), None)
+        if found is None:
+            raise DescriptionError(
+                f"{where}: {kind} path '{dot_path}' — segment '{part}' not found"
+            )
+        current = found.sub_fields
+    if found is None:
+        # Guards against callers passing an empty dot_path.
+        raise DescriptionError(f"{where}: {kind} path cannot be empty")
+    return found
+
+
+def _upsert_alias_paths(
+    fields: tuple[ResolvedField, ...],
+    *,
+    outward_identifier_path: str | None,
+) -> dict[str, str]:
+    alias_paths: dict[str, str] = {field.name: field.name for field in fields}
+    for field in fields:
+        for sub_field in field.sub_fields:
+            alias_paths.setdefault(
+                f"{field.name}_{sub_field.name}", f"{field.name}.{sub_field.name}"
+            )
+    if outward_identifier_path:
+        alias_paths.setdefault(outward_identifier_path, outward_identifier_path)
+        alias_paths.setdefault(
+            outward_identifier_path.rsplit(".", 1)[-1], outward_identifier_path
+        )
+    return alias_paths
+
+
+def _resolved_upsert_field(
+    coll: CollectionDef,
+    resolved_fields: tuple[ResolvedField, ...],
+) -> str | None:
+    if coll.outward_identifier:
+        return coll.outward_identifier
+
+    if any(field.name == "lokalid" for field in resolved_fields):
+        return "lokalid"
+
+    return None
+
+
 def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
     types = {t.name: t for t in commons.field_types}
-    codelists = {c.name: c for c in commons.code_lists}
+    # Dataset-local codelists take precedence over commons codelists.
+    codelists: dict[str, CodeList] = {c.name: c for c in commons.code_lists}
+    codelists.update({c.name: c for c in dataset.codelists})
     collection_names = {c.name for c in dataset.collections}
 
     unknown_processes = set(dataset.processes) - known_process_ids()
@@ -142,21 +226,52 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
             seen.add(fld.name)
             resolved_fields.append(_resolve_field(fld, types, codelists, where=where))
 
-        unknown_upsert_fields = set(coll.upsert_key) - seen
-        if unknown_upsert_fields:
+        resolved_tuple = tuple(resolved_fields)
+        if coll.outward_identifier:
+            _resolve_dot_path(
+                resolved_tuple,
+                coll.outward_identifier,
+                where=where,
+                kind="outward_identifier",
+            )
+        for path in coll.server_managed:
+            _resolve_dot_path(
+                resolved_tuple,
+                path,
+                where=where,
+                kind="server_managed",
+            )
+
+        resolved_upsert_field = _resolved_upsert_field(coll, resolved_tuple)
+        upsert_alias_paths = _upsert_alias_paths(
+            resolved_tuple,
+            outward_identifier_path=coll.outward_identifier,
+        )
+        if (
+            resolved_upsert_field is not None
+            and resolved_upsert_field not in upsert_alias_paths
+        ):
             raise DescriptionError(
-                f"{where}: upsert_key references unknown field(s) "
-                f"{sorted(unknown_upsert_fields)}"
+                f"{where}: resolved upsert field references unknown field "
+                f"'{resolved_upsert_field}'"
             )
         auto_increment_fields = {
             fld.name for fld in merged_fields if fld.auto_increment
         }
-        invalid_upsert_fields = set(coll.upsert_key) & auto_increment_fields
-        if invalid_upsert_fields:
+        if (
+            resolved_upsert_field is not None
+            and upsert_alias_paths[resolved_upsert_field] in auto_increment_fields
+        ):
             raise DescriptionError(
-                f"{where}: upsert_key cannot use auto-increment field(s) "
-                f"{sorted(invalid_upsert_fields)}"
+                f"{where}: resolved upsert field cannot use auto-increment field "
+                f"'{resolved_upsert_field}'"
             )
+
+        upsert_path = (
+            upsert_alias_paths[resolved_upsert_field]
+            if resolved_upsert_field is not None
+            else None
+        )
 
         resolved_rels: list[ResolvedRelationship] = []
         for rel in coll.relationships:
@@ -176,9 +291,13 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
                 geometry_type=coll.geometry.type,
                 srid=coll.geometry.srid,
                 has_z=coll.geometry.has_z,
-                fields=tuple(resolved_fields),
+                geometry_required=coll.geometry.required,
+                fields=resolved_tuple,
                 relationships=tuple(resolved_rels),
-                upsert_key=tuple(coll.upsert_key),
+                upsert_field=resolved_upsert_field,
+                upsert_path=upsert_path,
+                outward_identifier_path=coll.outward_identifier,
+                server_managed_paths=dict(coll.server_managed),
             )
         )
 

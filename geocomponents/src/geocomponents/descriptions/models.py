@@ -32,6 +32,8 @@ BUILTIN_SQL_TYPES: dict[str, str] = {
     "date": "date",
     "timestamp": "timestamptz",
     "uuid": "uuid",
+    # Nested object stored as JSONB; sub-fields live in FieldDef.fields.
+    "object": "jsonb",
 }
 
 GeometryType = Literal[
@@ -86,11 +88,18 @@ class CodeList(BaseModel):
     values: list[CodeListValue] = Field(default_factory=list)
 
 
+_VALID_SERVER_MANAGED_TOKENS: frozenset[str] = frozenset(
+    {"outward_identifier", "timestamp_iso"}
+)
+
+
 class FieldDef(BaseModel):
     """One attribute of a collection.
 
     Exactly one of ``type`` (builtin token), ``type_ref`` (a ``FieldType``
     name) or ``codelist`` (a ``CodeList`` name) selects the column type.
+    For ``type: object``, ``fields`` must be non-empty and defines the
+    nested sub-fields (stored as JSONB at arbitrary depth).
     """
 
     name: SafeIdentifier
@@ -100,24 +109,49 @@ class FieldDef(BaseModel):
     required: bool = False
     auto_increment: bool = False
     description: str | None = None
+    # Nested sub-fields for type:object columns (stored as JSONB).
+    fields: list[FieldDef] = Field(default_factory=list)
+    # Documentation-only enum values; not enforced at the DB level.
+    enum: list[str] = Field(default_factory=list)
+    # When True, the schema builder emits an index for this field.
+    indexable: bool = False
 
     @model_validator(mode="after")
     def _exactly_one_type_source(self):
-        n_set = sum(x is not None for x in (self.type, self.type_ref, self.codelist))
-        if n_set != 1:
-            raise ValueError(
-                "field must set exactly one of type / type_ref / codelist "
-                f"(got {n_set})"
+        if self.type == "object":
+            if not self.fields:
+                raise ValueError(
+                    "field with type='object' must have at least one sub-field "
+                    "in 'fields'"
+                )
+            if self.type_ref is not None or self.codelist is not None:
+                raise ValueError(
+                    "field with type='object' must not also set type_ref or codelist"
+                )
+        else:
+            n_set = sum(
+                x is not None for x in (self.type, self.type_ref, self.codelist)
             )
+            if n_set != 1:
+                raise ValueError(
+                    "field must set exactly one of type / type_ref / codelist "
+                    f"(got {n_set})"
+                )
         if self.auto_increment and self.type != "integer":
             raise ValueError("auto_increment is only supported for integer fields")
         return self
+
+
+# Self-referential model requires an explicit rebuild so Pydantic resolves
+# the forward reference to FieldDef inside FieldDef.fields.
+FieldDef.model_rebuild()
 
 
 class GeometryDef(BaseModel):
     type: GeometryType = "Point"
     srid: int = 4326
     has_z: bool = False
+    required: bool = True
 
 
 class RelationshipDef(BaseModel):
@@ -139,14 +173,28 @@ class CollectionDef(BaseModel):
     geometry: GeometryDef = Field(default_factory=GeometryDef)
     fields: list[FieldDef] = Field(default_factory=list)
     relationships: list[RelationshipDef] = Field(default_factory=list)
-    upsert_key: list[SafeIdentifier] = Field(default_factory=list)
+    # Dot-path to the JSONB sub-field whose value is injected from the feature
+    # id on read and stripped on write (e.g. "identifikasjon.lokalid").
+    outward_identifier: str | None = None
+    # Maps dot-paths to server-managed token values.  Allowed tokens:
+    # "outward_identifier" — for JSONB targets, inject id::text on read and
+    #                         strip on write; for scalar targets, copy the
+    #                         referenced outward_identifier value on write.
+    # "timestamp_iso"      — inject now()::text on write.
+    server_managed: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _unique_upsert_key(self):
-        if len(self.upsert_key) != len(set(self.upsert_key)):
-            raise ValueError("upsert_key fields must be unique")
-        if self.upsert_key and self.feature_model != "simple":
-            raise ValueError("upsert_key is only supported for simple collections")
+    def _validate_collection(self):
+        invalid_tokens = {
+            v
+            for v in self.server_managed.values()
+            if v not in _VALID_SERVER_MANAGED_TOKENS
+        }
+        if invalid_tokens:
+            raise ValueError(
+                f"server_managed has invalid token(s): {sorted(invalid_tokens)}; "
+                f"allowed: {sorted(_VALID_SERVER_MANAGED_TOKENS)}"
+            )
         return self
 
 
@@ -169,6 +217,9 @@ class DatasetDef(BaseModel):
     description: str | None = None
     processes: list[str] = Field(default_factory=list)
     collections: list[CollectionDef] = Field(default_factory=list)
+    # Named codelists defined within this dataset.  Fields reference them by
+    # name via ``codelist: name``; values are used for DB-level validation.
+    codelists: list[CodeList] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------
@@ -181,6 +232,14 @@ class ResolvedField:
     required: bool = False
     codelist: str | None = None  # kept for future DB-side enforcement
     auto_increment: bool = False
+    # Non-empty for type:object fields; contains the resolved sub-fields.
+    sub_fields: tuple[ResolvedField, ...] = field(default_factory=tuple)
+    # Documentation-only enum values (not DB-enforced).
+    enum: tuple[str, ...] = field(default_factory=tuple)
+    # True when the schema builder should emit an index for this field.
+    indexable: bool = False
+    # Actual code values from the referenced CodeList (used for DB validation).
+    codelist_values: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -199,8 +258,14 @@ class ResolvedCollection:
     srid: int
     fields: tuple[ResolvedField, ...]
     relationships: tuple[ResolvedRelationship, ...]
-    upsert_key: tuple[str, ...] = field(default_factory=tuple)
+    upsert_field: str | None = None
+    upsert_path: str | None = None
     has_z: bool = False
+    geometry_required: bool = True
+    # Dot-path to the outward-identifier sub-field (e.g. "identifikasjon.lokalid").
+    outward_identifier_path: str | None = None
+    # Server-managed dot-paths -> token values (mirrors CollectionDef.server_managed).
+    server_managed_paths: dict[str, str] = field(default_factory=dict)
 
     @property
     def id_field(self) -> str:
@@ -217,7 +282,7 @@ class ResolvedCollection:
 
     @property
     def supports_upsert(self) -> bool:
-        return self.supports_crud and bool(self.upsert_key)
+        return self.supports_crud and self.upsert_field is not None
 
 
 @dataclass(frozen=True)

@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
           enable-cache: true
       - name: Install dev dependencies (pre-commit lives in geocomponents dev group)
@@ -57,7 +57,7 @@ jobs:
       DB_PASSWORD: geocomponents
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
           enable-cache: true
       - name: Sync dependencies
@@ -70,7 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
           enable-cache: true
       - name: Sync dependencies
@@ -86,7 +86,7 @@ jobs:
         working-directory: geocomponents
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
           enable-cache: true
       - name: Export runtime dependencies to requirements.txt
@@ -101,7 +101,7 @@ jobs:
         working-directory: gcimport
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
         with:
           enable-cache: true
       - name: Export runtime dependencies to requirements.txt
@@ -109,69 +109,99 @@ jobs:
       - name: Audit dependencies with pip-audit
         run: uvx pip-audit -r requirements.txt --disable-pip
 
-  # Builds the image on every PR and every push, loads it into the local Docker
-  # daemon (no registry credentials), and fails the run on HIGH/CRITICAL OS or
-  # library CVEs. Populates the GHA build cache so `publish` can reuse layers.
+  # Builds each Docker image on every PR and every push, loads it into the local
+  # Docker daemon (no registry credentials), and fails the run on HIGH/CRITICAL
+  # OS or library CVEs. Populates the GHA build cache so `publish` can reuse
+  # layers.
   build-and-scan:
-    needs: [pre-commit-lint, test, audit]
+    needs: [pre-commit-lint, test, test-gcimport, audit, audit-gcimport]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: geocomponents
+            context: ./geocomponents
+            local_tag: geocomponents:scan
+            image_name: ${{ github.repository }}-geocomponents
+            cache_scope: geocomponents
+          - service: gcimport
+            context: ./gcimport
+            local_tag: gcimport:scan
+            image_name: ${{ github.repository }}-gcimport
+            cache_scope: gcimport
+          - service: gccore
+            context: ./gccore
+            local_tag: gccore:scan
+            image_name: ${{ github.repository }}-gccore
+            cache_scope: gccore
+          - service: gcjobs
+            context: ./gcjobs
+            local_tag: gcjobs:scan
+            image_name: ${{ github.repository }}-gcjobs
+            cache_scope: gcjobs
+          - service: gcmapview
+            context: ./gcmapview
+            local_tag: gcmapview:scan
+            image_name: ${{ github.repository }}-gcmapview
+            cache_scope: gcmapview
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
 
-      - name: Build image (load into local daemon for scanning)
-        uses: docker/build-push-action@cb941d0b895b09c17fa011d41c411b33c752cf28  # v6.16.0
+      - name: Build ${{ matrix.service }} image (load into local daemon for scanning)
+        uses: docker/build-push-action@2ca78c6bec76527009825f31aae0532b4d40d820  # v6.16.0
         with:
-          context: ./geocomponents
+          context: ${{ matrix.context }}
           load: true
-          tags: geocomponents:scan
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ matrix.local_tag }}
+          cache-from: type=gha,scope=${{ matrix.cache_scope }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
 
       - name: Trivy vulnerability scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
         with:
-          image-ref: geocomponents:scan
+          image-ref: ${{ matrix.local_tag }}
           format: table
           exit-code: '1'
           ignore-unfixed: true
-          vuln-type: 'os,library'
+          pkg-types: 'os,library'
           severity: 'CRITICAL,HIGH'
 
-  build-and-scan-gcimport:
-    needs: [pre-commit-lint, test-gcimport, audit-gcimport]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
-      - name: Build gcimport image
-        uses: docker/build-push-action@cb941d0b895b09c17fa011d41c411b33c752cf28  # v6.16.0
-        with:
-          context: ./gcimport
-          load: true
-          tags: gcimport:scan
-          cache-from: type=gha,scope=gcimport
-          cache-to: type=gha,mode=max,scope=gcimport
-      - name: Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
-        with:
-          image-ref: gcimport:scan
-          format: table
-          exit-code: '1'
-          ignore-unfixed: true
-          vuln-type: 'os,library'
-          severity: 'CRITICAL,HIGH'
-
-  # Publishes to GHCR only on merges to main. Depends on build-and-scan so a
-  # failing Trivy scan (or lint/test) blocks publish. Rebuilds via buildx but
-  # `cache-from: type=gha` makes it a near-no-op that just re-tags and pushes.
+  # Publishes one GHCR artifact per Dockerfile only on merges to main. Depends
+  # on build-and-scan so a failing Trivy scan (or lint/test) blocks publish.
+  # Rebuilds via buildx but `cache-from: type=gha` makes it a near-no-op that
+  # just re-tags and pushes.
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [build-and-scan]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: geocomponents
+            context: ./geocomponents
+            image_name: ${{ github.repository }}-geocomponents
+            cache_scope: geocomponents
+          - service: gcimport
+            context: ./gcimport
+            image_name: ${{ github.repository }}-gcimport
+            cache_scope: gcimport
+          - service: gccore
+            context: ./gccore
+            image_name: ${{ github.repository }}-gccore
+            cache_scope: gccore
+          - service: gcjobs
+            context: ./gcjobs
+            image_name: ${{ github.repository }}-gcjobs
+            cache_scope: gcjobs
+          - service: gcmapview
+            context: ./gcmapview
+            image_name: ${{ github.repository }}-gcmapview
+            cache_scope: gcmapview
     permissions:
       contents: read
       packages: write
@@ -179,7 +209,6 @@ jobs:
       id-token: write
     env:
       REGISTRY: ghcr.io
-      IMAGE_NAME: ${{ github.repository }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
@@ -197,7 +226,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@703896b4f30f62d53f5530a80bcdc589a3f702bc  # v5.7.0
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ matrix.image_name }}
           tags: |
             # Always tag with short git SHA (e.g. a1b2c3d)
             type=sha,prefix=,format=short
@@ -206,20 +235,20 @@ jobs:
             # Tag latest on every push to the default branch
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push Docker image
+      - name: Build and push ${{ matrix.service }} Docker image
         id: push
-        uses: docker/build-push-action@cb941d0b895b09c17fa011d41c411b33c752cf28  # v6.16.0
+        uses: docker/build-push-action@2ca78c6bec76527009825f31aae0532b4d40d820  # v6.16.0
         with:
-          context: ./geocomponents
+          context: ${{ matrix.context }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.cache_scope }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
 
-      - name: Generate artifact attestation
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373  # v4.1.1
+      - name: Generate ${{ matrix.service }} artifact attestation
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-name: ${{ env.REGISTRY }}/${{ matrix.image_name }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true

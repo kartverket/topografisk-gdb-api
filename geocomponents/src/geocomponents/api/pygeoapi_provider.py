@@ -37,7 +37,11 @@ from starlette.routing import Route
 from starlette.types import ASGIApp
 
 from geocomponents.config import database_dsn
-from geocomponents.descriptions.models import ResolvedCollection, ResolvedDataset
+from geocomponents.descriptions.models import (
+    ResolvedCollection,
+    ResolvedDataset,
+    ResolvedField,
+)
 from geocomponents.processes.registry import PROCESS_REGISTRY
 
 PROVIDER_PATH = "geocomponents.api.db_function_provider.DbFunctionProvider"
@@ -80,11 +84,28 @@ def _json_type(sql_type: str) -> str:
         return "number"
     if s == "boolean":
         return "boolean"
+    if s == "jsonb":
+        return "object"
     return "string"
 
 
+def _field_schema(fld: ResolvedField) -> dict:
+    """Return a JSON Schema fragment for one resolved field."""
+    if fld.sql_type == "jsonb":
+        return {
+            "type": "object",
+            "properties": {sf.name: _field_schema(sf) for sf in fld.sub_fields},
+        }
+    schema: dict = {"type": _json_type(fld.sql_type)}
+    # Enforced codelist values take priority over documentation-only enum hints.
+    values = fld.codelist_values or fld.enum
+    if values:
+        schema["enum"] = list(values)
+    return schema
+
+
 def _provider_fields(coll: ResolvedCollection) -> dict:
-    fields = {f.name: {"type": _json_type(f.sql_type)} for f in coll.fields}
+    fields = {f.name: _field_schema(f) for f in coll.fields}
     for rel in coll.relationships:
         fields[f"{rel.name}_id"] = {"type": "string"}
     return fields
@@ -116,7 +137,7 @@ def _collection_resource(dataset: str, coll: ResolvedCollection, dsn: str) -> di
                 # Geometry type/srid so the provider can describe its own schema.
                 "geometry_type": coll.geometry_type,
                 "srid": coll.srid,
-                "upsert_key": list(coll.upsert_key),
+                "upsert_field": coll.upsert_field,
                 **(
                     {
                         "storage_crs": storage_crs,
@@ -405,7 +426,7 @@ def _build_starlette_app(api_: API) -> Starlette:
 
     def _upsertable(cid) -> bool:
         res = _resource(cid)
-        return bool(res and res["providers"][0].get("upsert_key"))
+        return bool(res and res["providers"][0].get("upsert_field"))
 
     async def landing(request: Request):
         return await _execute(api_, core_api.landing_page, request)

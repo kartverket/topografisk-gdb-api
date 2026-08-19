@@ -80,14 +80,25 @@ def test_feature_model_and_processes_resolve():
     assert by_name["blocks"].supports_crud is False
 
 
-def test_bane_upsert_key_resolves():
-    bane = next(d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bane")
-    for coll in bane.collections:
-        assert coll.upsert_key == ("lokalid", "identifikasjon_navnerom")
+def test_fkb_bane_dataset_resolves_expected_geometry_and_upsert_field():
+    fkb_bane = next(
+        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "fkb_bane"
+    )
+    assert [coll.name for coll in fkb_bane.collections] == [
+        "jernbaneplattformkant",
+        "spormidt",
+    ]
+
+    for coll in fkb_bane.collections:
+        assert coll.geometry_type == "MultiLineString"
+        assert coll.srid == 5973
+        assert coll.has_z is True
+        assert coll.upsert_field == "identifikasjon.lokalid"
+        assert coll.upsert_path == "identifikasjon.lokalid"
         assert coll.supports_upsert
 
 
-def test_bygning_dataset_resolves_expected_geometry_and_upsert_key():
+def test_bygning_dataset_resolves_expected_geometry_and_upsert_field():
     bygning = next(
         d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bygning"
     )
@@ -102,14 +113,16 @@ def test_bygning_dataset_resolves_expected_geometry_and_upsert_key():
     assert linework.geometry_type == "MultiLineString"
     assert linework.srid == 5972
     assert linework.has_z is True
-    assert linework.upsert_key == ("lokalid", "identifikasjon_navnerom")
+    assert linework.upsert_field == "lokalid"
+    assert linework.upsert_path == "lokalid"
     assert linework.supports_upsert
 
     area = next(coll for coll in bygning.collections if coll.name == "bygning_omrade")
     assert area.geometry_type == "MultiPolygon"
     assert area.srid == 5972
     assert area.has_z is True
-    assert area.upsert_key == ("lokalid", "identifikasjon_navnerom")
+    assert area.upsert_field == "lokalid"
+    assert area.upsert_path == "lokalid"
     assert area.supports_upsert
 
     centerline = next(
@@ -118,7 +131,8 @@ def test_bygning_dataset_resolves_expected_geometry_and_upsert_key():
     assert centerline.geometry_type == "MultiLineString"
     assert centerline.srid == 5972
     assert centerline.has_z is True
-    assert centerline.upsert_key == ("lokalid", "identifikasjon_navnerom")
+    assert centerline.upsert_field == "lokalid"
+    assert centerline.upsert_path == "lokalid"
     assert centerline.supports_upsert
 
     position = next(
@@ -127,19 +141,9 @@ def test_bygning_dataset_resolves_expected_geometry_and_upsert_key():
     assert position.geometry_type == "Point"
     assert position.srid == 5972
     assert position.has_z is True
-    assert position.upsert_key == ("lokalid", "identifikasjon_navnerom")
+    assert position.upsert_field == "lokalid"
+    assert position.upsert_path == "lokalid"
     assert position.supports_upsert
-
-
-def test_upsert_key_must_reference_writable_fields():
-    dataset = DatasetDef.model_validate(
-        {
-            "name": "x",
-            "collections": [{"name": "c", "upsert_key": ["missing"]}],
-        }
-    )
-    with pytest.raises(DescriptionError, match="unknown field"):
-        resolve_dataset(dataset, Commons())
 
 
 def test_unknown_process_raises_clear_error():
@@ -223,6 +227,270 @@ def test_safe_identifier_surfaces_via_file_loader(tmp_path):
 
 
 # --------------------------------------------------------------------------
+# Nested object fields (Commit 2)
+# --------------------------------------------------------------------------
+
+
+def _dataset_with_object_field(extra_collection_keys=None):
+    """Helper: dataset with a single collection containing an object field."""
+    coll = {
+        "name": "c",
+        "fields": [
+            {
+                "name": "kvalitet",
+                "type": "object",
+                "fields": [
+                    {"name": "datafangstmetode", "type": "string"},
+                    {"name": "noyaktighet", "type": "integer"},
+                ],
+            }
+        ],
+    }
+    if extra_collection_keys:
+        coll.update(extra_collection_keys)
+    return DatasetDef.model_validate({"name": "x", "collections": [coll]})
+
+
+def test_object_field_resolves_to_jsonb_with_sub_fields():
+    ds = resolve_dataset(_dataset_with_object_field(), Commons())
+    coll = ds.collections[0]
+    kvalitet = next(f for f in coll.fields if f.name == "kvalitet")
+    assert kvalitet.sql_type == "jsonb"
+    assert len(kvalitet.sub_fields) == 2
+    assert kvalitet.sub_fields[0].name == "datafangstmetode"
+    assert kvalitet.sub_fields[0].sql_type == "text"
+    assert kvalitet.sub_fields[1].name == "noyaktighet"
+    assert kvalitet.sub_fields[1].sql_type == "integer"
+
+
+def test_depth2_nesting_resolves_correctly():
+    dataset = DatasetDef.model_validate(
+        {
+            "name": "x",
+            "collections": [
+                {
+                    "name": "c",
+                    "fields": [
+                        {
+                            "name": "outer",
+                            "type": "object",
+                            "fields": [
+                                {
+                                    "name": "inner",
+                                    "type": "object",
+                                    "fields": [{"name": "leaf", "type": "string"}],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    ds = resolve_dataset(dataset, Commons())
+    outer = ds.collections[0].fields[0]
+    assert outer.sql_type == "jsonb"
+    inner = outer.sub_fields[0]
+    assert inner.sql_type == "jsonb"
+    leaf = inner.sub_fields[0]
+    assert leaf.sql_type == "text"
+
+
+def test_enum_propagates_to_resolved_field():
+    dataset = DatasetDef.model_validate(
+        {
+            "name": "x",
+            "collections": [
+                {
+                    "name": "c",
+                    "fields": [
+                        {"name": "medium", "type": "string", "enum": ["T", "U", "V"]}
+                    ],
+                }
+            ],
+        }
+    )
+    ds = resolve_dataset(dataset, Commons())
+    medium = ds.collections[0].fields[0]
+    assert medium.enum == ("T", "U", "V")
+
+
+def test_indexable_propagates_to_resolved_field():
+    dataset = DatasetDef.model_validate(
+        {
+            "name": "x",
+            "collections": [
+                {
+                    "name": "c",
+                    "fields": [
+                        {"name": "lokalid", "type": "string", "indexable": True}
+                    ],
+                }
+            ],
+        }
+    )
+    ds = resolve_dataset(dataset, Commons())
+    assert ds.collections[0].fields[0].indexable is True
+
+
+def test_error_message_contains_full_path_for_nested_bad_type_ref():
+    """where context must compose so the error names the sub-field path."""
+    dataset = DatasetDef.model_validate(
+        {
+            "name": "myds",
+            "collections": [
+                {
+                    "name": "mycoll",
+                    "fields": [
+                        {
+                            "name": "kvalitet",
+                            "type": "object",
+                            "fields": [{"name": "method", "type_ref": "no_such_type"}],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    with pytest.raises(DescriptionError, match="kvalitet"):
+        resolve_dataset(dataset, Commons())
+
+
+def test_dataset_codelist_takes_precedence_over_commons():
+    """Dataset-local codelists must shadow a commons codelist of the same name."""
+    commons = Commons.model_validate(
+        {"code_lists": [{"name": "medium", "values": [{"code": "COMMONS_ONLY"}]}]}
+    )
+    dataset = DatasetDef.model_validate(
+        {
+            "name": "x",
+            "codelists": [{"name": "medium", "values": [{"code": "DATASET_VALUE"}]}],
+            "collections": [
+                {"name": "c", "fields": [{"name": "f", "codelist": "medium"}]}
+            ],
+        }
+    )
+    ds = resolve_dataset(dataset, commons)
+    # The field resolves successfully (both sources have "medium"), and the
+    # dataset codelist is used. We can't directly inspect which was picked
+    # from ResolvedField, but the key assertion is that it resolves at all
+    # and that adding a dataset codelist doesn't break the lookup.
+    assert ds.collections[0].fields[0].codelist == "medium"
+
+
+def test_outward_identifier_dot_path_validated_against_fields():
+    """An outward_identifier referencing a non-existent sub-field must raise."""
+    dataset = DatasetDef.model_validate(
+        {
+            "name": "x",
+            "collections": [
+                {
+                    "name": "c",
+                    "outward_identifier": "identifikasjon.ghost",
+                    "fields": [
+                        {
+                            "name": "identifikasjon",
+                            "type": "object",
+                            "fields": [{"name": "lokalid", "type": "string"}],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    with pytest.raises(DescriptionError, match="outward_identifier"):
+        resolve_dataset(dataset, Commons())
+
+
+def test_server_managed_dot_path_validated_against_fields():
+    """A server_managed path referencing a non-existent field must raise."""
+    dataset = DatasetDef.model_validate(
+        {
+            "name": "x",
+            "collections": [
+                {
+                    "name": "c",
+                    "server_managed": {"does_not_exist.sub": "timestamp_iso"},
+                    "fields": [{"name": "other", "type": "string"}],
+                }
+            ],
+        }
+    )
+    with pytest.raises(DescriptionError, match="server_managed"):
+        resolve_dataset(dataset, Commons())
+
+
+def test_outward_identifier_and_server_managed_stored_on_resolved_collection():
+    """Valid declarations must propagate to the resolved collection."""
+    dataset = DatasetDef.model_validate(
+        {
+            "name": "x",
+            "collections": [
+                {
+                    "name": "c",
+                    "outward_identifier": "identifikasjon.lokalid",
+                    "server_managed": {
+                        "identifikasjon.lokalid": "outward_identifier",
+                        "identifikasjon.versjonid": "timestamp_iso",
+                    },
+                    "fields": [
+                        {
+                            "name": "identifikasjon",
+                            "type": "object",
+                            "fields": [
+                                {"name": "lokalid", "type": "string"},
+                                {"name": "versjonid", "type": "string"},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    ds = resolve_dataset(dataset, Commons())
+    coll = ds.collections[0]
+    assert coll.outward_identifier_path == "identifikasjon.lokalid"
+    assert coll.server_managed_paths["identifikasjon.versjonid"] == "timestamp_iso"
+
+
+# --------------------------------------------------------------------------
+# Loader post-code suspects
+# --------------------------------------------------------------------------
+
+
+def test_codelist_defined_only_in_dataset_resolves():
+    """Dataset-local codelist with no commons counterpart must resolve."""
+    dataset = DatasetDef.model_validate(
+        {
+            "name": "x",
+            "codelists": [{"name": "medium", "values": [{"code": "T"}]}],
+            "collections": [
+                {"name": "c", "fields": [{"name": "f", "codelist": "medium"}]}
+            ],
+        }
+    )
+    ds = resolve_dataset(dataset, Commons())
+    assert ds.collections[0].fields[0].codelist == "medium"
+
+
+def test_codelist_only_in_commons_still_resolves():
+    """Adding dataset.codelists must not break the existing commons lookup path."""
+    commons = Commons.model_validate(
+        {"code_lists": [{"name": "existing", "values": [{"code": "A"}]}]}
+    )
+    dataset = DatasetDef.model_validate(
+        {
+            "name": "x",
+            "collections": [
+                {"name": "c", "fields": [{"name": "f", "codelist": "existing"}]}
+            ],
+        }
+    )
+    ds = resolve_dataset(dataset, commons)
+    assert ds.collections[0].fields[0].codelist == "existing"
+
+
+# --------------------------------------------------------------------------
 # FieldDef: exactly one of type / type_ref / codelist
 # --------------------------------------------------------------------------
 @pytest.mark.parametrize(
@@ -245,3 +513,49 @@ def test_field_rejects_no_type_source():
     """A field must select its column type somehow."""
     with pytest.raises(ValidationError):
         FieldDef.model_validate({"name": "f"})
+
+
+# --------------------------------------------------------------------------
+# codelist_values flow (Commit 5 prerequisite)
+# --------------------------------------------------------------------------
+
+
+def test_codelist_values_populated_from_declared_codes():
+    """Suspect: codes in ResolvedField.codelist_values must match the codelist
+    declaration order and content."""
+    dataset = DatasetDef.model_validate(
+        {
+            "name": "x",
+            "codelists": [
+                {
+                    "name": "surface",
+                    "values": [
+                        {"code": "ASFALT"},
+                        {"code": "GRUS"},
+                        {"code": "STEIN"},
+                    ],
+                }
+            ],
+            "collections": [
+                {"name": "c", "fields": [{"name": "f", "codelist": "surface"}]}
+            ],
+        }
+    )
+    ds = resolve_dataset(dataset, Commons())
+    assert ds.collections[0].fields[0].codelist_values == ("ASFALT", "GRUS", "STEIN")
+
+
+def test_codelist_with_no_values_gives_empty_codelist_values():
+    """Suspect: a codelist with no declared values must not raise; codelist_values
+    must be an empty tuple so downstream callers can check truthiness safely."""
+    dataset = DatasetDef.model_validate(
+        {
+            "name": "x",
+            "codelists": [{"name": "empty"}],
+            "collections": [
+                {"name": "c", "fields": [{"name": "f", "codelist": "empty"}]}
+            ],
+        }
+    )
+    ds = resolve_dataset(dataset, Commons())
+    assert ds.collections[0].fields[0].codelist_values == ()

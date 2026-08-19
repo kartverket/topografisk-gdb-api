@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import robotoLatinVariableUrl from '@fontsource-variable/roboto/files/roboto-latin-wght-normal.woff2';
 import { AlertCircle, Eraser, Plus } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -20,19 +21,18 @@ import {
   configureInitialMapInteraction,
   terrainSourceId
 } from '../../map/mapDimension';
-import { useMapDimension } from './MapDimensionContext';
-import { FeaturePropertiesCard } from './FeaturePropertiesCard';
-import { MapLayersCard } from './MapLayersCard';
-import { useLayerVisibilityStore } from '../../store/layerVisibilityStore';
-import { useMapViewStore } from '../../store/mapViewStore';
 import {
   hasInspectableFeatureAtPoint,
   inspectFeaturesAtPoint,
   type ActiveFeatureFilter
 } from '../../map/featureInspect';
-import type { FeatureCollection } from '../../map/geojson';
-import { buildingCentroidsFeatureCollection, featureCentroid, logLoadedCoordinates } from './mapViewGeometry';
-import { randomNonOverlappingBuildingAndParcel } from './mapViewRandomFeatures';
+import { filterUnavailableLayers, useLayerVisibilityStore } from '../../store/layerVisibilityStore';
+import { useMapViewStore } from '../../store/mapViewStore';
+import { applyObjtypeLabelVisibility, OBJTYPE_LABEL_MIN_ZOOM, upsertObjtypeLabelLayer } from './objtypeLabels';
+import { FeaturePropertiesCard } from './FeaturePropertiesCard';
+import { MapLayersCard } from './MapLayersCard';
+import { useMapDimension } from './useMapDimension';
+import { buildingCentroidsFeatureCollection, logLoadedCoordinates } from './mapViewGeometry';
 import {
   addNativeFeatureSourcesAndLayers,
   clearVectorSources,
@@ -55,22 +55,43 @@ import {
   upsertGeoJsonSource,
   visibleOgcBbox
 } from './mapViewData';
+import { randomNonOverlappingBuildingAndParcel } from './mapViewRandomFeatures';
 import { useSelectedFeature } from './useSelectedFeature';
 
 /** Default initial view when no local favorite view has been saved. */
 const OTTA_CENTER: [number, number] = [9.54, 61.77];
 const OTTA_ZOOM = 15;
 const DEFERRED_ELEVATED_SOURCE_DELAY_MS = 120;
+const backgroundMapLayerIds = ['kartverket-topo', 'kartverket-toporaster', 'kartverket-topograatone'] as const;
+
+export type BackgroundMapId = 'topo' | 'toporaster' | 'topograatone' | 'none';
 
 const mapStyle: maplibregl.StyleSpecification = {
   version: 8,
+  'font-faces': {
+    'Roboto Variable': robotoLatinVariableUrl
+  },
   sources: {
-    osm: {
+    kartverketTopo: {
       type: 'raster',
-      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+      tiles: ['https://cache.kartverket.no/v1/wmts/1.0.0/topo/default/webmercator/{z}/{y}/{x}.png'],
       tileSize: 256,
-      maxzoom: 17,
-      attribution: '&copy; OpenStreetMap contributors'
+      maxzoom: 18,
+      attribution: '&copy; Kartverket'
+    },
+    kartverketToporaster: {
+      type: 'raster',
+      tiles: ['https://cache.kartverket.no/v1/wmts/1.0.0/toporaster/default/webmercator/{z}/{y}/{x}.png'],
+      tileSize: 256,
+      maxzoom: 18,
+      attribution: '&copy; Kartverket'
+    },
+    kartverketTopograatone: {
+      type: 'raster',
+      tiles: ['https://cache.kartverket.no/v1/wmts/1.0.0/topograatone/default/webmercator/{z}/{y}/{x}.png'],
+      tileSize: 256,
+      maxzoom: 18,
+      attribution: '&copy; Kartverket'
     },
     [terrainSourceId]: {
       type: 'raster-dem',
@@ -83,9 +104,25 @@ const mapStyle: maplibregl.StyleSpecification = {
   },
   layers: [
     {
-      id: 'osm',
+      id: 'kartverket-topo',
       type: 'raster',
-      source: 'osm'
+      source: 'kartverketTopo'
+    },
+    {
+      id: 'kartverket-toporaster',
+      type: 'raster',
+      source: 'kartverketToporaster',
+      layout: {
+        visibility: 'none'
+      }
+    },
+    {
+      id: 'kartverket-topograatone',
+      type: 'raster',
+      source: 'kartverketTopograatone',
+      layout: {
+        visibility: 'none'
+      }
     }
   ]
 };
@@ -94,10 +131,26 @@ function isTerrainEnabled(is3d: boolean, adjustElevatedHeights: boolean) {
   return is3d && !adjustElevatedHeights;
 }
 
+function applyBackgroundMap(map: maplibregl.Map, backgroundMap: BackgroundMapId) {
+  for (const layerId of backgroundMapLayerIds) {
+    if (!map.getLayer(layerId)) {
+      continue;
+    }
+
+    const isVisible =
+      (backgroundMap === 'topo' && layerId === 'kartverket-topo') ||
+      (backgroundMap === 'toporaster' && layerId === 'kartverket-toporaster') ||
+      (backgroundMap === 'topograatone' && layerId === 'kartverket-topograatone');
+    map.setLayoutProperty(layerId, 'visibility', isVisible ? 'visible' : 'none');
+  }
+}
+
 export function MapView() {
+  const mapSectionRef = useRef<HTMLElement>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map>(null);
-  const buildingMarkerRefs = useRef<maplibregl.Marker[]>([]);
+  const mapLayersPanelRef = useRef<HTMLDivElement>(null);
+  const featureInspectorPanelRef = useRef<HTMLDivElement>(null);
   const pendingReloadTimeoutRef = useRef<number | undefined>(undefined);
   const pendingElevatedRefreshTimeoutRef = useRef<number | undefined>(undefined);
   const reloadVisibleDataRef = useRef<(() => Promise<void>) | undefined>(undefined);
@@ -111,8 +164,12 @@ export function MapView() {
   activeFeatureFilterRef.current = activeFeatureFilter;
   const latestVectorDataRef = useRef<VisibleFeatureCollections>(emptyVisibleFeatureCollections);
   const layerVisibility = useLayerVisibilityStore(state => state.visibility);
+  const availableLayerIds = useLayerVisibilityStore(state => state.availableLayerIds);
+  const isLoadingAvailableLayers = useLayerVisibilityStore(state => state.isLoadingAvailableLayers);
+  const resolveAvailableLayerIds = useLayerVisibilityStore(state => state.resolveAvailableLayerIds);
   const setLayerVisibility = useLayerVisibilityStore(state => state.setVisibility);
-  const previousLayerVisibilityRef = useRef(layerVisibility);
+  const filteredLayerVisibility = filterUnavailableLayers(layerVisibility, availableLayerIds);
+  const previousLayerVisibilityRef = useRef(filteredLayerVisibility);
   const favoriteViews = useMapViewStore(state => state.favoriteViews);
   const activeFavoriteName = useMapViewStore(state => state.activeFavoriteName);
   const saveFavoriteView = useMapViewStore(state => state.saveFavoriteView);
@@ -120,13 +177,95 @@ export function MapView() {
   const removeFavoriteView = useMapViewStore(state => state.removeFavoriteView);
   const activeFavoriteView =
     favoriteViews.find(favoriteView => favoriteView.name === activeFavoriteName) ?? favoriteViews[0];
-  const [status, setStatus] = useState('Loading map...');
+  const initialFavoriteViewRef = useRef<{ center: [number, number]; zoom: number }>({
+    center: activeFavoriteView?.center ?? OTTA_CENTER,
+    zoom: activeFavoriteView?.zoom ?? OTTA_ZOOM
+  });
+  const [status, setStatus] = useState('Laster kart...');
   const [error, setError] = useState<string>();
   const [isMapReady, setIsMapReady] = useState(false);
   const [isVectorZoomActive, setIsVectorZoomActive] = useState(false);
+  const [backgroundMap, setBackgroundMap] = useState<BackgroundMapId>('topo');
+  const backgroundMapRef = useRef<BackgroundMapId>(backgroundMap);
+  backgroundMapRef.current = backgroundMap;
   const [isCreating, setIsCreating] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
+  const [placeInspectorLeftOfLayers, setPlaceInspectorLeftOfLayers] = useState(false);
   const { selectedFeature, setHoveredPositionIndex, setSelectedFeature } = useSelectedFeature({ mapRef, is3d });
+  const closeSelectedFeatureInspectorRef = useRef<() => void>(() => {});
+  const setSelectedFeatureRef = useRef(setSelectedFeature);
+  setSelectedFeatureRef.current = setSelectedFeature;
+
+  function toggleMapDimension() {
+    if (!is3d) {
+      setAdjustElevatedHeights(true);
+    }
+
+    setIs3d(value => !value);
+  }
+
+  function currentFilteredLayerVisibility() {
+    const state = useLayerVisibilityStore.getState();
+    return filterUnavailableLayers(state.visibility, state.availableLayerIds);
+  }
+
+  useEffect(() => {
+    void resolveAvailableLayerIds();
+  }, [resolveAvailableLayerIds]);
+
+  useEffect(() => {
+    if (!selectedFeature) {
+      setPlaceInspectorLeftOfLayers(false);
+      return;
+    }
+
+    const mapSection = mapSectionRef.current;
+    const mapLayersPanel = mapLayersPanelRef.current;
+    const featureInspectorPanel = featureInspectorPanelRef.current;
+
+    if (!mapSection || !mapLayersPanel || !featureInspectorPanel) {
+      return;
+    }
+
+    let frame = 0;
+
+    const updateInspectorPlacement = () => {
+      frame = 0;
+      const sectionRect = mapSection.getBoundingClientRect();
+      const layersRect = mapLayersPanel.getBoundingClientRect();
+      const inspectorRect = featureInspectorPanel.getBoundingClientRect();
+      const overlapsVertically = inspectorRect.top < layersRect.bottom && layersRect.top < inspectorRect.bottom;
+      const availableWidthLeftOfLayers = layersRect.left - sectionRect.left - 16;
+      const canMoveLeft = window.innerWidth >= 640 && inspectorRect.width <= availableWidthLeftOfLayers;
+
+      setPlaceInspectorLeftOfLayers(overlapsVertically && canMoveLeft);
+    };
+
+    const scheduleInspectorPlacementUpdate = () => {
+      if (frame !== 0) {
+        return;
+      }
+
+      frame = window.requestAnimationFrame(updateInspectorPlacement);
+    };
+
+    scheduleInspectorPlacementUpdate();
+
+    const resizeObserver = new ResizeObserver(scheduleInspectorPlacementUpdate);
+    resizeObserver.observe(mapSection);
+    resizeObserver.observe(mapLayersPanel);
+    resizeObserver.observe(featureInspectorPanel);
+    window.addEventListener('resize', scheduleInspectorPlacementUpdate);
+
+    return () => {
+      if (frame !== 0) {
+        window.cancelAnimationFrame(frame);
+      }
+
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', scheduleInspectorPlacementUpdate);
+    };
+  }, [selectedFeature]);
 
   function cancelPendingMapWork() {
     if (pendingReloadTimeoutRef.current !== undefined) {
@@ -175,57 +314,21 @@ export function MapView() {
     }
   }
 
-  function applyBuildingMarkerVisibility(visible: boolean) {
-    for (const marker of buildingMarkerRefs.current) {
-      marker.getElement().style.display = visible ? '' : 'none';
-    }
-  }
-
-  function updateBuildingDebugMarkers(map: maplibregl.Map, buildings: FeatureCollection) {
-    for (const marker of buildingMarkerRefs.current) {
-      marker.remove();
-    }
-
-    const showMarkers = !is3dRef.current && useLayerVisibilityStore.getState().visibility.buildings;
-
-    buildingMarkerRefs.current = buildings.features.flatMap(building => {
-      const centroid = featureCentroid(building);
-      if (!centroid) {
-        return [];
-      }
-
-      const markerElement = document.createElement('div');
-      markerElement.className =
-        'h-1.5 w-1.5 rounded-full border border-white bg-black shadow-[0_0_0_1px_rgb(0_0_0/0.45)]';
-      markerElement.title = `Building ${building.id ?? ''}`.trim();
-      markerElement.style.display = showMarkers ? '' : 'none';
-
-      return [
-        new maplibregl.Marker({
-          element: markerElement,
-          anchor: 'center'
-        })
-          .setLngLat([centroid[0], centroid[1]])
-          .addTo(map)
-      ];
-    });
-  }
-
   function saveCurrentFavoriteView() {
     const map = mapRef.current;
     if (!map) {
       return;
     }
 
-    const suggestedName = activeFavoriteName ?? `Favorite ${favoriteViews.length + 1}`;
-    const rawName = window.prompt('Name for favorite location:', suggestedName);
+    const suggestedName = activeFavoriteName ?? `Favoritt ${favoriteViews.length + 1}`;
+    const rawName = window.prompt('Navn på favorittsted:', suggestedName);
     if (rawName === null) {
       return;
     }
 
     const favoriteName = rawName.trim();
     if (!favoriteName) {
-      setStatus('Favorite location was not saved because no name was provided.');
+      setStatus('Favorittstedet ble ikke lagret fordi det manglet navn.');
       return;
     }
 
@@ -242,7 +345,7 @@ export function MapView() {
       adjustElevatedHeights
     });
     setStatus(
-      `${existed ? 'Updated' : 'Saved'} favorite "${favoriteName}" at ${savedCenter[0].toFixed(5)}, ${savedCenter[1].toFixed(5)} (z=${savedZoom.toFixed(2)}) with current layers.`
+      `${existed ? 'Oppdaterte' : 'Lagret'} favoritt «${favoriteName}» på ${savedCenter[0].toFixed(5)}, ${savedCenter[1].toFixed(5)} (z=${savedZoom.toFixed(2)}) med gjeldende lag.`
     );
   }
 
@@ -252,7 +355,7 @@ export function MapView() {
     }
 
     removeFavoriteView(activeFavoriteView.name);
-    setStatus(`Removed favorite "${activeFavoriteView.name}".`);
+    setStatus(`Slettet favoritt «${activeFavoriteView.name}».`);
   }
 
   function selectStoredFavoriteView(name: string) {
@@ -265,11 +368,11 @@ export function MapView() {
       setError(undefined);
       applyFavoriteViewSettings(selectedFavoriteView);
       map.easeTo({ center: selectedFavoriteView.center, zoom: selectedFavoriteView.zoom, duration: 700 });
-      setStatus(`Selected favorite "${name}", restored its layers, and moved to it.`);
+      setStatus(`Valgte favoritt «${name}», gjenopprettet lagene og flyttet kartet dit.`);
       return;
     }
 
-    setStatus(`Selected favorite "${name}".`);
+    setStatus(`Valgte favoritt «${name}».`);
   }
 
   function applyFeatureFilter(featureFilter: ActiveFeatureFilter) {
@@ -281,7 +384,7 @@ export function MapView() {
 
     setError(undefined);
     setActiveFeatureFilter({ propertyKey, value });
-    setStatus(`Filtering visible layers by ${propertyKey} "${value}".`);
+    setStatus(`Filtrerer synlige lag på ${propertyKey} «${value}».`);
   }
 
   function clearFeatureFilter() {
@@ -292,7 +395,7 @@ export function MapView() {
     const clearedFeatureFilter = activeFeatureFilterRef.current;
     setError(undefined);
     setActiveFeatureFilter(undefined);
-    setStatus(`Cleared ${clearedFeatureFilter.propertyKey} filter "${clearedFeatureFilter.value}".`);
+    setStatus(`Fjernet filteret ${clearedFeatureFilter.propertyKey} «${clearedFeatureFilter.value}».`);
   }
 
   function closeSelectedFeatureInspector() {
@@ -302,6 +405,7 @@ export function MapView() {
 
     setSelectedFeature(undefined);
   }
+  closeSelectedFeatureInspectorRef.current = closeSelectedFeatureInspector;
 
   async function applyRenderedVisibleData(
     map: maplibregl.Map,
@@ -333,7 +437,7 @@ export function MapView() {
       'building-centroids',
       buildingCentroidsFeatureCollection(renderedFeatureCollections.buildings)
     );
-    updateBuildingDebugMarkers(map, renderedFeatureCollections.buildings);
+    upsertObjtypeLabelLayer(map, renderedFeatureCollections, visibility);
   }
 
   useEffect(() => {
@@ -345,8 +449,8 @@ export function MapView() {
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
       style: mapStyle,
-      center: activeFavoriteView?.center ?? OTTA_CENTER,
-      zoom: activeFavoriteView?.zoom ?? OTTA_ZOOM
+      center: initialFavoriteViewRef.current.center,
+      zoom: initialFavoriteViewRef.current.zoom
     });
     mapRef.current = map;
     const resizeObserver = new ResizeObserver(() => map.resize());
@@ -354,8 +458,8 @@ export function MapView() {
 
     map.on('error', event => {
       console.error('[gcmapview] MapLibre error', event.error);
-      setError(event.error?.message ?? 'Unknown MapLibre error');
-      setStatus('MapLibre failed while loading the map style or layers');
+      setError(event.error?.message ?? 'Ukjent MapLibre-feil');
+      setStatus('MapLibre feilet under lasting av kartstil eller lag');
     });
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right');
@@ -377,19 +481,20 @@ export function MapView() {
       if (!vectorZoomActive) {
         latestVectorDataRef.current = emptyVisibleFeatureCollections;
         await clearVectorSources(map);
-        updateBuildingDebugMarkers(map, emptyFeatureCollection);
+        upsertObjtypeLabelLayer(map, emptyVisibleFeatureCollections, currentFilteredLayerVisibility());
         if (!cancelled && requestId === visibleRequestId) {
           setError(undefined);
-          closeSelectedFeatureInspector();
+          closeSelectedFeatureInspectorRef.current();
           setStatus(
-            `Zoom in above level ${MIN_VECTOR_ZOOM} to load vector data (current z=${map.getZoom().toFixed(1)}).`
+            `Zoom inn over nivå ${MIN_VECTOR_ZOOM} for å laste vektordata (nåværende z=${map.getZoom().toFixed(1)}).`
           );
         }
         return;
       }
 
       try {
-        const currentVisibility = useLayerVisibilityStore.getState().visibility;
+        await useLayerVisibilityStore.getState().resolveAvailableLayerIds();
+        const currentVisibility = currentFilteredLayerVisibility();
         const {
           bbox,
           parcels,
@@ -418,12 +523,12 @@ export function MapView() {
         await applyRenderedVisibleData(map, latestVectorDataRef.current, currentVisibility);
         setError(undefined);
         setStatus(
-          `Loaded ${parcels.features.length} parcels, ${buildings.features.length} buildings, ${platformEdges.features.length} platform edges, ${trackCentres.features.length} track centres, ${bygning.features.length} Bygning line features, ${bygningOmrade.features.length} Bygning area features, ${bygningSenterlinje.features.length} Bygning centerline features, and ${bygningPosisjon.features.length} Bygning position features for bbox ${bbox.map(value => value.toFixed(5)).join(',')}.${activeFeatureFilterRef.current ? ` Rendering only ${activeFeatureFilterRef.current.propertyKey} "${activeFeatureFilterRef.current.value}".` : ''}${isBuildingZoom(map) ? '' : ` Building layers load from zoom ${MIN_BUILDING_ZOOM}.`}`
+          `Lastet ${parcels.features.length} parseller, ${buildings.features.length} bygninger, ${platformEdges.features.length} plattformkanter, ${trackCentres.features.length} spormidt, ${bygning.features.length} Bygning-linjefeaturer, ${bygningOmrade.features.length} Bygning-områdefeaturer, ${bygningSenterlinje.features.length} Bygning-senterlinjefeaturer og ${bygningPosisjon.features.length} Bygning-posisjonsfeaturer for bbox ${bbox.map(value => value.toFixed(5)).join(',')}.${activeFeatureFilterRef.current ? ` Viser bare ${activeFeatureFilterRef.current.propertyKey} «${activeFeatureFilterRef.current.value}».` : ''}${isBuildingZoom(map) ? '' : ` Bygningslag lastes fra zoom ${MIN_BUILDING_ZOOM}.`}`
         );
       } catch (cause) {
         if (!cancelled && requestId === visibleRequestId) {
-          setError(cause instanceof Error ? cause.message : 'Unknown error');
-          setStatus('Could not reload visible map data');
+          setError(cause instanceof Error ? cause.message : 'Ukjent feil');
+          setStatus('Kunne ikke laste synlige kartdata på nytt');
         }
       }
     }
@@ -437,15 +542,18 @@ export function MapView() {
 
       pendingReloadTimeoutRef.current = window.setTimeout(() => {
         pendingReloadTimeoutRef.current = undefined;
+        applyObjtypeLabelVisibility(map, !is3dRef.current && map.getZoom() > OBJTYPE_LABEL_MIN_ZOOM);
         void reloadVisibleData();
       }, 120);
     }
 
     function handleMoveStart() {
+      visibleRequestId += 1;
       cancelPendingMapWork();
     }
 
     map.once('load', () => {
+      applyBackgroundMap(map, backgroundMapRef.current);
       addNativeFeatureSourcesAndLayers(
         map,
         emptyFeatureCollection,
@@ -456,22 +564,23 @@ export function MapView() {
         emptyFeatureCollection,
         emptyFeatureCollection,
         emptyFeatureCollection,
-        useLayerVisibilityStore.getState().visibility,
+        currentFilteredLayerVisibility(),
         adjustElevatedHeightsRef.current,
         false
       );
-      updateBuildingDebugMarkers(map, emptyFeatureCollection);
+      upsertObjtypeLabelLayer(map, emptyVisibleFeatureCollections, currentFilteredLayerVisibility());
+      applyObjtypeLabelVisibility(map, !is3dRef.current && map.getZoom() > OBJTYPE_LABEL_MIN_ZOOM);
       map.on('movestart', handleMoveStart);
       map.on('moveend', scheduleVisibleDataReload);
 
       map.on('click', event => {
         const inspectedFeature = inspectFeaturesAtPoint(map, event.point);
         if (!inspectedFeature) {
-          closeSelectedFeatureInspector();
+          closeSelectedFeatureInspectorRef.current();
           return;
         }
 
-        setSelectedFeature(inspectedFeature);
+        setSelectedFeatureRef.current(inspectedFeature);
       });
       map.on('mousemove', event => {
         map.getCanvas().style.cursor = hasInspectableFeatureAtPoint(map, event.point) ? 'pointer' : '';
@@ -479,7 +588,7 @@ export function MapView() {
 
       setIsMapReady(true);
       setIsVectorZoomActive(isVectorZoom(map));
-      setStatus(`Zoom in above level ${MIN_VECTOR_ZOOM} to load vector data.`);
+      setStatus(`Zoom inn over nivå ${MIN_VECTOR_ZOOM} for å laste vektordata.`);
       void reloadVisibleData();
     });
 
@@ -491,10 +600,6 @@ export function MapView() {
       map.off('movestart', handleMoveStart);
       map.off('moveend', scheduleVisibleDataReload);
       mapRef.current = null;
-      for (const marker of buildingMarkerRefs.current) {
-        marker.remove();
-      }
-      buildingMarkerRefs.current = [];
       resizeObserver.disconnect();
       map.remove();
     };
@@ -506,13 +611,17 @@ export function MapView() {
       return;
     }
 
-    applyMapDimensionMode(
-      map,
-      is3d,
-      useLayerVisibilityStore.getState().visibility,
-      isTerrainEnabled(is3d, adjustElevatedHeights)
-    );
-    applyBuildingMarkerVisibility(useLayerVisibilityStore.getState().visibility.buildings && !is3d);
+    applyBackgroundMap(map, backgroundMap);
+  }, [backgroundMap, isMapReady]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady) {
+      return;
+    }
+
+    applyMapDimensionMode(map, is3d, currentFilteredLayerVisibility(), isTerrainEnabled(is3d, adjustElevatedHeights));
+    applyObjtypeLabelVisibility(map, !is3d && map.getZoom() > OBJTYPE_LABEL_MIN_ZOOM);
   }, [adjustElevatedHeights, is3d, isMapReady]);
 
   useEffect(() => {
@@ -524,7 +633,7 @@ export function MapView() {
     void applyRenderedVisibleData(
       map,
       latestVectorDataRef.current,
-      useLayerVisibilityStore.getState().visibility,
+      currentFilteredLayerVisibility(),
       activeFeatureFilter
     );
   }, [activeFeatureFilter, isMapReady]);
@@ -535,11 +644,10 @@ export function MapView() {
       return;
     }
 
-    applyMapLayerVisibility(map, is3d, layerVisibility, isTerrainEnabled(is3d, adjustElevatedHeights));
-    applyBuildingMarkerVisibility(layerVisibility.buildings && !is3d);
+    applyMapLayerVisibility(map, is3d, filteredLayerVisibility, isTerrainEnabled(is3d, adjustElevatedHeights));
 
-    const visibilityChanged = layerVisibilityChanged(previousLayerVisibilityRef.current, layerVisibility);
-    previousLayerVisibilityRef.current = layerVisibility;
+    const visibilityChanged = layerVisibilityChanged(previousLayerVisibilityRef.current, filteredLayerVisibility);
+    previousLayerVisibilityRef.current = filteredLayerVisibility;
 
     if (pendingElevatedRefreshTimeoutRef.current !== undefined) {
       window.clearTimeout(pendingElevatedRefreshTimeoutRef.current);
@@ -568,12 +676,12 @@ export function MapView() {
         latest.bygning,
         latest.bygningSenterlinje,
         latest.bygningOmrade,
-        layerVisibility,
+        filteredLayerVisibility,
         adjustElevatedHeights && is3d,
         is3d
       );
     }, DEFERRED_ELEVATED_SOURCE_DELAY_MS);
-  }, [adjustElevatedHeights, layerVisibility, isMapReady, is3d]);
+  }, [adjustElevatedHeights, filteredLayerVisibility, isMapReady, is3d]);
 
   async function createRandomBuilding() {
     const map = mapRef.current;
@@ -581,7 +689,7 @@ export function MapView() {
       return;
     }
     if (!isVectorZoom(map)) {
-      setError(`Zoom in above level ${MIN_VECTOR_ZOOM} before creating parcels`);
+      setError(`Zoom inn over nivå ${MIN_VECTOR_ZOOM} før du oppretter parseller`);
       return;
     }
 
@@ -630,7 +738,7 @@ export function MapView() {
         bygningOmrade,
         bygningSenterlinje,
         bygningPosisjon
-      } = await getVisibleFeatureCollections(map, layerVisibility);
+      } = await getVisibleFeatureCollections(map, filteredLayerVisibility);
       logLoadedCoordinates('parcels after create', parcels);
       logLoadedCoordinates('buildings after create', buildings);
       latestVectorDataRef.current = {
@@ -643,18 +751,18 @@ export function MapView() {
         bygningSenterlinje,
         bygningPosisjon
       };
-      await applyRenderedVisibleData(map, latestVectorDataRef.current, layerVisibility);
-      const createdStatus = `Created ${buildingsToCreate.length} building${buildingsToCreate.length === 1 ? '' : 's'} with a ${area * 15} m2 parcel after ${placementAttempts} placement attempt${placementAttempts === 1 ? '' : 's'}. ${buildings.features.length} buildings loaded.`;
+      await applyRenderedVisibleData(map, latestVectorDataRef.current, filteredLayerVisibility);
+      const createdStatus = `Opprettet ${buildingsToCreate.length} bygning${buildingsToCreate.length === 1 ? '' : 'er'} med en parsell på ${area * 15} m2 etter ${placementAttempts} plasseringsforsøk. ${buildings.features.length} bygninger lastet.`;
       setStatus(createdStatus);
       map.once('idle', () => {
         const nativeState = logNativeRenderingState(map);
         setStatus(
-          `${createdStatus} Native source features P:${nativeState.parcelSourceFeatures} B:${nativeState.buildingSourceFeatures}; rendered P:${nativeState.parcelRenderedFeatures} B:${nativeState.buildingRenderedFeatures}.`
+          `${createdStatus} Native kildefeaturer P:${nativeState.parcelSourceFeatures} B:${nativeState.buildingSourceFeatures}; rendret P:${nativeState.parcelRenderedFeatures} B:${nativeState.buildingRenderedFeatures}.`
         );
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unknown error');
-      setStatus('Could not create building');
+      setError(cause instanceof Error ? cause.message : 'Ukjent feil');
+      setStatus('Kunne ikke opprette bygning');
     } finally {
       setIsCreating(false);
     }
@@ -666,7 +774,7 @@ export function MapView() {
       return;
     }
     if (!isVectorZoom(map)) {
-      setError(`Zoom in above level ${MIN_VECTOR_ZOOM} before clearing data`);
+      setError(`Zoom inn over nivå ${MIN_VECTOR_ZOOM} før du tømmer data`);
       return;
     }
 
@@ -701,7 +809,7 @@ export function MapView() {
         bygningOmrade: reloadedBygningOmrade,
         bygningSenterlinje: reloadedBygningSenterlinje,
         bygningPosisjon: reloadedBygningPosisjon
-      } = await getVisibleFeatureCollections(map, layerVisibility);
+      } = await getVisibleFeatureCollections(map, filteredLayerVisibility);
       logLoadedCoordinates('parcels after clear', reloadedParcels);
       logLoadedCoordinates('buildings after clear', reloadedBuildings);
       latestVectorDataRef.current = {
@@ -714,19 +822,19 @@ export function MapView() {
         bygningSenterlinje: reloadedBygningSenterlinje,
         bygningPosisjon: reloadedBygningPosisjon
       };
-      await applyRenderedVisibleData(map, latestVectorDataRef.current, layerVisibility);
-      const clearedStatus = `Cleared ${buildings.features.length} buildings and ${parcels.features.length} parcels.`;
+      await applyRenderedVisibleData(map, latestVectorDataRef.current, filteredLayerVisibility);
+      const clearedStatus = `Tømte ${buildings.features.length} bygninger og ${parcels.features.length} parseller.`;
       setStatus(clearedStatus);
       map.once('idle', () => {
         const nativeState = logNativeRenderingState(map);
         setStatus(
-          `${clearedStatus} Native source features P:${nativeState.parcelSourceFeatures} B:${nativeState.buildingSourceFeatures}; rendered P:${nativeState.parcelRenderedFeatures} B:${nativeState.buildingRenderedFeatures}.`
+          `${clearedStatus} Native kildefeaturer P:${nativeState.parcelSourceFeatures} B:${nativeState.buildingSourceFeatures}; rendret P:${nativeState.parcelRenderedFeatures} B:${nativeState.buildingRenderedFeatures}.`
         );
       });
       setIsMapReady(true);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unknown error');
-      setStatus('Could not clear data');
+      setError(cause instanceof Error ? cause.message : 'Ukjent feil');
+      setStatus('Kunne ikke tømme data');
     } finally {
       setIsClearing(false);
     }
@@ -734,8 +842,9 @@ export function MapView() {
 
   return (
     <section
+      ref={mapSectionRef}
       className="relative min-h-0 w-full overflow-hidden rounded-[min(var(--radius-4xl),24px)] border border-border bg-card shadow-sm"
-      aria-label="Cadastre, Bane, and Bygning map">
+      aria-label="Matrikkel-, FKB-Bane- og Bygning-kart">
       <div
         ref={mapContainerRef}
         className="absolute inset-0 h-full w-full"
@@ -746,7 +855,7 @@ export function MapView() {
           disabled={!isMapReady || !isVectorZoomActive || isCreating || isClearing}
           onClick={createRandomBuilding}>
           <Plus data-icon="inline-start" />
-          {isCreating ? 'Creating parcel...' : 'Create random parcel'}
+          {isCreating ? 'Oppretter parsell...' : 'Opprett tilfeldig parsell'}
         </Button>
         <Button
           size="sm"
@@ -755,27 +864,45 @@ export function MapView() {
           disabled={!isMapReady || !isVectorZoomActive || isCreating || isClearing}
           onClick={clearData}>
           <Eraser data-icon="inline-start" />
-          {isClearing ? 'Clearing data...' : 'Clear parcels'}
+          {isClearing ? 'Tømmer data...' : 'Tøm parseller'}
         </Button>
       </div>
-      <MapLayersCard
-        is3d={is3d}
-        visibility={layerVisibility}
-        favoriteViews={favoriteViews}
-        activeFavoriteName={activeFavoriteView?.name}
-        onSaveFavoriteView={saveCurrentFavoriteView}
-        onClearFavoriteView={clearStoredFavoriteView}
-        onSelectFavoriteView={selectStoredFavoriteView}
-      />
-      {selectedFeature ? (
-        <FeaturePropertiesCard
-          feature={selectedFeature}
-          activeFeatureFilter={activeFeatureFilter}
-          onApplyFeatureFilter={applyFeatureFilter}
-          onClearFeatureFilter={clearFeatureFilter}
-          onHoverPositionIndex={setHoveredPositionIndex}
-          onClose={closeSelectedFeatureInspector}
+      <div
+        ref={mapLayersPanelRef}
+        className="absolute right-12 bottom-[88px] z-[3] max-sm:top-20 max-sm:right-auto max-sm:bottom-auto max-sm:left-4">
+        <MapLayersCard
+          backgroundMap={backgroundMap}
+          availableLayerIds={availableLayerIds}
+          is3d={is3d}
+          isLoadingAvailableLayers={isLoadingAvailableLayers}
+          terrainEnabled={is3d && !adjustElevatedHeights}
+          visibility={filteredLayerVisibility}
+          favoriteViews={favoriteViews}
+          activeFavoriteName={activeFavoriteView?.name}
+          onSelectBackgroundMap={setBackgroundMap}
+          onToggle3d={toggleMapDimension}
+          onToggleTerrain={() => setAdjustElevatedHeights(value => !value)}
+          onSaveFavoriteView={saveCurrentFavoriteView}
+          onClearFavoriteView={clearStoredFavoriteView}
+          onSelectFavoriteView={selectStoredFavoriteView}
         />
+      </div>
+      {selectedFeature ? (
+        <div
+          ref={featureInspectorPanelRef}
+          className={cn(
+            'absolute top-4 z-[3] max-sm:right-4 max-sm:bottom-[88px] max-sm:left-4 max-sm:top-auto',
+            placeInspectorLeftOfLayers ? 'right-[272px]' : 'right-4'
+          )}>
+          <FeaturePropertiesCard
+            feature={selectedFeature}
+            activeFeatureFilter={activeFeatureFilter}
+            onApplyFeatureFilter={applyFeatureFilter}
+            onClearFeatureFilter={clearFeatureFilter}
+            onHoverPositionIndex={setHoveredPositionIndex}
+            onClose={closeSelectedFeatureInspector}
+          />
+        </div>
       ) : null}
       <div className="absolute bottom-4 left-4 z-[3] max-w-[min(720px,calc(100%-2rem))]">
         {error ? (

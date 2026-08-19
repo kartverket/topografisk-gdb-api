@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
@@ -16,7 +16,7 @@ class ImportProfile:
 
     name: str
     title: str
-    default_api_url: str
+    dataset_api_path: str
     target_crs: str
     geometry_type: str
     collections: Mapping[str, str | tuple[str, ...]]
@@ -24,6 +24,9 @@ class ImportProfile:
     identity_fields: tuple[str, ...]
     geometry_types: Mapping[str, str] | None = None
     merge_duplicate_multilinestrings: bool = False
+    property_transform: Callable[[dict[str, object], str], dict[str, object]] | None = (
+        None
+    )
 
     def __post_init__(self) -> None:
         normalized_required_fields = {
@@ -120,6 +123,13 @@ class ImportProfile:
         ):
             return COMPATIBLE_GEOMETRY_MATCH
         return 0
+
+    def properties_for_upstream(
+        self, properties: dict[str, object], collection: str
+    ) -> dict[str, object]:
+        if self.property_transform is None:
+            return dict(properties)
+        return self.property_transform(dict(properties), collection.casefold())
 
     @property
     def supported_feature_types(self) -> str:

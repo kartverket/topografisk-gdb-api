@@ -13,6 +13,10 @@ System overview (Mermaid): [`ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 - [`geocomponents/`](geocomponents/) — the engine. Start with its
   [README](geocomponents/README.md) for describing datasets and running
   locally; see [DEPLOY.md](geocomponents/DEPLOY.md) for deployment.
+- [`gccore/`](gccore/) — a FastAPI service with Alembic-managed tables in the
+  shared `gc_core` PostgreSQL schema.
+- [`gcjobs/`](gcjobs/) — a FastAPI service with Alembic-managed tables in the
+  shared `gc_jobs` PostgreSQL schema.
 - [`gcimport/`](gcimport/) — a profile-driven, single-endpoint FastAPI service
   that validates JSON-FG uploads and idempotently imports dataset features.
 - [`gcmapview/`](gcmapview/) — local Vite + React map viewer with an `/import`
@@ -21,18 +25,42 @@ System overview (Mermaid): [`ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Development
 
-The root `Makefile` provides shortcuts for starting PostGIS and working with the
-frontend:
+The root `Makefile` provides shortcuts for the local compose stack, the
+frontend, and gcimport:
 
 ```bash
-make docker-up         # Start the local compose stack: PostGIS, apply-schema, geocomponents, and gcimport
+make docker-up         # Start the local compose stack: PostGIS, geocomponents, gcimport, gcmapview, gccore, and gcjobs
+make docker-down       # Stop the local compose stack
+make docker-delete-db-volume  # Delete the local geocomponents Postgres volume
+make docker-trivy-scan # Build and Trivy-scan all Dockerfile-based services via Docker
 make frontend-install  # Install frontend dependencies without running scripts
 make frontend-build    # Build the frontend
 make frontend-run      # Run the frontend development server
+make frontend-lint     # Lint the frontend
+make frontend-format   # Format the frontend
+make gccore-install    # Install gccore dependencies
+make gccore-test       # Run gccore tests
+make gccore-run        # Run gccore on port 8002
+make gcjobs-install    # Install gcjobs dependencies
+make gcjobs-test       # Run gcjobs tests
+make gcjobs-run        # Run gcjobs on port 8003
 make gcimport-install  # Install gcimport dependencies
 make gcimport-test     # Run gcimport tests
 make gcimport-run      # Run gcimport on port 8001
 ```
+
+To scan container images locally with the same Trivy severity filters as CI:
+
+```bash
+# Scan all Dockerfile-based services
+make docker-trivy-scan
+
+# Scan only one service image
+make docker-trivy-scan SERVICE=gcimport
+```
+
+This runs Trivy inside Docker, so no local `trivy` install is required. It
+expects a working local Docker daemon and access to the Docker socket.
 
 The repo uses [pre-commit](https://pre-commit.com/) at the root to run various file-hygiene checks at commits.
 The same hooks run in CI (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
@@ -56,12 +84,23 @@ For running the geocomponents test suite (unit tests without Docker,
 contract + integration tests against a local PostGIS), see
 [`geocomponents/README.md`](geocomponents/README.md#testing).
 
-With `make docker-up`, Swagger for the importer is available at
-`http://localhost:8001/docs`. The default import profile is `bane`; override it
-with `?profile=bygning` for Bygning uploads. Example:
+With `make docker-up`, the local ports are:
+
+- `http://localhost:8000` for geocomponents
+- `http://localhost:8001/docs` for gcimport Swagger
+- `http://localhost:8002/docs` for gccore Swagger
+- `http://localhost:8003/docs` for gcjobs Swagger
+- `http://localhost:8080` for gcmapview
+
+gcimport requires an explicit import profile on every upload request. Use
+`?profile=fkb_bane` for Bane uploads and `?profile=bygning` for Bygning
+uploads. Examples:
 
 ```bash
-curl -F 'file=@bane.json;type=application/json' http://localhost:8001/imports
+curl -F 'file=@bane.json;type=application/json' \
+  'http://localhost:8001/imports?profile=fkb_bane'
+curl -F 'file=@bygning.geojson;type=application/geo+json' \
+  'http://localhost:8001/imports?profile=bygning'
 ```
 
 # Technical details
