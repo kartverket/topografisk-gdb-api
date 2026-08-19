@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from typing import Annotated, Any
+from uuid import uuid4
 
-import httpx
+import httpx2
 import orjson
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile, status
+from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from gcimport.config import Settings
@@ -21,15 +24,18 @@ from gcimport.importer import (
     prepare_document,
 )
 from gcimport.profiles import BUILTIN_PROFILES, ImportProfile, get_profile
+from gcimport.pubsub import ImportEventPublisher, RedisImportEventPublisher
 
 READ_CHUNK_BYTES = 64 * 1024
 CLASSIC_GEOJSON_SUFFIX = ".geojson"
+LOGGER = logging.getLogger(__name__)
 
 
 def create_app(
     *,
     settings: Settings | None = None,
-    client: httpx.AsyncClient | None = None,
+    client: httpx2.AsyncClient | None = None,
+    event_publisher: ImportEventPublisher | None = None,
 ) -> FastAPI:
     """Create an app with optionally injected configuration and HTTP client."""
 
@@ -38,13 +44,19 @@ def create_app(
         runtime_settings = settings or Settings.from_env()
         app_instance.state.settings = runtime_settings
         if client is not None:
+            app_instance.state.event_publisher = (
+                event_publisher or RedisImportEventPublisher(runtime_settings.redis_url)
+            )
             app_instance.state.http_client = client
             yield
             return
 
-        async with httpx.AsyncClient(
+        async with httpx2.AsyncClient(
             timeout=runtime_settings.request_timeout_seconds
         ) as runtime_client:
+            app_instance.state.event_publisher = (
+                event_publisher or RedisImportEventPublisher(runtime_settings.redis_url)
+            )
             app_instance.state.http_client = runtime_client
             yield
 
@@ -67,13 +79,47 @@ def create_app(
     async def create_import(
         file: Annotated[UploadFile, File()],
         profile_name: Annotated[str, Query(alias="profile")],
+        requested_import_id: Annotated[
+            str | None,
+            Header(alias="X-Import-Id"),
+        ] = None,
     ) -> dict:
         runtime_settings: Settings = application.state.settings
+        publisher: ImportEventPublisher = application.state.event_publisher
         request_profile = _request_profile(profile_name)
         body = await _read_bounded(file, runtime_settings.max_upload_bytes)
+        import_id = requested_import_id.strip() if requested_import_id else str(uuid4())
+        if not import_id:
+            import_id = str(uuid4())
+        base_event = {
+            "import_id": import_id,
+            "profile": request_profile.name,
+            "dataset_api_path": request_profile.dataset_api_path,
+            "filename": file.filename,
+        }
+
+        await _publish_event(
+            publisher,
+            {
+                **base_event,
+                "event": "import.started",
+                "phase": "parsing",
+                "timestamp": _timestamp(),
+            },
+        )
         try:
             document = orjson.loads(body)
         except orjson.JSONDecodeError as err:
+            await _publish_event(
+                publisher,
+                {
+                    **base_event,
+                    "event": "import.completed.failed",
+                    "phase": "parsing",
+                    "timestamp": _timestamp(),
+                    "reason": "uploaded file must contain valid UTF-8 JSON",
+                },
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="uploaded file must contain valid UTF-8 JSON",
@@ -83,6 +129,16 @@ def create_app(
             document = _normalize_upload(document, file.filename, request_profile)
             features = prepare_document(document, request_profile)
         except ConversionError as err:
+            await _publish_event(
+                publisher,
+                {
+                    **base_event,
+                    "event": "import.completed.failed",
+                    "phase": "parsing",
+                    "timestamp": _timestamp(),
+                    "reason": str(err),
+                },
+            )
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail={
@@ -91,13 +147,49 @@ def create_app(
                 },
             ) from err
         except DocumentValidationError as err:
+            await _publish_event(
+                publisher,
+                {
+                    **base_event,
+                    "event": "import.completed.failed",
+                    "phase": "parsing",
+                    "timestamp": _timestamp(),
+                    "errors": err.errors,
+                    "reason": "invalid JSON-FG document",
+                },
+            )
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail={"message": "invalid JSON-FG document", "errors": err.errors},
             ) from err
 
+        await _publish_event(
+            publisher,
+            {
+                **base_event,
+                "event": "import.parsed",
+                "phase": "importing",
+                "timestamp": _timestamp(),
+                "total_features": len(features),
+            },
+        )
+
+        async def publish_batch_event(batch_event: dict[str, Any]) -> None:
+            suffix = batch_event.pop("status")
+            await _publish_event(
+                publisher,
+                {
+                    **base_event,
+                    **batch_event,
+                    "event": f"import.batch.{suffix}",
+                    "phase": "importing",
+                    "timestamp": _timestamp(),
+                    "total_features": len(features),
+                },
+            )
+
         try:
-            return await import_features(
+            result = await import_features(
                 features,
                 client=application.state.http_client,
                 api_url=_dataset_api_url(
@@ -105,8 +197,22 @@ def create_app(
                     request_profile,
                 ),
                 upsert_batch_size=runtime_settings.upsert_batch_size,
+                on_batch=publish_batch_event,
             )
         except UpstreamImportError as err:
+            await _publish_event(
+                publisher,
+                {
+                    **base_event,
+                    "event": "import.completed.failed",
+                    "phase": "importing",
+                    "timestamp": _timestamp(),
+                    "total_features": len(features),
+                    "collection": err.collection,
+                    "feature_id": err.feature_id,
+                    "reason": err.reason,
+                },
+            )
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail={
@@ -117,7 +223,36 @@ def create_app(
                 },
             ) from err
 
+        await _publish_event(
+            publisher,
+            {
+                **base_event,
+                "event": "import.completed.succeeded",
+                "phase": "completed",
+                "timestamp": _timestamp(),
+                "total_features": len(features),
+                "imported_features": result["total"],
+            },
+        )
+        return result
+
     return application
+
+
+async def _publish_event(
+    publisher: ImportEventPublisher,
+    event: dict[str, Any],
+) -> None:
+    try:
+        await publisher.publish(event)
+    except Exception:
+        LOGGER.warning(
+            "Failed to publish import event %s", event.get("event"), exc_info=True
+        )
+
+
+def _timestamp() -> str:
+    return datetime.now(UTC).isoformat()
 
 
 def _is_classic_geojson_filename(filename: str | None) -> bool:

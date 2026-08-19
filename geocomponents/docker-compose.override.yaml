@@ -61,6 +61,7 @@ services:
     build: ../gcimport
     environment:
       GEOCOMPONENTS_API_URL: http://api:8000
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "8001:8000"
     volumes:
@@ -68,19 +69,21 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      redis:
+        condition: service_healthy
 
   gcmapview:
     build: ../gcmapview
     environment:
       GEOCOMPONENTS_API_URL: http://localhost:8000
-      GCIMPORT_API_URL: http://localhost:8001
+      GCJOBS_API_URL: http://localhost:8003
     read_only: true
     ports:
       - "8080:80"
     depends_on:
       api:
         condition: service_healthy
-      gcimport:
+      gcjobs:
         condition: service_started
 
   gccore-migrate:
@@ -106,6 +109,7 @@ services:
       DB_NAME: geocomponents
       DB_USER: geocomponents
       DB_PASSWORD: geocomponents
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "8002:8000"
     volumes:
@@ -121,6 +125,8 @@ services:
       retries: 20
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       gccore-migrate:
         condition: service_completed_successfully
@@ -148,6 +154,8 @@ services:
       DB_NAME: geocomponents
       DB_USER: geocomponents
       DB_PASSWORD: geocomponents
+      GCJOBS_IMPORT_API_URL: http://gcimport:8000
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "8003:8000"
     volumes:
@@ -163,6 +171,8 @@ services:
       retries: 20
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       gcjobs-migrate:
         condition: service_completed_successfully

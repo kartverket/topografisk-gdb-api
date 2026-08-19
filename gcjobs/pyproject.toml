@@ -7,7 +7,9 @@ requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.16",
     "fastapi>=0.141.1",
+    "httpx2>=2.10.0",
     "psycopg[binary]>=3.3.4",
+    "redis>=5.2",
     "sqlalchemy>=2.0.43",
     "typer>=0.27.0",
     "uvicorn>=0.52.0",
@@ -18,7 +20,6 @@ gcjobs = "gcjobs.cli:app"
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28",
     "pytest>=8.0",
     "ruff==0.16.1",
 ]
