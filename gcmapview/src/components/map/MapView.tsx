@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import robotoLatinVariableUrl from '@fontsource-variable/roboto/files/roboto-latin-wght-normal.woff2';
@@ -168,7 +168,10 @@ export function MapView() {
   const isLoadingAvailableLayers = useLayerVisibilityStore(state => state.isLoadingAvailableLayers);
   const resolveAvailableLayerIds = useLayerVisibilityStore(state => state.resolveAvailableLayerIds);
   const setLayerVisibility = useLayerVisibilityStore(state => state.setVisibility);
-  const filteredLayerVisibility = filterUnavailableLayers(layerVisibility, availableLayerIds);
+  const filteredLayerVisibility = useMemo(
+    () => filterUnavailableLayers(layerVisibility, availableLayerIds),
+    [availableLayerIds, layerVisibility]
+  );
   const previousLayerVisibilityRef = useRef(filteredLayerVisibility);
   const favoriteViews = useMapViewStore(state => state.favoriteViews);
   const activeFavoriteName = useMapViewStore(state => state.activeFavoriteName);
