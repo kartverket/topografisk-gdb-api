@@ -57,6 +57,7 @@ def topogdb_statements() -> list[str]:
 
 def apply_topogdb(conn: psycopg.Connection) -> None:
     """Create the fixed ``topogdb`` schema objects used by dataset functions."""
+    conn.execute("drop schema if exists topogdb cascade")
     for stmt in topogdb_statements():
         conn.execute(stmt)
     conn.commit()

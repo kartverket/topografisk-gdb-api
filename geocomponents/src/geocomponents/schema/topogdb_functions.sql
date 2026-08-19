@@ -18,7 +18,6 @@ begin
         -- drop type topogdb.footprint_facts cascade before reapplying.
         create type topogdb.footprint_facts as (
             footprint       geometry,
-            sections_doubled  double precision,
             areas           integer,
             holes           integer,
             curves_all_used boolean
@@ -32,9 +31,6 @@ comment on type topogdb.footprint_facts is
 
 comment on column topogdb.footprint_facts.footprint is
     'The enclosed 2D area. NULL when the lines do not close, POLYGON EMPTY when the input is empty.';
-comment on column topogdb.footprint_facts.sections_doubled is
-    'Length covered by more than one line. Measured from the input lines directly and is therefore '
-    'independent of the footprint being closed.';
 comment on column topogdb.footprint_facts.areas is
     'Number of disjoint parts of the footprint. 0 when none was built.';
 comment on column topogdb.footprint_facts.holes is
@@ -51,11 +47,24 @@ immutable
 parallel safe
 as $$
 declare
-    flat geometry := ST_Force2D(lines);  -- Force 2d as ST_NODE matches XY and picks arbitrary z
+    flat geometry;
     f    topogdb.footprint_facts;
 begin
-    f.sections_doubled := coalesce(ST_Length(flat), 0)
-                      - coalesce(ST_Length(ST_UnaryUnion(flat)), 0);
+    if lines is not null then
+        if GeometryType(lines) <> 'MULTILINESTRING' then
+            raise exception 'build_footprint expects MULTILINESTRING, got %', GeometryType(lines)
+                using errcode = 'XX000',
+                      hint = 'Gather members with ST_Collect over ST_Dump of each member geometry.';
+        end if;
+        if (select coalesce(bool_or(ST_IsEmpty(part.geom)), false) from ST_Dump(lines) part) then
+            raise exception 'build_footprint received a MULTILINESTRING with an empty member'
+                using errcode = 'XX000',
+                      hint = 'Borderlines of footprint cannot be empty.';
+        end if;
+    end if;
+
+    -- Force2D because ST_Node matches on XY and would otherwise carry an arbitrary Z.
+    flat := ST_Force2D(lines);
 
     f.footprint := ST_BuildArea(ST_Node(flat));
     f.areas           := 0;
@@ -63,7 +72,15 @@ begin
     f.curves_all_used := false;
 
     if f.footprint is not null and not ST_IsEmpty(f.footprint) then
-        f.areas           := ST_NumGeometries(f.footprint);
+        -- ST_BuildArea is not expected to return invalid geometries when
+        -- input is noded
+        if not ST_IsValid(f.footprint) then
+            raise exception 'build_footprint produced an invalid footprint: %',
+                            ST_IsValidReason(f.footprint)
+                using errcode = 'XX000';
+        end if;
+
+        f.areas := ST_NumGeometries(f.footprint);
         f.holes := (
             select coalesce(sum(ST_NumInteriorRings(part.geom)), 0)
             from (select (ST_Dump(f.footprint)).geom) part
@@ -77,5 +94,7 @@ $$;
 
 comment on function topogdb.build_footprint(geometry) is
     'Build the 2D footprint enclosed by a set of boundary lines, and return their footprint_facts. '
+    'Precondition: input must be NULL or MULTILINESTRING, and non-empty members must all be present. '
     'The lines arrive collected into one geometry so order and direction do not matter. '
-    'Z-coordinate is dropped if it exists. ';
+    'Z-coordinate is dropped if it exists. '
+    'Raises XX000 if the built footprint is invalid, which noded linework never produces.';
