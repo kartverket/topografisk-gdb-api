@@ -9,6 +9,7 @@ description: Example cadastral dataset (parcels and buildings).
 # Processes this dataset exposes (must be known to the process registry).
 processes:
   - hello
+  - export-feature
 
 collections:
   - name: parcels

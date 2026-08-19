@@ -140,7 +140,10 @@ def build_config(dataset: ResolvedDataset, public_url: str, dsn: str) -> dict:
     for process_id in dataset.processes:
         resources[process_id] = {
             "type": "process",
-            "processor": {"name": PROCESS_REGISTRY[process_id]},
+            "processor": {
+                "name": PROCESS_REGISTRY[process_id], 
+                "dataset": dataset.name,
+            },
         }
 
     return {
@@ -560,9 +563,18 @@ def _build_starlette_app(api_: API) -> Starlette:
 
     async def execute_process(request: Request):
         pid = request.path_params["process_id"]
-        return await _execute(
+        body_bytes = await request.body()
+        response = await _execute(
             api_, processes_api.execute_process, request, pid, skip_valid_check=True
         )
+        if pid == "export-feature" and response.status_code == 200:
+            try:
+                inputs = orjson.loads(body_bytes).get("inputs", {})
+                filename = f"{inputs.get('collection', 'feature')}-{inputs.get('feature_id', 'export')}.geojson"
+                response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+            except Exception:
+                pass
+        return response
 
     routes = [
         Route("/", landing),
