@@ -20,6 +20,8 @@ Feature shaping lives here; OGC hypermedia links / paging envelopes do not
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import psycopg
 
 from geocomponents.schema.plan import (
@@ -33,6 +35,7 @@ from geocomponents.schema.plan import (
 
 # Audit columns are server-managed; never written from incoming features.
 _AUDIT = ("created_at", "updated_at")
+_SCHEMA_DIR = Path(__file__).resolve().parent
 
 
 def _quote_key(name: str) -> str:
@@ -47,6 +50,18 @@ def _quote_key(name: str) -> str:
 # ==========================================================================
 # Dispatch layer (fixed; generated once, independent of any dataset)
 # ==========================================================================
+def topogdb_statements() -> list[str]:
+    """The fixed PostGIS helper objects under ``topogdb`` applied once per DB."""
+    return [(_SCHEMA_DIR / "topogdb_functions.sql").read_text(encoding="utf-8")]
+
+
+def apply_topogdb(conn: psycopg.Connection) -> None:
+    """Create the fixed ``topogdb`` schema objects used by dataset functions."""
+    for stmt in topogdb_statements():
+        conn.execute(stmt)
+    conn.commit()
+
+
 def dispatch_statements() -> list[str]:
     """The stable ``ogc.feature_*`` entrypoints the API calls.
 
