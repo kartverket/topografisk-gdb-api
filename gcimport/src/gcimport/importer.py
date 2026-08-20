@@ -715,7 +715,10 @@ async def _import_feature_batch(
         raise UpstreamImportError(
             collection=collection,
             feature_id=indexed_features[0][1].feature_id,
-            reason="successful upstream batch response must return one id per feature",
+            reason=(
+                "successful upstream batch response must return one id per "
+                "feature under features"
+            ),
         )
 
     return [

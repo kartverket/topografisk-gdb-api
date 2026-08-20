@@ -427,10 +427,12 @@ def test_import_publishes_start_batch_and_success_events() -> None:
         return httpx2.Response(
             200,
             json={
+                "collection": "jernbaneplattformkant",
+                "total": 2,
                 "features": [
                     {"id": PLATFORM_UUID},
                     {"id": TRACK_UUID},
-                ]
+                ],
             },
         )
 
