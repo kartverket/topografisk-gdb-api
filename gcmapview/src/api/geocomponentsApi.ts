@@ -142,3 +142,54 @@ export async function getDatasetCollectionIds() {
 
   return availableCollectionIds;
 }
+
+export type ExportFormat = 'geojson' | 'jsonfg';
+
+const exportFormatExtensions: Record<ExportFormat, string> = {
+  geojson: 'geojson',
+  jsonfg: 'jsonfg'
+};
+
+export async function exportFeature(
+  collectionId: CollectionId,
+  featureId: string | number,
+  format: ExportFormat = 'geojson'
+): Promise<void> {
+  const url = `${collectionApiUrls[collectionId]}/processes/export-feature/execution`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      inputs: { collection: collectionId, feature_id: String(featureId), format }
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Export failed: HTTP ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  const filename =
+    parseFilename(response.headers.get('content-disposition')) ??
+    `${collectionId}-${featureId}.${exportFormatExtensions[format]}`;
+
+  triggerDownload(blob, filename);
+}
+
+function parseFilename(header: string | null): string | null {
+  if (!header) return null;
+  const match = header.match(/filename="([^"]+)"/i);
+  return match ? match[1] : null;
+}
+
+function triggerDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}

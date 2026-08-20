@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { Filter, FilterX, X } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { Download, Filter, FilterX, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,6 +11,7 @@ import {
   type ActiveFeatureFilter,
   type InspectedFeature
 } from '../../map/featureInspect';
+import { exportFeature, type ExportFormat } from '../../api/geocomponentsApi';
 
 type FeaturePropertiesCardProps = {
   feature: InspectedFeature;
@@ -159,10 +160,11 @@ export function FeaturePropertiesCard({
   onClose,
   onApplyFeatureFilter,
   onClearFeatureFilter,
-  onHoverPositionIndex
+  onHoverPositionIndex 
 }: FeaturePropertiesCardProps) {
   const isSourceLoading = Boolean(feature.positionsLoading);
   const entries = Object.entries(feature.properties).sort(([a], [b]) => a.localeCompare(b));
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('geojson');
 
   return (
     <Card
@@ -187,13 +189,38 @@ export function FeaturePropertiesCard({
             type="button"
             size="icon-sm"
             variant="ghost"
-            className="-mt-1 -mr-1"
             aria-label="Close properties"
             onClick={onClose}>
             <X />
           </Button>
         </CardAction>
       </CardHeader>
+      <div className="flex items-center gap-2 px-(--card-spacing) pt-2">
+        <select
+          aria-label="Export format"
+          title="Export format"
+          className="h-7 flex-1 rounded border border-border bg-transparent px-2 text-xs"
+          value={exportFormat}
+          onChange={(event) => setExportFormat(event.target.value as ExportFormat)}>
+          <option value="geojson">GeoJSON</option>
+          <option value="jsonfg">JSON-FG</option>
+        </select>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={!feature.collectionId || feature.featureId === undefined}
+          onClick={() => {
+            if (feature.collectionId && feature.featureId !== undefined) {
+              exportFeature(feature.collectionId, feature.featureId, exportFormat).catch((err) => {
+                console.error('Export failed', err);
+              });
+            }
+          }}>
+          <Download className="mr-1 size-4" />
+          Export
+        </Button>
+      </div>
       <CardContent className="space-y-2 overflow-y-auto pt-2">
         <Separator />
         {feature.positions.length > 0 || isSourceLoading ? (

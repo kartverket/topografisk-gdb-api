@@ -9,6 +9,7 @@ from __future__ import annotations
 
 PROCESS_REGISTRY: dict[str, str] = {
     "hello": "geocomponents.processes.placeholder.PlaceholderProcessor",
+    "export-feature": "geocomponents.processes.export_feature.ExportFeatureProcessor",
 }
 
 

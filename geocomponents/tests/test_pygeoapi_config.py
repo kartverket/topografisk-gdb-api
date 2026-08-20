@@ -27,9 +27,16 @@ def _config():
 
 def test_resources_are_collections_plus_declared_processes():
     cfg = _config()
-    # cadastre declares process 'hello' and has a topology collection 'blocks'.
-    assert set(cfg["resources"]) == {"parcels", "buildings", "blocks", "hello"}
+    # cadastre declares processes 'hello' and 'export-feature' plus a topology collection 'blocks'.
+    assert set(cfg["resources"]) == {
+        "parcels",
+        "buildings",
+        "blocks",
+        "hello",
+        "export-feature",
+    }
     assert cfg["resources"]["hello"]["type"] == "process"
+    assert cfg["resources"]["export-feature"]["type"] == "process"
 
 
 def test_processes_are_only_the_declared_ones():

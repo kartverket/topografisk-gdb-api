@@ -21,6 +21,9 @@ provider; the gateway never imports pygeoapi.
 
 from __future__ import annotations
 
+import logging
+from http import HTTPStatus
+
 import orjson
 import pygeoapi.api as core_api
 import pygeoapi.api.itemtypes as itemtypes_api
@@ -47,6 +50,8 @@ from geocomponents.processes.registry import PROCESS_REGISTRY
 PROVIDER_PATH = "geocomponents.api.db_function_provider.DbFunctionProvider"
 CRS84 = "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
 WGS84_SRID = 4326
+
+_logger = logging.getLogger(__name__)
 
 
 def _storage_crs_uri(coll: ResolvedCollection) -> str | None:
@@ -161,7 +166,10 @@ def build_config(dataset: ResolvedDataset, public_url: str, dsn: str) -> dict:
     for process_id in dataset.processes:
         resources[process_id] = {
             "type": "process",
-            "processor": {"name": PROCESS_REGISTRY[process_id]},
+            "processor": {
+                "name": PROCESS_REGISTRY[process_id],
+                "dataset": dataset.name,
+            },
         }
 
     return {
@@ -291,6 +299,22 @@ def _unsupported_media_type() -> Response:
     )
 
 
+def _problem_detail(response: Response) -> str:
+    """Pull a human-readable message from a pygeoapi error response body."""
+    try:
+        payload = orjson.loads(bytes(response.body))
+    except Exception:
+        return "Process execution failed"
+    if isinstance(payload, dict):
+        return str(
+            payload.get("description")
+            or payload.get("detail")
+            or payload.get("message")
+            or "Process execution failed"
+        )
+    return "Process execution failed"
+
+
 def _tailor_oas(oas: dict, dataset: ResolvedDataset) -> dict:
     """Trim the generated OpenAPI to what this service actually serves.
 
@@ -413,7 +437,7 @@ def _strip_queryables_links(obj):
     return obj
 
 
-def _build_starlette_app(api_: API) -> Starlette:
+def _build_starlette_app(api_: API) -> Starlette:  # noqa: PLR0915
     def _resource(cid):
         return api_.config["resources"].get(cid)
 
@@ -581,8 +605,72 @@ def _build_starlette_app(api_: API) -> Starlette:
 
     async def execute_process(request: Request):
         pid = request.path_params["process_id"]
-        return await _execute(
+        body_bytes = await request.body()
+
+        # Validate optional OGC `response` parameter: only "raw" is supported.
+        if pid == "export-feature":
+            try:
+                requested_response = orjson.loads(body_bytes).get("response")
+            except Exception:
+                requested_response = None
+            if requested_response not in (None, "raw"):
+                return JSONResponse(
+                    {
+                        "type": "about:blank",
+                        "title": "Unsupported response mode",
+                        "status": 400,
+                        "detail": (
+                            "Only 'raw' response is supported. "
+                            "Omit the 'response' field or set it to 'raw'."
+                        ),
+                    },
+                    status_code=400,
+                    media_type="application/problem+json",
+                )
+
+        response = await _execute(
             api_, processes_api.execute_process, request, pid, skip_valid_check=True
+        )
+
+        if pid != "export-feature":
+            return response
+
+        if response.status_code == HTTPStatus.OK:
+            try:
+                inputs = orjson.loads(body_bytes).get("inputs", {})
+                extension = {"geojson": "geojson", "jsonfg": "jsonfg"}.get(
+                    inputs.get("format", "geojson"), "geojson"
+                )
+                filename = (
+                    f"{inputs.get('collection', 'feature')}"
+                    f"-{inputs.get('feature_id', 'export')}.{extension}"
+                )
+                response.headers["Content-Disposition"] = (
+                    f'attachment; filename="{filename}"'
+                )
+            except Exception:
+                _logger.warning("Failed to set Content-Disposition", exc_info=True)
+            return response
+
+        # Non-200: normalise to application/problem+json.
+        status = (
+            HTTPStatus.NOT_FOUND
+            if b"not found" in bytes(response.body).lower()
+            else response.status_code
+        )
+        return JSONResponse(
+            {
+                "type": "about:blank",
+                "title": (
+                    "Feature not found"
+                    if status == HTTPStatus.NOT_FOUND
+                    else "Export failed"
+                ),
+                "status": status,
+                "detail": _problem_detail(response),
+            },
+            status_code=status,
+            media_type="application/problem+json",
         )
 
     routes = [
