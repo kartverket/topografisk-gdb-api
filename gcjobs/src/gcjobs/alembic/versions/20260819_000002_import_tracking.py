@@ -27,11 +27,19 @@ def upgrade() -> None:
         sa.Column("status", sa.Text(), nullable=False, server_default="running"),
         sa.Column("phase", sa.Text(), nullable=True),
         sa.Column("total_features", sa.Integer(), nullable=True),
-        sa.Column("processed_features", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("succeeded_features", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column(
+            "processed_features", sa.Integer(), nullable=False, server_default="0"
+        ),
+        sa.Column(
+            "succeeded_features", sa.Integer(), nullable=False, server_default="0"
+        ),
         sa.Column("failed_features", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("processed_batches", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("succeeded_batches", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column(
+            "processed_batches", sa.Integer(), nullable=False, server_default="0"
+        ),
+        sa.Column(
+            "succeeded_batches", sa.Integer(), nullable=False, server_default="0"
+        ),
         sa.Column("failed_batches", sa.Integer(), nullable=False, server_default="0"),
         sa.Column(
             "last_error",
@@ -108,8 +116,18 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ux_gc_jobs_import_event_message_id", table_name="import_event", schema="gc_jobs")
-    op.drop_index("ix_gc_jobs_import_event_import_id_id", table_name="import_event", schema="gc_jobs")
-    op.drop_index("ix_gc_jobs_import_run_last_event_at", table_name="import_run", schema="gc_jobs")
+    op.drop_index(
+        "ux_gc_jobs_import_event_message_id",
+        table_name="import_event",
+        schema="gc_jobs",
+    )
+    op.drop_index(
+        "ix_gc_jobs_import_event_import_id_id",
+        table_name="import_event",
+        schema="gc_jobs",
+    )
+    op.drop_index(
+        "ix_gc_jobs_import_run_last_event_at", table_name="import_run", schema="gc_jobs"
+    )
     op.drop_table("import_event", schema="gc_jobs")
     op.drop_table("import_run", schema="gc_jobs")
