@@ -33,3 +33,31 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 3
+
+  - package-ecosystem: docker
+    directory: /gccore
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: docker
+    directory: /gcimport
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: docker
+    directory: /gcjobs
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: docker
+    directory: /gcmapview
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3

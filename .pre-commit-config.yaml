@@ -52,3 +52,9 @@ repos:
         entry: python3 scripts/check_ruff_versions.py
         files: '^(\.pre-commit-config\.yaml|(geocomponents|gcimport)/pyproject\.toml)$'
         pass_filenames: false
+      - id: docker-versions-in-sync
+        name: container image and uv versions in sync
+        language: system
+        entry: python3 scripts/check_docker_versions.py
+        files: '^(\.github/workflows/ci\.yml|geocomponents/docker-compose\.yml|(geocomponents|gccore|gcimport|gcjobs|gcmapview)/Dockerfile)$'
+        pass_filenames: false
