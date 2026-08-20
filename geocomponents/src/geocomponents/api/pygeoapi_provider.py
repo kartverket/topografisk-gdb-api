@@ -294,6 +294,22 @@ def _unsupported_media_type() -> Response:
     )
 
 
+def _problem_detail(response: Response) -> str:
+    """Pull a human-readable message from a pygeoapi error response body."""
+    try:
+        payload = orjson.loads(bytes(response.body))
+    except Exception:
+        return "Process execution failed"
+    if isinstance(payload, dict):
+        return str(
+            payload.get("description")
+            or payload.get("detail")
+            or payload.get("message")
+            or "Process execution failed"
+        )
+    return "Process execution failed"
+
+
 def _tailor_oas(oas: dict, dataset: ResolvedDataset) -> dict:
     """Trim the generated OpenAPI to what this service actually serves.
 
@@ -585,17 +601,62 @@ def _build_starlette_app(api_: API) -> Starlette:
     async def execute_process(request: Request):
         pid = request.path_params["process_id"]
         body_bytes = await request.body()
+
+        # Validate optional OGC `response` parameter: only "raw" is supported.
+        if pid == "export-feature":
+            try:
+                requested_response = orjson.loads(body_bytes).get("response")
+            except Exception:
+                requested_response = None
+            if requested_response not in (None, "raw"):
+                return JSONResponse(
+                    {
+                        "type": "about:blank",
+                        "title": "Unsupported response mode",
+                        "status": 400,
+                        "detail": (
+                            "Only 'raw' response is supported. "
+                            "Omit the 'response' field or set it to 'raw'."
+                        ),
+                    },
+                    status_code=400,
+                    media_type="application/problem+json",
+                )
+
         response = await _execute(
             api_, processes_api.execute_process, request, pid, skip_valid_check=True
         )
-        if pid == "export-feature" and response.status_code == 200:
+
+        if pid != "export-feature":
+            return response
+
+        if response.status_code == 200:
             try:
                 inputs = orjson.loads(body_bytes).get("inputs", {})
-                filename = f"{inputs.get('collection', 'feature')}-{inputs.get('feature_id', 'export')}.geojson"
+                extension = {"geojson": "geojson", "jsonfg": "jsonfg"}.get(
+                    inputs.get("format", "geojson"), "geojson"
+                )
+                filename = (
+                    f"{inputs.get('collection', 'feature')}"
+                    f"-{inputs.get('feature_id', 'export')}.{extension}"
+                )
                 response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
             except Exception:
                 pass
-        return response
+            return response
+
+        # Non-200: normalise to application/problem+json.
+        status = 404 if b"not found" in bytes(response.body).lower() else response.status_code
+        return JSONResponse(
+            {
+                "type": "about:blank",
+                "title": "Export failed" if status != 404 else "Feature not found",
+                "status": status,
+                "detail": _problem_detail(response),
+            },
+            status_code=status,
+            media_type="application/problem+json",
+        )
 
     routes = [
         Route("/", landing),
