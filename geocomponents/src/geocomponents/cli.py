@@ -58,6 +58,8 @@ def apply_schema():
 
     datasets = _load_datasets()
     with psycopg.connect(config.database_dsn()) as conn:
+        functions.apply_topogdb(conn)
+        typer.echo("applied topogdb schema")
         functions.apply_dispatch(conn)
         typer.echo("applied dispatch layer (ogc.feature_*)")
         for d in datasets:
