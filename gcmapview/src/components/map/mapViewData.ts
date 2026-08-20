@@ -334,7 +334,7 @@ export function addNativeFeatureSourcesAndLayers(
     filter: ['==', ['geometry-type'], 'Polygon'],
     paint: {
       'fill-color': BUILDING_FILL_COLOR,
-      'fill-opacity': 0.90,
+      'fill-opacity': 0.9,
       'fill-outline-color': BUILDING_COLOR
     }
   });

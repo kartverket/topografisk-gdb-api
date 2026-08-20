@@ -29,6 +29,8 @@ The root `Makefile` provides shortcuts for the local compose stack, the
 frontend, and gcimport:
 
 ```bash
+make lock              # Refresh lockfiles for geocomponents, gccore, gcjobs, and gcimport
+make install           # Sync dependencies from the existing lockfiles for geocomponents, gccore, gcjobs, and gcimport
 make docker-up         # Start the local compose stack: PostGIS, geocomponents, gcimport, gcmapview, gccore, and gcjobs
 make docker-down       # Stop the local compose stack
 make docker-delete-db-volume  # Delete the local geocomponents Postgres volume
@@ -69,8 +71,9 @@ The same hooks run in CI (see [`.github/workflows/ci.yml`](.github/workflows/ci.
 [uv](https://docs.astral.sh/uv/) is the only prerequisite:
 
 ```bash
-# One-time setup: install the git hook and warm hook envs
-uv sync --project geocomponents
+# One-time setup: refresh lockfiles, sync environments, install the git hook, and warm hook envs
+make lock
+make install
 uv run --project geocomponents pre-commit install
 
 # Run against staged files (this is what the git hook does)
@@ -98,9 +101,9 @@ uploads. Examples:
 
 ```bash
 curl -F 'file=@bane.json;type=application/json' \
-  'http://localhost:8001/imports?profile=fkb_bane'
+  'http://localhost:8003/imports?profile=fkb_bane'
 curl -F 'file=@bygning.geojson;type=application/geo+json' \
-  'http://localhost:8001/imports?profile=bygning'
+  'http://localhost:8003/imports?profile=bygning'
 ```
 
 # Technical details

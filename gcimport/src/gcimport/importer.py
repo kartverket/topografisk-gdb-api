@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-import httpx
+import httpx2
 from pyproj import CRS, Transformer
 from pyproj.exceptions import CRSError, ProjError
 
@@ -46,6 +47,10 @@ class UpstreamImportError(RuntimeError):
         self.reason = reason
 
 
+class _BatchRouteUnavailableError(RuntimeError):
+    """Raised when the upstream API does not expose batch upsert."""
+
+
 @dataclass(frozen=True)
 class PreparedFeature:
     """A validated GeoJSON feature and its upstream route."""
@@ -53,6 +58,17 @@ class PreparedFeature:
     collection: str
     feature_id: str
     geojson: dict[str, Any]
+
+
+BatchEventCallback = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+@dataclass(frozen=True)
+class _ImportChunkContext:
+    imported: list[dict[str, str] | None]
+    client: httpx2.AsyncClient
+    api_url: str
+    on_batch: BatchEventCallback | None
 
 
 def _identity_values(
@@ -508,55 +524,275 @@ def _iter_positions(coordinates: Any) -> list[list[float]]:
 async def import_features(
     features: list[PreparedFeature],
     *,
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     api_url: str,
+    upsert_batch_size: int,
+    on_batch: BatchEventCallback | None = None,
 ) -> dict[str, Any]:
-    """Upsert prepared features individually and return an import summary."""
-    imported: list[dict[str, str]] = []
-    for feature in features:
-        url = f"{api_url}/collections/{feature.collection}/items:upsert"
-        try:
-            response = await client.post(
-                url,
-                json=feature.geojson,
-                headers={"Content-Type": "application/geo+json"},
+    """Upsert prepared features and return an import summary."""
+    indexed_features: dict[str, list[tuple[int, PreparedFeature]]] = {}
+    for index, feature in enumerate(features):
+        indexed_features.setdefault(feature.collection, []).append((index, feature))
+
+    imported: list[dict[str, str] | None] = [None] * len(features)
+    batch_supported = True
+    context = _ImportChunkContext(
+        imported=imported,
+        client=client,
+        api_url=api_url,
+        on_batch=on_batch,
+    )
+
+    for collection_features in indexed_features.values():
+        for chunk in _chunked(collection_features, upsert_batch_size):
+            batch_supported = await _import_chunk(
+                chunk,
+                context=context,
+                batch_supported=batch_supported,
             )
-        except httpx.HTTPError as err:
-            raise UpstreamImportError(
-                collection=feature.collection,
-                feature_id=feature.feature_id,
-                reason=f"request failed: {err}",
-            ) from err
-        if not response.is_success:
-            raise UpstreamImportError(
-                collection=feature.collection,
-                feature_id=feature.feature_id,
-                reason=f"upstream returned HTTP {response.status_code}",
-            )
-        try:
-            response_body = response.json()
-        except (json.JSONDecodeError, UnicodeDecodeError) as err:
-            raise UpstreamImportError(
-                collection=feature.collection,
-                feature_id=feature.feature_id,
-                reason="successful upstream response did not contain valid JSON",
-            ) from err
-        upstream_id = (
-            response_body.get("id") if isinstance(response_body, dict) else None
+
+    return {"total": len(features), "features": imported}
+
+
+async def _import_chunk(
+    chunk: list[tuple[int, PreparedFeature]],
+    *,
+    context: _ImportChunkContext,
+    batch_supported: bool,
+) -> bool:
+    if len(chunk) > 1 and batch_supported:
+        handled, batch_supported = await _try_import_chunk_batch(
+            chunk,
+            context=context,
         )
-        if not isinstance(upstream_id, str):
-            raise UpstreamImportError(
-                collection=feature.collection,
-                feature_id=feature.feature_id,
-                reason="successful upstream response requires a UUID string id",
+        if handled:
+            return batch_supported
+
+    await _import_chunk_singles(
+        chunk,
+        context=context,
+    )
+    return batch_supported
+
+
+async def _try_import_chunk_batch(
+    chunk: list[tuple[int, PreparedFeature]],
+    *,
+    context: _ImportChunkContext,
+) -> tuple[bool, bool]:
+    try:
+        identifiers = await _import_feature_batch(
+            chunk,
+            client=context.client,
+            api_url=context.api_url,
+        )
+    except _BatchRouteUnavailableError:
+        return False, False
+    except UpstreamImportError as err:
+        if context.on_batch is not None:
+            await context.on_batch(
+                {
+                    "status": "failed",
+                    "mode": "batch",
+                    "collection": err.collection,
+                    "feature_id": err.feature_id,
+                    "batch_size": len(chunk),
+                    "reason": err.reason,
+                }
             )
+        raise
+
+    if context.on_batch is not None:
+        await context.on_batch(
+            {
+                "status": "succeeded",
+                "mode": "batch",
+                "collection": chunk[0][1].collection,
+                "batch_size": len(chunk),
+                "feature_ids": [feature.feature_id for _, feature in chunk],
+            }
+        )
+    for (index, feature), identifier in zip(chunk, identifiers, strict=True):
+        context.imported[index] = {
+            "collection": feature.collection,
+            "id": identifier,
+        }
+    return True, True
+
+
+async def _import_chunk_singles(
+    chunk: list[tuple[int, PreparedFeature]],
+    *,
+    context: _ImportChunkContext,
+) -> None:
+    for index, feature in chunk:
         try:
-            stable_id = str(UUID(upstream_id))
-        except ValueError as err:
-            raise UpstreamImportError(
-                collection=feature.collection,
-                feature_id=feature.feature_id,
-                reason="successful upstream response requires a UUID string id",
-            ) from err
-        imported.append({"collection": feature.collection, "id": stable_id})
-    return {"total": len(imported), "features": imported}
+            context.imported[index] = await _import_feature(
+                feature,
+                client=context.client,
+                api_url=context.api_url,
+            )
+        except UpstreamImportError as err:
+            if context.on_batch is not None:
+                await context.on_batch(
+                    {
+                        "status": "failed",
+                        "mode": "single",
+                        "collection": err.collection,
+                        "feature_id": err.feature_id,
+                        "batch_size": 1,
+                        "reason": err.reason,
+                    }
+                )
+            raise
+        if context.on_batch is not None:
+            await context.on_batch(
+                {
+                    "status": "succeeded",
+                    "mode": "single",
+                    "collection": feature.collection,
+                    "feature_id": feature.feature_id,
+                    "batch_size": 1,
+                    "feature_ids": [feature.feature_id],
+                }
+            )
+
+
+def _chunked(
+    items: list[tuple[int, PreparedFeature]], size: int
+) -> list[list[tuple[int, PreparedFeature]]]:
+    return [items[index : index + size] for index in range(0, len(items), size)]
+
+
+async def _import_feature_batch(
+    indexed_features: list[tuple[int, PreparedFeature]],
+    *,
+    client: httpx2.AsyncClient,
+    api_url: str,
+) -> list[str]:
+    collection = indexed_features[0][1].collection
+    url = f"{api_url}/processes/upsert-batch/execution"
+    payload = {
+        "inputs": {
+            "collection": collection,
+            "features": [feature.geojson for _, feature in indexed_features],
+        }
+    }
+
+    try:
+        response = await client.post(
+            url,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+        )
+    except httpx2.HTTPError as err:
+        raise UpstreamImportError(
+            collection=collection,
+            feature_id=indexed_features[0][1].feature_id,
+            reason=f"request failed: {err}",
+        ) from err
+
+    if response.status_code in {404, 405, 415, 501}:
+        raise _BatchRouteUnavailableError()
+    if not response.is_success:
+        raise UpstreamImportError(
+            collection=collection,
+            feature_id=indexed_features[0][1].feature_id,
+            reason=f"upstream returned HTTP {response.status_code}",
+        )
+
+    try:
+        response_body = response.json()
+    except (json.JSONDecodeError, UnicodeDecodeError) as err:
+        raise UpstreamImportError(
+            collection=collection,
+            feature_id=indexed_features[0][1].feature_id,
+            reason="successful upstream response did not contain valid JSON",
+        ) from err
+
+    items = response_body.get("features") if isinstance(response_body, dict) else None
+    if not isinstance(items, list) or len(items) != len(indexed_features):
+        raise UpstreamImportError(
+            collection=collection,
+            feature_id=indexed_features[0][1].feature_id,
+            reason=(
+                "successful upstream batch response must return one id per "
+                "feature under features"
+            ),
+        )
+
+    return [
+        _parse_upstream_id(
+            collection=feature.collection,
+            feature_id=feature.feature_id,
+            response_body=item,
+        )
+        for (_, feature), item in zip(indexed_features, items, strict=True)
+    ]
+
+
+async def _import_feature(
+    feature: PreparedFeature,
+    *,
+    client: httpx2.AsyncClient,
+    api_url: str,
+) -> dict[str, str]:
+    url = f"{api_url}/collections/{feature.collection}/items:upsert"
+    try:
+        response = await client.post(
+            url,
+            json=feature.geojson,
+            headers={"Content-Type": "application/geo+json"},
+        )
+    except httpx2.HTTPError as err:
+        raise UpstreamImportError(
+            collection=feature.collection,
+            feature_id=feature.feature_id,
+            reason=f"request failed: {err}",
+        ) from err
+    if not response.is_success:
+        raise UpstreamImportError(
+            collection=feature.collection,
+            feature_id=feature.feature_id,
+            reason=f"upstream returned HTTP {response.status_code}",
+        )
+    try:
+        response_body = response.json()
+    except (json.JSONDecodeError, UnicodeDecodeError) as err:
+        raise UpstreamImportError(
+            collection=feature.collection,
+            feature_id=feature.feature_id,
+            reason="successful upstream response did not contain valid JSON",
+        ) from err
+
+    return {
+        "collection": feature.collection,
+        "id": _parse_upstream_id(
+            collection=feature.collection,
+            feature_id=feature.feature_id,
+            response_body=response_body,
+        ),
+    }
+
+
+def _parse_upstream_id(
+    *,
+    collection: str,
+    feature_id: str,
+    response_body: Any,
+) -> str:
+    upstream_id = response_body.get("id") if isinstance(response_body, dict) else None
+    if not isinstance(upstream_id, str):
+        raise UpstreamImportError(
+            collection=collection,
+            feature_id=feature_id,
+            reason="successful upstream response requires a UUID string id",
+        )
+    try:
+        return str(UUID(upstream_id))
+    except ValueError as err:
+        raise UpstreamImportError(
+            collection=collection,
+            feature_id=feature_id,
+            reason="successful upstream response requires a UUID string id",
+        ) from err

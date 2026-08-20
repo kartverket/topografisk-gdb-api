@@ -36,6 +36,9 @@ packages = ["src/geocomponents"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+filterwarnings = [
+    'ignore:Support for class-based `config` is deprecated, use ConfigDict instead\.:pydantic.warnings.PydanticDeprecatedSince20',
+]
 
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.

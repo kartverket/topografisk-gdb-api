@@ -9,6 +9,7 @@ from __future__ import annotations
 
 PROCESS_REGISTRY: dict[str, str] = {
     "hello": "geocomponents.processes.placeholder.PlaceholderProcessor",
+    "upsert-batch": "geocomponents.processes.upsert_batch.UpsertBatchProcessor",
 }
 
 

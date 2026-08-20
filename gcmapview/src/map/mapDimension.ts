@@ -105,6 +105,13 @@ function offsetHeightExpression(
 
 function setLayerVisibility(map: maplibregl.Map, layerId: string, visible: boolean) {
   if (!map.getLayer(layerId)) return;
+
+  const currentVisibility = map.getLayoutProperty(layerId, 'visibility');
+  const nextVisibility = visible ? 'visible' : 'none';
+  if (currentVisibility === nextVisibility) {
+    return;
+  }
+
   map.setLayoutProperty(layerId, 'visibility', visible ? 'visible' : 'none');
 }
 
