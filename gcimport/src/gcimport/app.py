@@ -285,7 +285,7 @@ def _batch_event_publisher(
     total_features: int,
 ) -> Callable[[dict[str, Any]], Awaitable[None]]:
     async def publish_batch_event(batch_event: dict[str, Any]) -> None:
-        suffix = batch_event.pop("status")
+        suffix = batch_event["status"]
         await _publish_import_update(
             publisher,
             base_event,
