@@ -2,7 +2,7 @@
 
 # ---- builder: resolve deps, install the package into a venv ----
 FROM python:3.12-slim AS builder
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.12.5-alpine3.22@sha256:f867107c5bcaa11b3c0c39761fb3476726203f6a0d388a68eb074c23c15cee09 /uv /usr/local/bin/uv
 ENV UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1
 WORKDIR /app
 
