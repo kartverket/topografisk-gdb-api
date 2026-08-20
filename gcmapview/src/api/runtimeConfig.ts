@@ -1,6 +1,6 @@
 type RuntimeConfig = {
   geocomponentsApiUrl?: unknown;
-  gcimportApiUrl?: unknown;
+  gcjobsApiUrl?: unknown;
 };
 
 declare global {
@@ -42,6 +42,6 @@ export function geocomponentsRuntimeApiUrl() {
   return getRuntimeConfig()?.geocomponentsApiUrl;
 }
 
-export function gcimportRuntimeApiUrl() {
-  return getRuntimeConfig()?.gcimportApiUrl;
+export function gcjobsRuntimeApiUrl() {
+  return getRuntimeConfig()?.gcjobsApiUrl;
 }

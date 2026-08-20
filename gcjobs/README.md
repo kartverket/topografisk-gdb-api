@@ -4,6 +4,7 @@
 shared PostgreSQL database used by `geocomponents`.
 
 - Shared database: same `DB_*` environment variables as `geocomponents`
+- Shared Redis broker for the import-event stream: set `REDIS_URL`
 - Owned schema: `gc_jobs`
 - Migration entrypoint: `gcjobs migrate-db`
 
@@ -11,6 +12,7 @@ shared PostgreSQL database used by `geocomponents`.
 
 ```sh
 uv sync
+export REDIS_URL=redis://localhost:56379/0
 uv run gcjobs migrate-db
 uv run gcjobs serve --port 8003
 ```
@@ -18,7 +20,7 @@ uv run gcjobs serve --port 8003
 Or start the shared local stack from `geocomponents/`:
 
 ```sh
-docker compose up --build db gcjobs-migrate gcjobs
+docker compose up --build db redis gcjobs-migrate gcjobs
 ```
 
 ## Endpoints

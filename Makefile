@@ -1,4 +1,4 @@
-.PHONY: docker-up docker-down docker-delete-db-volume docker-trivy-scan frontend-install frontend-build frontend-run frontend-lint frontend-format gcimport-install gcimport-test gcimport-run gccore-install gccore-test gccore-run gcjobs-install gcjobs-test gcjobs-run
+.PHONY: lock install docker-up docker-down docker-delete-db-volume docker-trivy-scan frontend-install frontend-build frontend-run frontend-lint frontend-format gcimport-lock gcimport-install gcimport-test gcimport-run gccore-lock gccore-install gccore-test gccore-run gcjobs-lock gcjobs-install gcjobs-test gcjobs-run
 
 DOCKER_COMPOSE := $(shell command -v docker-compose >/dev/null 2>&1 && echo docker-compose || echo 'docker compose')
 DOCKER_SERVICES := geocomponents gcimport gccore gcjobs gcmapview
@@ -6,6 +6,21 @@ TRIVY_SERVICES := $(if $(SERVICE),$(SERVICE),$(DOCKER_SERVICES))
 DOCKER_SOCKET ?= /var/run/docker.sock
 TRIVY_IMAGE ?= aquasec/trivy:latest
 TRIVY_CACHE_DIR ?= $(HOME)/.cache/trivy
+
+lock:
+	uv lock --project geocomponents
+	uv lock --project gccore
+	uv lock --project gcjobs
+	uv lock --project gcimport
+
+install:
+	uv sync --project geocomponents
+	uv sync --project gccore
+	uv sync --project gcjobs
+	uv sync --project gcimport
+
+docker-build:
+	cd geocomponents && $(DOCKER_COMPOSE) build
 
 docker-up:
 	cd geocomponents && $(DOCKER_COMPOSE) up --build
@@ -67,6 +82,12 @@ frontend-lint:
 frontend-format:
 	npm --prefix gcmapview run format
 
+geocomponents-test:
+	cd geocomponents && uv run pytest
+
+gcimport-lock:
+	uv lock --project gcimport
+
 gcimport-install:
 	uv sync --project gcimport
 
@@ -76,6 +97,9 @@ gcimport-test:
 gcimport-run:
 	uv run --project gcimport uvicorn gcimport.app:app --port 8001
 
+gccore-lock:
+	uv lock --project gccore
+
 gccore-install:
 	uv sync --project gccore
 
@@ -84,6 +108,9 @@ gccore-test:
 
 gccore-run:
 	uv run --project gccore gccore serve --port 8002
+
+gcjobs-lock:
+	uv lock --project gcjobs
 
 gcjobs-install:
 	uv sync --project gcjobs

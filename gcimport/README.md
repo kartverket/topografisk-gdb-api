@@ -17,6 +17,7 @@ another layer without changing the upload endpoint or upstream client.
 ## Configuration
 
 - `GEOCOMPONENTS_API_URL`: required geocomponents root URL.
+- `REDIS_URL`: required Redis broker URL for the import-event stream.
 - `GCIMPORT_MAX_UPLOAD_BYTES`: maximum uploaded file size in bytes
   (default: `104857600`).
 - `GCIMPORT_TIMEOUT_SECONDS`: upstream request timeout in seconds
@@ -27,6 +28,7 @@ another layer without changing the upload endpoint or upstream client.
 ```sh
 uv sync
 export GEOCOMPONENTS_API_URL=http://localhost:8000
+export REDIS_URL=redis://localhost:56379/0
 uv run uvicorn gcimport.app:app --port 8001
 ```
 

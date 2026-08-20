@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
@@ -14,6 +14,7 @@ from gcimport.profiles import ImportProfile
 from gcimport.profiles.bygning import (
     _AREA_SOURCE_OBJTYPES as _BUILDING_AREA_SOURCE_OBJTYPES,
 )
+from gcimport.pubsub import RecordingImportEventPublisher
 
 PLATFORM_UUID = "11111111-1111-4111-8111-111111111111"
 TRACK_UUID = "22222222-2222-4222-8222-222222222222"
@@ -374,7 +375,7 @@ def _building_position_geojson_document(
     }
 
 
-def _post(client: TestClient, document: Any, *, profile: str) -> httpx.Response:
+def _post(client: TestClient, document: Any, *, profile: str) -> httpx2.Response:
     return client.post(
         f"/imports?profile={profile}",
         files={"file": ("bane.json", json.dumps(document), "application/json")},
@@ -387,7 +388,7 @@ def _post_geojson(
     *,
     profile: str,
     filename: str = "source.geojson",
-) -> httpx.Response:
+) -> httpx2.Response:
     return client.post(
         f"/imports?profile={profile}",
         files={"file": (filename, json.dumps(document), "application/geo+json")},
@@ -395,24 +396,151 @@ def _post_geojson(
 
 
 def _test_client(
-    handler: httpx.MockTransport,
+    handler: httpx2.MockTransport,
     *,
     max_upload_bytes: int = 100_000,
+    upsert_batch_size: int = 250,
+    event_publisher: RecordingImportEventPublisher | None = None,
 ) -> TestClient:
-    upstream_client = httpx.AsyncClient(transport=handler)
+    upstream_client = httpx2.AsyncClient(transport=handler)
     app = create_app(
-        settings=Settings(
+        settings=_settings(
             geocomponents_api_url="https://bane.example",
             max_upload_bytes=max_upload_bytes,
+            upsert_batch_size=upsert_batch_size,
         ),
         client=upstream_client,
+        event_publisher=event_publisher,
     )
     return TestClient(app)
 
 
+def _settings(**overrides: Any) -> Settings:
+    return Settings(redis_url="redis://redis:6379/0", **overrides)
+
+
+def test_import_publishes_start_batch_and_success_events() -> None:
+    publisher = RecordingImportEventPublisher()
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        assert request.url.path.endswith("/processes/upsert-batch/execution")
+        return httpx2.Response(
+            200,
+            json={
+                "collection": "jernbaneplattformkant",
+                "total": 2,
+                "features": [
+                    {"id": PLATFORM_UUID},
+                    {"id": TRACK_UUID},
+                ],
+            },
+        )
+
+    first = _feature(properties=_properties(lokalid="feature-1"))
+    second = _feature(properties=_properties(lokalid="feature-2"))
+
+    with _test_client(
+        httpx2.MockTransport(handler),
+        upsert_batch_size=2,
+        event_publisher=publisher,
+    ) as client:
+        response = _post(client, _document([first, second]), profile="fkb_bane")
+
+    assert response.status_code == 200
+    assert [event["event"] for event in publisher.events] == [
+        "import.started",
+        "import.parsed",
+        "import.batch.succeeded",
+        "import.completed.succeeded",
+    ]
+    assert all(event["profile"] == "fkb_bane" for event in publisher.events)
+    assert publisher.events[1]["total_features"] == 2
+    assert publisher.events[2]["batch_size"] == 2
+    assert publisher.events[3]["imported_features"] == 2
+    assert len({event["import_id"] for event in publisher.events}) == 1
+
+
+def test_import_publishes_parse_failure_event() -> None:
+    publisher = RecordingImportEventPublisher()
+
+    with _test_client(
+        httpx2.MockTransport(lambda _request: httpx2.Response(204)),
+        event_publisher=publisher,
+    ) as client:
+        response = client.post(
+            "/imports?profile=fkb_bane",
+            files={"file": ("broken.json", "{", "application/json")},
+        )
+
+    assert response.status_code == 400
+    assert [event["event"] for event in publisher.events] == [
+        "import.started",
+        "import.completed.failed",
+    ]
+    assert publisher.events[1]["phase"] == "parsing"
+
+
+def test_import_publishes_batch_and_completion_failures() -> None:
+    publisher = RecordingImportEventPublisher()
+
+    def handler(_request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(500)
+
+    first = _feature(properties=_properties(lokalid="feature-1"))
+    second = _feature(properties=_properties(lokalid="feature-2"))
+
+    with _test_client(
+        httpx2.MockTransport(handler),
+        upsert_batch_size=2,
+        event_publisher=publisher,
+    ) as client:
+        response = _post(client, _document([first, second]), profile="fkb_bane")
+
+    assert response.status_code == 502
+    assert [event["event"] for event in publisher.events] == [
+        "import.started",
+        "import.parsed",
+        "import.batch.failed",
+        "import.completed.failed",
+    ]
+    assert publisher.events[2]["reason"] == "upstream returned HTTP 500"
+    assert publisher.events[3]["reason"] == "upstream returned HTTP 500"
+
+
+def test_import_uses_caller_supplied_import_id() -> None:
+    publisher = RecordingImportEventPublisher()
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        assert request.url.path.endswith(
+            "/collections/jernbaneplattformkant/items:upsert"
+        )
+        return httpx2.Response(200, json={"id": PLATFORM_UUID})
+
+    feature = _feature(properties=_properties(lokalid="feature-1"))
+
+    with _test_client(
+        httpx2.MockTransport(handler),
+        event_publisher=publisher,
+    ) as client:
+        response = client.post(
+            "/imports?profile=fkb_bane",
+            headers={"X-Import-Id": "run-123"},
+            files={
+                "file": (
+                    "source.json",
+                    json.dumps(_document([feature])),
+                    "application/json",
+                )
+            },
+        )
+
+    assert response.status_code == 200
+    assert {event["import_id"] for event in publisher.events} == {"run-123"}
+
+
 def test_imports_preflight_allows_any_origin() -> None:
     with _test_client(
-        httpx.MockTransport(lambda request: httpx.Response(200))
+        httpx2.MockTransport(lambda request: httpx2.Response(200))
     ) as client:
         response = client.options(
             "/imports",
@@ -428,16 +556,16 @@ def test_imports_preflight_allows_any_origin() -> None:
 
 
 def test_imports_place_and_fallback_geometry() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
         identifier = (
             TRACK_UUID
             if request.url.path.endswith("/spormidt/items:upsert")
             else PLATFORM_UUID
         )
-        return httpx.Response(200, json={"id": identifier})
+        return httpx2.Response(200, json={"id": identifier})
 
     first = _feature(feature_type="JERNBANEPLATTFORMKANT")
     first["geometry"] = {"type": "Point", "coordinates": [0, 0]}
@@ -455,7 +583,7 @@ def test_imports_place_and_fallback_geometry() -> None:
         "coordinates": [[10.7, 59.9], [10.8, 60.0]],
     }
 
-    with _test_client(httpx.MockTransport(handler)) as client:
+    with _test_client(httpx2.MockTransport(handler)) as client:
         response = _post(client, _document([first, second]), profile="fkb_bane")
 
     assert response.status_code == 200
@@ -481,12 +609,12 @@ def test_imports_place_and_fallback_geometry() -> None:
 def test_retry_returns_the_same_upstream_uuid() -> None:
     calls = 0
 
-    def handler(_request: httpx.Request) -> httpx.Response:
+    def handler(_request: httpx2.Request) -> httpx2.Response:
         nonlocal calls
         calls += 1
-        return httpx.Response(200, json={"id": PLATFORM_UUID})
+        return httpx2.Response(200, json={"id": PLATFORM_UUID})
 
-    with _test_client(httpx.MockTransport(handler)) as client:
+    with _test_client(httpx2.MockTransport(handler)) as client:
         first = _post(client, _document([_feature()]), profile="fkb_bane")
         retry = _post(client, _document([_feature()]), profile="fkb_bane")
 
@@ -497,15 +625,15 @@ def test_retry_returns_the_same_upstream_uuid() -> None:
 
 
 def test_imports_batch_same_collection_features() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
         assert request.url.path.endswith("/processes/upsert-batch/execution")
         payload = json.loads(request.content)
         assert payload["inputs"]["collection"] == "jernbaneplattformkant"
         assert len(payload["inputs"]["features"]) == 2
-        return httpx.Response(
+        return httpx2.Response(
             200,
             json={
                 "collection": "jernbaneplattformkant",
@@ -521,7 +649,7 @@ def test_imports_batch_same_collection_features() -> None:
         )
     )
 
-    with _test_client(httpx.MockTransport(handler)) as client:
+    with _test_client(httpx2.MockTransport(handler)) as client:
         response = _post(
             client,
             _document([_feature(), second]),
@@ -542,13 +670,13 @@ def test_imports_batch_same_collection_features() -> None:
 
 
 def test_imports_falls_back_when_batch_route_is_unavailable() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
         if request.url.path.endswith("/processes/upsert-batch/execution"):
-            return httpx.Response(404)
-        return httpx.Response(200, json={"id": PLATFORM_UUID})
+            return httpx2.Response(404)
+        return httpx2.Response(200, json={"id": PLATFORM_UUID})
 
     second = _feature(
         properties=_properties(
@@ -557,7 +685,7 @@ def test_imports_falls_back_when_batch_route_is_unavailable() -> None:
         )
     )
 
-    with _test_client(httpx.MockTransport(handler)) as client:
+    with _test_client(httpx2.MockTransport(handler)) as client:
         response = _post(
             client,
             _document([_feature(), second]),
@@ -580,11 +708,11 @@ def test_imports_falls_back_when_batch_route_is_unavailable() -> None:
 
 
 def test_imports_bane_linestring_place_for_compatibility() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, json={"id": PLATFORM_UUID})
+        return httpx2.Response(200, json={"id": PLATFORM_UUID})
 
     feature = _feature()
     feature["place"] = {
@@ -592,7 +720,7 @@ def test_imports_bane_linestring_place_for_compatibility() -> None:
         "coordinates": [[10.7, 59.9], [10.8, 60.0]],
     }
 
-    with _test_client(httpx.MockTransport(handler)) as client:
+    with _test_client(httpx2.MockTransport(handler)) as client:
         response = _post(client, _document([feature]), profile="fkb_bane")
 
     assert response.status_code == 200
@@ -602,11 +730,11 @@ def test_imports_bane_linestring_place_for_compatibility() -> None:
 
 
 def test_imports_fkb_bane_nested_upstream_properties() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, json={"id": PLATFORM_UUID})
+        return httpx2.Response(200, json={"id": PLATFORM_UUID})
 
     feature = _feature(
         properties=_properties(
@@ -615,7 +743,7 @@ def test_imports_fkb_bane_nested_upstream_properties() -> None:
         )
     )
 
-    with _test_client(httpx.MockTransport(handler)) as client:
+    with _test_client(httpx2.MockTransport(handler)) as client:
         response = _post(client, _document([feature]), profile="fkb_bane")
 
     assert response.status_code == 200
@@ -664,15 +792,15 @@ def test_dataset_rules_are_supplied_by_profile() -> None:
 
 
 def test_imports_built_in_bygning_profile_with_multilinestring() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, json={"id": PLATFORM_UUID})
+        return httpx2.Response(200, json={"id": PLATFORM_UUID})
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
-        settings=Settings(geocomponents_api_url="https://bygning.example"),
+        settings=_settings(geocomponents_api_url="https://bygning.example"),
         client=upstream_client,
     )
 
@@ -700,15 +828,15 @@ def test_imports_built_in_bygning_profile_with_multilinestring() -> None:
 
 
 def test_imports_built_in_bygning_omrade_profile_with_multipolygon() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, json={"id": PLATFORM_UUID})
+        return httpx2.Response(200, json={"id": PLATFORM_UUID})
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
-        settings=Settings(geocomponents_api_url="https://bygning.example"),
+        settings=_settings(geocomponents_api_url="https://bygning.example"),
         client=upstream_client,
     )
 
@@ -736,15 +864,15 @@ def test_imports_built_in_bygning_omrade_profile_with_multipolygon() -> None:
 
 
 def test_imports_built_in_bygning_senterlinje_profile_with_multilinestring() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, json={"id": PLATFORM_UUID})
+        return httpx2.Response(200, json={"id": PLATFORM_UUID})
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
-        settings=Settings(geocomponents_api_url="https://bygning.example"),
+        settings=_settings(geocomponents_api_url="https://bygning.example"),
         client=upstream_client,
     )
 
@@ -772,15 +900,15 @@ def test_imports_built_in_bygning_senterlinje_profile_with_multilinestring() -> 
 
 
 def test_imports_built_in_bygning_position_profile_with_point() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, json={"id": PLATFORM_UUID})
+        return httpx2.Response(200, json={"id": PLATFORM_UUID})
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
-        settings=Settings(geocomponents_api_url="https://bygning.example"),
+        settings=_settings(geocomponents_api_url="https://bygning.example"),
         client=upstream_client,
     )
 
@@ -809,7 +937,7 @@ def test_imports_built_in_bygning_position_profile_with_point() -> None:
 
 def test_rejects_missing_profile_query_parameter() -> None:
     with _test_client(
-        httpx.MockTransport(lambda _request: httpx.Response(204))
+        httpx2.MockTransport(lambda _request: httpx2.Response(204))
     ) as client:
         response = client.post(
             "/imports",
@@ -826,15 +954,15 @@ def test_rejects_missing_profile_query_parameter() -> None:
 
 
 def test_request_profile_selects_bygning_target_dataset() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, json={"id": PLATFORM_UUID})
+        return httpx2.Response(200, json={"id": PLATFORM_UUID})
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
-        settings=Settings(geocomponents_api_url="https://shared.example"),
+        settings=_settings(geocomponents_api_url="https://shared.example"),
         client=upstream_client,
     )
 
@@ -860,15 +988,15 @@ def test_request_profile_selects_bygning_target_dataset() -> None:
 def test_request_profile_can_import_bygning_area_geojson_through_bygning_profile(
     objtype: str,
 ) -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, json={"id": PLATFORM_UUID})
+        return httpx2.Response(200, json={"id": PLATFORM_UUID})
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
-        settings=Settings(geocomponents_api_url="https://shared.example"),
+        settings=_settings(geocomponents_api_url="https://shared.example"),
         client=upstream_client,
     )
 
@@ -897,15 +1025,15 @@ def test_request_profile_can_import_bygning_area_geojson_through_bygning_profile
 def test_request_profile_can_import_bygning_position_geojson_through_bygning_profile() -> (
     None
 ):
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, json={"id": PLATFORM_UUID})
+        return httpx2.Response(200, json={"id": PLATFORM_UUID})
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
-        settings=Settings(geocomponents_api_url="https://shared.example"),
+        settings=_settings(geocomponents_api_url="https://shared.example"),
         client=upstream_client,
     )
 
@@ -930,15 +1058,15 @@ def test_request_profile_can_import_bygning_position_geojson_through_bygning_pro
 def test_request_profile_can_import_bygning_senterlinje_geojson_through_bygning_profile() -> (
     None
 ):
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, json={"id": PLATFORM_UUID})
+        return httpx2.Response(200, json={"id": PLATFORM_UUID})
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
-        settings=Settings(geocomponents_api_url="https://shared.example"),
+        settings=_settings(geocomponents_api_url="https://shared.example"),
         client=upstream_client,
     )
 
@@ -961,15 +1089,15 @@ def test_request_profile_can_import_bygning_senterlinje_geojson_through_bygning_
 
 
 def test_request_profile_can_import_mixed_bygning_geojson() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, json={"id": PLATFORM_UUID})
+        return httpx2.Response(200, json={"id": PLATFORM_UUID})
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
-        settings=Settings(geocomponents_api_url="https://shared.example"),
+        settings=_settings(geocomponents_api_url="https://shared.example"),
         client=upstream_client,
     )
 
@@ -1001,7 +1129,7 @@ def test_request_profile_can_import_mixed_bygning_geojson() -> None:
 
 def test_rejects_unknown_request_profile() -> None:
     with _test_client(
-        httpx.MockTransport(lambda _request: httpx.Response(204))
+        httpx2.MockTransport(lambda _request: httpx2.Response(204))
     ) as client:
         response = client.post(
             "/imports?profile=unknown",
@@ -1020,7 +1148,7 @@ def test_rejects_unknown_request_profile() -> None:
 
 def test_rejects_legacy_bygning_omrade_request_profile() -> None:
     with _test_client(
-        httpx.MockTransport(lambda _request: httpx.Response(204))
+        httpx2.MockTransport(lambda _request: httpx2.Response(204))
     ) as client:
         response = client.post(
             "/imports?profile=bygning_omrade",
@@ -1038,15 +1166,15 @@ def test_rejects_legacy_bygning_omrade_request_profile() -> None:
 
 
 def test_imports_bygning_geojson_without_falling_back_to_bane() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, json={"id": PLATFORM_UUID})
+        return httpx2.Response(200, json={"id": PLATFORM_UUID})
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
-        settings=Settings(geocomponents_api_url="https://bygning.example"),
+        settings=_settings(geocomponents_api_url="https://bygning.example"),
         client=upstream_client,
     )
 
@@ -1066,15 +1194,15 @@ def test_imports_bygning_geojson_without_falling_back_to_bane() -> None:
 
 
 def test_imports_bygning_omrade_geojson_without_falling_back_to_bane() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, json={"id": PLATFORM_UUID})
+        return httpx2.Response(200, json={"id": PLATFORM_UUID})
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
-        settings=Settings(geocomponents_api_url="https://bygning.example"),
+        settings=_settings(geocomponents_api_url="https://bygning.example"),
         client=upstream_client,
     )
 
@@ -1102,15 +1230,15 @@ def test_bygning_profile_tracks_scanned_area_geojson_objtypes() -> None:
 
 
 def test_merges_duplicate_bygning_segments_with_same_business_key() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, json={"id": PLATFORM_UUID})
+        return httpx2.Response(200, json={"id": PLATFORM_UUID})
 
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
-        settings=Settings(geocomponents_api_url="https://bygning.example"),
+        settings=_settings(geocomponents_api_url="https://bygning.example"),
         client=upstream_client,
     )
 
@@ -1163,16 +1291,16 @@ def test_validation_happens_before_upstream_calls(
 ) -> None:
     calls = 0
 
-    def handler(_request: httpx.Request) -> httpx.Response:
+    def handler(_request: httpx2.Request) -> httpx2.Response:
         nonlocal calls
         calls += 1
-        return httpx.Response(204)
+        return httpx2.Response(204)
 
     valid = _feature()
     invalid = _feature(properties=_properties(lokalid="feature-2"))
     mutate(invalid)
 
-    with _test_client(httpx.MockTransport(handler)) as client:
+    with _test_client(httpx2.MockTransport(handler)) as client:
         response = _post(client, _document([valid, invalid]), profile="fkb_bane")
 
     assert response.status_code == 422
@@ -1182,7 +1310,7 @@ def test_validation_happens_before_upstream_calls(
 
 def test_spormidt_requires_extra_fields() -> None:
     with _test_client(
-        httpx.MockTransport(lambda _request: httpx.Response(204))
+        httpx2.MockTransport(lambda _request: httpx2.Response(204))
     ) as client:
         response = _post(
             client,
@@ -1199,12 +1327,12 @@ def test_spormidt_requires_extra_fields() -> None:
 def test_rejects_duplicate_identity_before_upstream_calls() -> None:
     calls = 0
 
-    def handler(_request: httpx.Request) -> httpx.Response:
+    def handler(_request: httpx2.Request) -> httpx2.Response:
         nonlocal calls
         calls += 1
-        return httpx.Response(204)
+        return httpx2.Response(204)
 
-    with _test_client(httpx.MockTransport(handler)) as client:
+    with _test_client(httpx2.MockTransport(handler)) as client:
         response = _post(
             client,
             _document([_feature(), _feature()]),
@@ -1221,7 +1349,7 @@ def test_place_requires_inherited_crs() -> None:
     document.pop("coordRefSys")
 
     with _test_client(
-        httpx.MockTransport(lambda _request: httpx.Response(204))
+        httpx2.MockTransport(lambda _request: httpx2.Response(204))
     ) as client:
         response = _post(client, document, profile="fkb_bane")
 
@@ -1231,7 +1359,7 @@ def test_place_requires_inherited_crs() -> None:
 
 def test_rejects_invalid_json() -> None:
     with _test_client(
-        httpx.MockTransport(lambda _request: httpx.Response(204))
+        httpx2.MockTransport(lambda _request: httpx2.Response(204))
     ) as client:
         response = client.post(
             "/imports?profile=fkb_bane",
@@ -1243,7 +1371,7 @@ def test_rejects_invalid_json() -> None:
 
 def test_rejects_oversized_upload() -> None:
     with _test_client(
-        httpx.MockTransport(lambda _request: httpx.Response(204)),
+        httpx2.MockTransport(lambda _request: httpx2.Response(204)),
         max_upload_bytes=5,
     ) as client:
         response = client.post(
@@ -1255,8 +1383,8 @@ def test_rejects_oversized_upload() -> None:
 
 
 def test_reports_upstream_failure_as_bad_gateway() -> None:
-    transport = httpx.MockTransport(
-        lambda _request: httpx.Response(503, text="unavailable")
+    transport = httpx2.MockTransport(
+        lambda _request: httpx2.Response(503, text="unavailable")
     )
 
     with _test_client(transport) as client:
@@ -1272,8 +1400,8 @@ def test_reports_upstream_failure_as_bad_gateway() -> None:
 
 
 def test_rejects_successful_upstream_response_without_uuid() -> None:
-    transport = httpx.MockTransport(
-        lambda _request: httpx.Response(200, json={"id": "not-a-uuid"})
+    transport = httpx2.MockTransport(
+        lambda _request: httpx2.Response(200, json={"id": "not-a-uuid"})
     )
 
     with _test_client(transport) as client:
@@ -1330,13 +1458,13 @@ def _classic_geojson_document_with_alias_names() -> dict[str, Any]:
 
 
 def test_imports_classic_geojson_when_filename_ends_with_geojson() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, json={"id": TRACK_UUID})
+        return httpx2.Response(200, json={"id": TRACK_UUID})
 
-    with _test_client(httpx.MockTransport(handler)) as client:
+    with _test_client(httpx2.MockTransport(handler)) as client:
         response = client.post(
             "/imports?profile=fkb_bane",
             files={
@@ -1361,10 +1489,10 @@ def test_imports_classic_geojson_when_filename_ends_with_geojson() -> None:
 
 
 def test_classic_geojson_extension_is_case_insensitive() -> None:
-    def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"id": TRACK_UUID})
+    def handler(_request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json={"id": TRACK_UUID})
 
-    with _test_client(httpx.MockTransport(handler)) as client:
+    with _test_client(httpx2.MockTransport(handler)) as client:
         response = client.post(
             "/imports?profile=fkb_bane",
             files={
@@ -1380,13 +1508,13 @@ def test_classic_geojson_extension_is_case_insensitive() -> None:
 
 
 def test_imports_classic_geojson_with_alias_property_names() -> None:
-    requests: list[httpx.Request] = []
+    requests: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx.Response(200, json={"id": TRACK_UUID})
+        return httpx2.Response(200, json={"id": TRACK_UUID})
 
-    with _test_client(httpx.MockTransport(handler)) as client:
+    with _test_client(httpx2.MockTransport(handler)) as client:
         response = client.post(
             "/imports?profile=fkb_bane",
             files={
@@ -1408,15 +1536,15 @@ def test_imports_classic_geojson_with_alias_property_names() -> None:
 def test_rejects_invalid_classic_geojson_before_upstream_calls() -> None:
     calls = 0
 
-    def handler(_request: httpx.Request) -> httpx.Response:
+    def handler(_request: httpx2.Request) -> httpx2.Response:
         nonlocal calls
         calls += 1
-        return httpx.Response(204)
+        return httpx2.Response(204)
 
     document = _classic_geojson_document()
     document.pop("crs")
 
-    with _test_client(httpx.MockTransport(handler)) as client:
+    with _test_client(httpx2.MockTransport(handler)) as client:
         response = client.post(
             "/imports?profile=fkb_bane",
             files={
@@ -1436,7 +1564,7 @@ def test_rejects_invalid_classic_geojson_before_upstream_calls() -> None:
 
 def test_json_uploads_are_not_auto_converted() -> None:
     with _test_client(
-        httpx.MockTransport(lambda _request: httpx.Response(204))
+        httpx2.MockTransport(lambda _request: httpx2.Response(204))
     ) as client:
         response = client.post(
             "/imports?profile=fkb_bane",

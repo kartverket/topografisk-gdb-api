@@ -18,7 +18,7 @@ gccore = "gccore.cli:app"
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28",
+    "httpx2>=2.10.0",
     "pytest>=8.0",
     "ruff==0.16.1",
 ]

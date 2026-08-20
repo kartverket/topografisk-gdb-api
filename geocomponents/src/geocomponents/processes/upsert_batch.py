@@ -38,26 +38,28 @@ PROCESS_METADATA = {
         },
     },
     "outputs": {
-        "result": {
-            "title": "Batch upsert result",
+        "collection": {
+            "title": "Collection",
+            "description": "Collection the batch upsert targeted.",
+            "schema": {"type": "string"},
+        },
+        "total": {
+            "title": "Total",
+            "description": "Number of inserted or replaced features.",
+            "schema": {"type": "integer"},
+        },
+        "features": {
+            "title": "Features",
             "description": "Stable ids for the inserted or replaced features.",
             "schema": {
-                "type": "object",
-                "required": ["collection", "features", "total"],
-                "properties": {
-                    "collection": {"type": "string"},
-                    "total": {"type": "integer"},
-                    "features": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "required": ["id"],
-                            "properties": {"id": {"type": "string", "format": "uuid"}},
-                        },
-                    },
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["id"],
+                    "properties": {"id": {"type": "string", "format": "uuid"}},
                 },
             },
-        }
+        },
     },
     "example": {
         "inputs": {

@@ -306,14 +306,14 @@ def test_bygning_batch_upsert_process_roundtrip(db, datasets):
     )
 
     assert response.status_code == HTTPStatus.OK
-    payload = response.json()
-    assert len(payload["features"]) == 2
+    result = response.json()
+    assert len(result["features"]) == 2
 
     first_item = client.get(
-        f"{BYGNING_API}/collections/bygning/items/{payload['features'][0]['id']}?f=json"
+        f"{BYGNING_API}/collections/bygning/items/{result['features'][0]['id']}?f=json"
     ).json()
     second_item = client.get(
-        f"{BYGNING_API}/collections/bygning/items/{payload['features'][1]['id']}?f=json"
+        f"{BYGNING_API}/collections/bygning/items/{result['features'][1]['id']}?f=json"
     ).json()
 
     assert first_item["properties"]["lokalid"] == "building-integration-1"

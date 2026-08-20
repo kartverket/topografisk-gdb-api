@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-import httpx
+import httpx2
 from pyproj import CRS, Transformer
 from pyproj.exceptions import CRSError, ProjError
 
@@ -57,6 +58,17 @@ class PreparedFeature:
     collection: str
     feature_id: str
     geojson: dict[str, Any]
+
+
+BatchEventCallback = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+@dataclass(frozen=True)
+class _ImportChunkContext:
+    imported: list[dict[str, str] | None]
+    client: httpx2.AsyncClient
+    api_url: str
+    on_batch: BatchEventCallback | None
 
 
 def _identity_values(
@@ -512,9 +524,10 @@ def _iter_positions(coordinates: Any) -> list[list[float]]:
 async def import_features(
     features: list[PreparedFeature],
     *,
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     api_url: str,
     upsert_batch_size: int,
+    on_batch: BatchEventCallback | None = None,
 ) -> dict[str, Any]:
     """Upsert prepared features and return an import summary."""
     indexed_features: dict[str, list[tuple[int, PreparedFeature]]] = {}
@@ -523,36 +536,126 @@ async def import_features(
 
     imported: list[dict[str, str] | None] = [None] * len(features)
     batch_supported = True
+    context = _ImportChunkContext(
+        imported=imported,
+        client=client,
+        api_url=api_url,
+        on_batch=on_batch,
+    )
 
     for collection_features in indexed_features.values():
         for chunk in _chunked(collection_features, upsert_batch_size):
-            if len(chunk) > 1 and batch_supported:
-                try:
-                    identifiers = await _import_feature_batch(
-                        chunk,
-                        client=client,
-                        api_url=api_url,
-                    )
-                except _BatchRouteUnavailableError:
-                    batch_supported = False
-                else:
-                    for (index, feature), identifier in zip(
-                        chunk, identifiers, strict=True
-                    ):
-                        imported[index] = {
-                            "collection": feature.collection,
-                            "id": identifier,
-                        }
-                    continue
-
-            for index, feature in chunk:
-                imported[index] = await _import_feature(
-                    feature,
-                    client=client,
-                    api_url=api_url,
-                )
+            batch_supported = await _import_chunk(
+                chunk,
+                context=context,
+                batch_supported=batch_supported,
+            )
 
     return {"total": len(features), "features": imported}
+
+
+async def _import_chunk(
+    chunk: list[tuple[int, PreparedFeature]],
+    *,
+    context: _ImportChunkContext,
+    batch_supported: bool,
+) -> bool:
+    if len(chunk) > 1 and batch_supported:
+        handled, batch_supported = await _try_import_chunk_batch(
+            chunk,
+            context=context,
+        )
+        if handled:
+            return batch_supported
+
+    await _import_chunk_singles(
+        chunk,
+        context=context,
+    )
+    return batch_supported
+
+
+async def _try_import_chunk_batch(
+    chunk: list[tuple[int, PreparedFeature]],
+    *,
+    context: _ImportChunkContext,
+) -> tuple[bool, bool]:
+    try:
+        identifiers = await _import_feature_batch(
+            chunk,
+            client=context.client,
+            api_url=context.api_url,
+        )
+    except _BatchRouteUnavailableError:
+        return False, False
+    except UpstreamImportError as err:
+        if context.on_batch is not None:
+            await context.on_batch(
+                {
+                    "status": "failed",
+                    "mode": "batch",
+                    "collection": err.collection,
+                    "feature_id": err.feature_id,
+                    "batch_size": len(chunk),
+                    "reason": err.reason,
+                }
+            )
+        raise
+
+    if context.on_batch is not None:
+        await context.on_batch(
+            {
+                "status": "succeeded",
+                "mode": "batch",
+                "collection": chunk[0][1].collection,
+                "batch_size": len(chunk),
+                "feature_ids": [feature.feature_id for _, feature in chunk],
+            }
+        )
+    for (index, feature), identifier in zip(chunk, identifiers, strict=True):
+        context.imported[index] = {
+            "collection": feature.collection,
+            "id": identifier,
+        }
+    return True, True
+
+
+async def _import_chunk_singles(
+    chunk: list[tuple[int, PreparedFeature]],
+    *,
+    context: _ImportChunkContext,
+) -> None:
+    for index, feature in chunk:
+        try:
+            context.imported[index] = await _import_feature(
+                feature,
+                client=context.client,
+                api_url=context.api_url,
+            )
+        except UpstreamImportError as err:
+            if context.on_batch is not None:
+                await context.on_batch(
+                    {
+                        "status": "failed",
+                        "mode": "single",
+                        "collection": err.collection,
+                        "feature_id": err.feature_id,
+                        "batch_size": 1,
+                        "reason": err.reason,
+                    }
+                )
+            raise
+        if context.on_batch is not None:
+            await context.on_batch(
+                {
+                    "status": "succeeded",
+                    "mode": "single",
+                    "collection": feature.collection,
+                    "feature_id": feature.feature_id,
+                    "batch_size": 1,
+                    "feature_ids": [feature.feature_id],
+                }
+            )
 
 
 def _chunked(
@@ -564,7 +667,7 @@ def _chunked(
 async def _import_feature_batch(
     indexed_features: list[tuple[int, PreparedFeature]],
     *,
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     api_url: str,
 ) -> list[str]:
     collection = indexed_features[0][1].collection
@@ -582,7 +685,7 @@ async def _import_feature_batch(
             json=payload,
             headers={"Content-Type": "application/json"},
         )
-    except httpx.HTTPError as err:
+    except httpx2.HTTPError as err:
         raise UpstreamImportError(
             collection=collection,
             feature_id=indexed_features[0][1].feature_id,
@@ -612,7 +715,10 @@ async def _import_feature_batch(
         raise UpstreamImportError(
             collection=collection,
             feature_id=indexed_features[0][1].feature_id,
-            reason="successful upstream batch response must return one id per feature",
+            reason=(
+                "successful upstream batch response must return one id per "
+                "feature under features"
+            ),
         )
 
     return [
@@ -628,7 +734,7 @@ async def _import_feature_batch(
 async def _import_feature(
     feature: PreparedFeature,
     *,
-    client: httpx.AsyncClient,
+    client: httpx2.AsyncClient,
     api_url: str,
 ) -> dict[str, str]:
     url = f"{api_url}/collections/{feature.collection}/items:upsert"
@@ -638,7 +744,7 @@ async def _import_feature(
             json=feature.geojson,
             headers={"Content-Type": "application/geo+json"},
         )
-    except httpx.HTTPError as err:
+    except httpx2.HTTPError as err:
         raise UpstreamImportError(
             collection=feature.collection,
             feature_id=feature.feature_id,
