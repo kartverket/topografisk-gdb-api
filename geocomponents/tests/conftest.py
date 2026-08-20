@@ -52,8 +52,10 @@ def db(datasets):
         conn.autocommit = True
         for d in datasets:
             conn.execute(f"drop schema if exists {d.name} cascade")
+        conn.execute("drop schema if exists topogdb cascade")
         conn.execute("drop schema if exists ogc cascade")
         conn.autocommit = False
+        functions.apply_topogdb(conn)
         functions.apply_dispatch(conn)
         for d in datasets:
             plan = build_schema_plan(d)
