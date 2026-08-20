@@ -236,6 +236,13 @@ def test_import_start_records_gcimport_http_failure(
         recorded.append(event)
         return {"id": event["import_id"]}
 
+    def fake_get_import_run(_import_id):
+        if not recorded:
+            return None
+        if recorded[-1]["event"] == "import.completed.failed":
+            return {"status": "failed", "processed_features": 0}
+        return {"status": "running", "processed_features": 0}
+
     def handler(_request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(
             422,
@@ -243,6 +250,7 @@ def test_import_start_records_gcimport_http_failure(
         )
 
     monkeypatch.setattr("gcjobs.app.db.record_import_event", fake_record_import_event)
+    monkeypatch.setattr("gcjobs.app.db.get_import_run", fake_get_import_run)
     proxy_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
         event_listener=StubImportEventListener([]),
@@ -256,11 +264,12 @@ def test_import_start_records_gcimport_http_failure(
         )
 
     assert response.status_code == 202
-    assert recorded == [
-        {
-            "import_id": response.json()["import_id"],
-            "event": "import.accepted",
-            "phase": "accepted",
-            "profile": "fkb_bane",
-        }
-    ]
+    assert recorded[0] == {
+        "import_id": response.json()["import_id"],
+        "event": "import.accepted",
+        "phase": "accepted",
+        "profile": "fkb_bane",
+    }
+    assert recorded[1]["event"] == "import.completed.failed"
+    assert recorded[1]["phase"] == "forwarding"
+    assert "422" in recorded[1]["reason"]

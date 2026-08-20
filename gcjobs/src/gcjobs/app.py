@@ -174,7 +174,7 @@ async def _proxy_import(
     payload: bytes,
 ) -> None:
     try:
-        await import_client.post(
+        response = await import_client.post(
             f"{config.gcimport_api_url()}/imports",
             params={"profile": profile_name},
             headers={
@@ -183,6 +183,7 @@ async def _proxy_import(
             },
             content=payload,
         )
+        response.raise_for_status()
     except httpx2.HTTPError as err:
         _record_proxy_terminal_event(
             import_id,

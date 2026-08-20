@@ -19,21 +19,20 @@ class RedisImportEventPublisher:
         *,
         stream: str = IMPORT_EVENTS_STREAM,
     ) -> None:
-        self._redis_url = redis_url
         self._stream = stream
+        redis = _redis_asyncio_module()
+        self._client = redis.from_url(redis_url, decode_responses=True)
 
     async def publish(self, event: dict[str, Any]) -> None:
-        redis = _redis_asyncio_module()
-        client = redis.from_url(self._redis_url, decode_responses=True)
-        try:
-            await client.xadd(
-                self._stream,
-                {"event": json.dumps(event)},
-                maxlen=IMPORT_EVENTS_MAXLEN,
-                approximate=True,
-            )
-        finally:
-            await client.aclose()
+        await self._client.xadd(
+            self._stream,
+            {"event": json.dumps(event)},
+            maxlen=IMPORT_EVENTS_MAXLEN,
+            approximate=True,
+        )
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
 
 
 class RecordingImportEventPublisher:
@@ -42,6 +41,9 @@ class RecordingImportEventPublisher:
 
     async def publish(self, event: dict[str, Any]) -> None:
         self.events.append(dict(event))
+
+    async def aclose(self) -> None:
+        return None
 
 
 def _redis_asyncio_module() -> Any:
