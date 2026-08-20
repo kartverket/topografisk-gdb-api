@@ -1,14 +1,16 @@
-from pygeoapi.process.base import BaseProcessor, ProcessorExecuteError
-from geocomponents.config import database_dsn
-import psycopg
 import orjson
+import psycopg
+from pygeoapi.process.base import BaseProcessor, ProcessorExecuteError
+
+from geocomponents.config import database_dsn
 
 
 class FeatureNotFoundError(ProcessorExecuteError):
     """Raised when the requested feature does not exist."""
 
+
 def _to_jsonfg(feature: dict) -> dict:
-    return { 
+    return {
         "type": "Feature",
         "id": feature.get("id"),
         "featureType": feature.get("properties", {}).get("objtype"),
@@ -16,9 +18,10 @@ def _to_jsonfg(feature: dict) -> dict:
         "properties": feature.get("properties", {}),
     }
 
+
 FORMATS = {
-    "geojson": ("application/geo+json",  lambda f: orjson.dumps(f)),
-    "jsonfg":  ("application/vnd.ogc.fg+json", lambda f: orjson.dumps(_to_jsonfg(f))),
+    "geojson": ("application/geo+json", lambda f: orjson.dumps(f)),
+    "jsonfg": ("application/vnd.ogc.fg+json", lambda f: orjson.dumps(_to_jsonfg(f))),
 }
 
 PROCESS_METADATA = {
@@ -48,12 +51,13 @@ PROCESS_METADATA = {
             "title": "Output format",
             "description": "The output format of the exported feature.",
             "schema": {
-                "type": "string", 
+                "type": "string",
                 "enum": ["geojson", "jsonfg"],
-                "default": "geojson"},
+                "default": "geojson",
+            },
             "minOccurs": 0,
             "maxOccurs": 1,
-        }
+        },
     },
     "outputs": {
         "result": {
@@ -67,7 +71,10 @@ PROCESS_METADATA = {
         },
     },
     "example": {
-        "inputs": {"collection": "parcels", "feature_id": "00000000-0000-0000-0000-000000000000"},
+        "inputs": {
+            "collection": "parcels",
+            "feature_id": "00000000-0000-0000-0000-000000000000",
+        },
     },
 }
 
@@ -94,15 +101,14 @@ class ExportFeatureProcessor(BaseProcessor):
             raise FeatureNotFoundError(
                 f"Feature {feature_id} not found in {self.dataset}/{collection}"
             )
-        
+
         try:
             media_type, encode = FORMATS[format_]
-        except KeyError:
-            raise ProcessorExecuteError(f"Unsupported format: {format_}")
-            
+        except KeyError as err:
+            raise ProcessorExecuteError(f"Unsupported format: {format_}") from err
+
         body_bytes = encode(payload)
         return media_type, body_bytes
 
     def __repr__(self):
         return "<ExportFeatureProcessor>"
-

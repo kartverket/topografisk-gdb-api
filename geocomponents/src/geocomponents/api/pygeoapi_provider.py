@@ -21,6 +21,9 @@ provider; the gateway never imports pygeoapi.
 
 from __future__ import annotations
 
+import logging
+from http import HTTPStatus
+
 import orjson
 import pygeoapi.api as core_api
 import pygeoapi.api.itemtypes as itemtypes_api
@@ -47,6 +50,8 @@ from geocomponents.processes.registry import PROCESS_REGISTRY
 PROVIDER_PATH = "geocomponents.api.db_function_provider.DbFunctionProvider"
 CRS84 = "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
 WGS84_SRID = 4326
+
+_logger = logging.getLogger(__name__)
 
 
 def _storage_crs_uri(coll: ResolvedCollection) -> str | None:
@@ -162,7 +167,7 @@ def build_config(dataset: ResolvedDataset, public_url: str, dsn: str) -> dict:
         resources[process_id] = {
             "type": "process",
             "processor": {
-                "name": PROCESS_REGISTRY[process_id], 
+                "name": PROCESS_REGISTRY[process_id],
                 "dataset": dataset.name,
             },
         }
@@ -432,7 +437,7 @@ def _strip_queryables_links(obj):
     return obj
 
 
-def _build_starlette_app(api_: API) -> Starlette:
+def _build_starlette_app(api_: API) -> Starlette:  # noqa: PLR0915
     def _resource(cid):
         return api_.config["resources"].get(cid)
 
@@ -630,7 +635,7 @@ def _build_starlette_app(api_: API) -> Starlette:
         if pid != "export-feature":
             return response
 
-        if response.status_code == 200:
+        if response.status_code == HTTPStatus.OK:
             try:
                 inputs = orjson.loads(body_bytes).get("inputs", {})
                 extension = {"geojson": "geojson", "jsonfg": "jsonfg"}.get(
@@ -640,17 +645,27 @@ def _build_starlette_app(api_: API) -> Starlette:
                     f"{inputs.get('collection', 'feature')}"
                     f"-{inputs.get('feature_id', 'export')}.{extension}"
                 )
-                response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+                response.headers["Content-Disposition"] = (
+                    f'attachment; filename="{filename}"'
+                )
             except Exception:
-                pass
+                _logger.warning("Failed to set Content-Disposition", exc_info=True)
             return response
 
         # Non-200: normalise to application/problem+json.
-        status = 404 if b"not found" in bytes(response.body).lower() else response.status_code
+        status = (
+            HTTPStatus.NOT_FOUND
+            if b"not found" in bytes(response.body).lower()
+            else response.status_code
+        )
         return JSONResponse(
             {
                 "type": "about:blank",
-                "title": "Export failed" if status != 404 else "Feature not found",
+                "title": (
+                    "Feature not found"
+                    if status == HTTPStatus.NOT_FOUND
+                    else "Export failed"
+                ),
                 "status": status,
                 "detail": _problem_detail(response),
             },

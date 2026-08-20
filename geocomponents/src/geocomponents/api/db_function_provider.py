@@ -204,7 +204,7 @@ class DbFunctionProvider(BaseProvider):
             return cur.fetchone()[0]
 
     @crs_transform
-    def get(self, identifier, **kwargs) -> dict: 
+    def get(self, identifier, **kwargs) -> dict:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
                 "select ogc.feature_item(%s, %s, %s)",
