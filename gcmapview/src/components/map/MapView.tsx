@@ -21,6 +21,7 @@ import {
   configureInitialMapInteraction,
   terrainSourceId
 } from '../../map/mapDimension';
+import { DEFAULT_3D_PITCH } from '../../map/map3d';
 import {
   hasInspectableFeatureAtPoint,
   inspectFeaturesAtPoint,
@@ -187,6 +188,7 @@ export function MapView() {
   const [status, setStatus] = useState('Laster kart...');
   const [error, setError] = useState<string>();
   const [isMapReady, setIsMapReady] = useState(false);
+  const [pendingFavoriteNavigationName, setPendingFavoriteNavigationName] = useState<string>();
   const [isVectorZoomActive, setIsVectorZoomActive] = useState(false);
   const [backgroundMap, setBackgroundMap] = useState<BackgroundMapId>('topo');
   const backgroundMapRef = useRef<BackgroundMapId>(backgroundMap);
@@ -299,23 +301,43 @@ export function MapView() {
     }
   }, [activeFavoriteView, setAdjustElevatedHeights, setIs3d, setLayerVisibility]);
 
-  function applyFavoriteViewSettings(favoriteView: typeof activeFavoriteView) {
-    if (!favoriteView) {
+  useEffect(() => {
+    if (!pendingFavoriteNavigationName || activeFavoriteView?.name !== pendingFavoriteNavigationName) {
       return;
     }
 
-    if (favoriteView.visibility) {
-      setLayerVisibility(favoriteView.visibility);
+    const map = mapRef.current;
+    if (!map) {
+      return;
     }
 
-    if (favoriteView.is3d !== undefined) {
-      setIs3d(favoriteView.is3d);
+    if (activeFavoriteView.is3d !== undefined && activeFavoriteView.is3d !== is3d) {
+      return;
     }
 
-    if (favoriteView.adjustElevatedHeights !== undefined) {
-      setAdjustElevatedHeights(favoriteView.adjustElevatedHeights);
+    if (
+      activeFavoriteView.adjustElevatedHeights !== undefined &&
+      activeFavoriteView.adjustElevatedHeights !== adjustElevatedHeights
+    ) {
+      return;
     }
-  }
+
+    const targetPitch = activeFavoriteView.is3d ? Math.max(map.getPitch(), DEFAULT_3D_PITCH) : 0;
+    const frame = window.requestAnimationFrame(() => {
+      map.easeTo({
+        center: activeFavoriteView.center,
+        zoom: activeFavoriteView.zoom,
+        pitch: targetPitch,
+        duration: 700
+      });
+      setPendingFavoriteNavigationName(undefined);
+      setStatus(`Valgte favoritt «${activeFavoriteView.name}», gjenopprettet lagene og flyttet kartet dit.`);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [activeFavoriteView, adjustElevatedHeights, is3d, pendingFavoriteNavigationName]);
 
   function saveCurrentFavoriteView() {
     const map = mapRef.current;
@@ -369,9 +391,8 @@ export function MapView() {
 
     if (map && selectedFavoriteView) {
       setError(undefined);
-      applyFavoriteViewSettings(selectedFavoriteView);
-      map.easeTo({ center: selectedFavoriteView.center, zoom: selectedFavoriteView.zoom, duration: 700 });
-      setStatus(`Valgte favoritt «${name}», gjenopprettet lagene og flyttet kartet dit.`);
+      setPendingFavoriteNavigationName(name);
+      setStatus(`Valgte favoritt «${name}», gjenoppretter lag og kameramodus før kartet flyttes.`);
       return;
     }
 
