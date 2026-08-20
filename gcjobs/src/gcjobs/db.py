@@ -266,28 +266,8 @@ def _run_updates_for_event(event: dict[str, Any]) -> dict[str, Any]:
     }
     return _run_update_payload(
         status=status,
-        counters=_terminal_counters(event),
         is_terminal=is_terminal,
     )
-
-
-def _terminal_counters(event: dict[str, Any]) -> dict[str, int] | None:
-    if str(event["event"]) != "import.completed.succeeded":
-        return None
-
-    processed_features = event.get("processed_features")
-    if not isinstance(processed_features, int):
-        imported_features = event.get("imported_features")
-        processed_features = (
-            imported_features if isinstance(imported_features, int) else None
-        )
-    if processed_features is None or processed_features < 0:
-        return None
-
-    return {
-        "processed_features": processed_features,
-        "succeeded_features": processed_features,
-    }
 
 
 def _run_update_payload(
