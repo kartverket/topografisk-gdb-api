@@ -1,6 +1,6 @@
 services:
   db:
-    image: imresamu/postgis:17-3.6-alpine
+    image: imresamu/postgis:17
     environment:
       POSTGRES_USER: geocomponents
       POSTGRES_PASSWORD: geocomponents
