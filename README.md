@@ -64,11 +64,11 @@ make docker-trivy-scan SERVICE=gcimport
 This runs Trivy inside Docker, so no local `trivy` install is required. It
 expects a working local Docker daemon and access to the Docker socket.
 
-The repo uses [pre-commit](https://pre-commit.com/) at the root to run various file-hygiene checks at commits.
+The repo uses [pre-commit](https://pre-commit.com/) at the root to run various file-hygiene checks at commits. It currently lives in `geocomponents` as a dev tool instead of at root to avoid a root python project and tooling manifest.
+
 The same hooks run in CI (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
-`pre-commit` itself lives in the `geocomponents` dev dependency group, so
-[uv](https://docs.astral.sh/uv/) is the only prerequisite:
+The hooks are installed running commands below. [uv](https://docs.astral.sh/uv/) is the only prerequisite:
 
 ```bash
 # One-time setup: refresh lockfiles, sync environments, install the git hook, and warm hook envs

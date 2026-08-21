@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Fail if the ruff versions pinned in pre-commit and Python projects disagree.
 
 Both configs are the source of truth for different consumers (pre-commit /
