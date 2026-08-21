@@ -1,6 +1,7 @@
 import * as maplibregl from 'maplibre-gl';
-import type { FeatureCollection, Position } from './geojson';
-import { heightColorExpression, maxCoordinateHeight } from './map3d';
+import type { FeatureCollection } from './geojson';
+import { normalizeLineworkFeatureCollection } from './lineworkHeight';
+import { heightColorExpression } from './map3d';
 
 export const platformEdgesSourceId = 'bane-platform-edges';
 export const trackCentresSourceId = 'bane-track-centres';
@@ -9,46 +10,7 @@ export const platformEdgesLayerId = 'bane-platform-edges-line';
 export const trackCentresLayerId = 'bane-track-centres-line';
 
 export function normalizeBaneFeatureCollection(featureCollection: FeatureCollection): FeatureCollection {
-  return {
-    type: 'FeatureCollection',
-    features: featureCollection.features.map(feature => {
-      if (!feature.geometry?.coordinates || !Array.isArray(feature.geometry.coordinates)) {
-        return feature;
-      }
-
-      if (feature.geometry.type === 'LineString') {
-        const coordinates = feature.geometry.coordinates as Position[];
-        return {
-          ...feature,
-          properties: {
-            ...(feature.properties ?? {}),
-            height: maxCoordinateHeight(coordinates)
-          },
-          geometry: {
-            type: 'LineString',
-            coordinates
-          }
-        };
-      }
-
-      if (feature.geometry.type === 'MultiLineString') {
-        const coordinates = feature.geometry.coordinates as Position[][];
-        return {
-          ...feature,
-          properties: {
-            ...(feature.properties ?? {}),
-            height: Math.max(0, ...coordinates.map(maxCoordinateHeight))
-          },
-          geometry: {
-            type: 'MultiLineString',
-            coordinates
-          }
-        };
-      }
-
-      return feature;
-    })
-  };
+  return normalizeLineworkFeatureCollection(featureCollection);
 }
 
 export function addBaneSourcesAndLayers(

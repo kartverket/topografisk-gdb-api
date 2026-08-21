@@ -6,6 +6,7 @@ import json
 import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 from uuid import UUID
 
@@ -21,6 +22,15 @@ MIN_LINEAR_RING_POSITIONS = 4
 MIN_POSITION_DIMENSIONS = 2
 MAX_POSITION_DIMENSIONS = 3
 _DUPLICATE_MERGE_IGNORED_PROPERTIES = frozenset({"OBJECTID", "SHAPE_Length"})
+
+
+@lru_cache(maxsize=32)
+def _transformer_for_crs(source_crs: str, target_crs: str) -> Transformer:
+    return Transformer.from_crs(
+        CRS.from_user_input(source_crs),
+        CRS.from_user_input(target_crs),
+        always_xy=True,
+    )
 
 
 class DocumentValidationError(ValueError):
@@ -310,11 +320,7 @@ def _transform_geometry(
         raise DocumentValidationError([f"geometry must be a {target_geometry_type}"])
 
     try:
-        transformer = Transformer.from_crs(
-            CRS.from_user_input(source_crs),
-            CRS.from_user_input(profile.target_crs),
-            always_xy=True,
-        )
+        transformer = _transformer_for_crs(source_crs, profile.target_crs)
         transformed = _transform_coordinates(
             geometry_type,
             coordinates,

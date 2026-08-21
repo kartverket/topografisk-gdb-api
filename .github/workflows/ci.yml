@@ -79,6 +79,32 @@ jobs:
         working-directory: gcimport
         run: uv run pytest
 
+  test-gccore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+      - name: Sync dependencies
+        run: uv sync --project gccore --frozen
+      - name: Run tests
+        working-directory: gccore
+        run: uv run pytest
+
+  test-gcjobs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+      - name: Sync dependencies
+        run: uv sync --project gcjobs --frozen
+      - name: Run tests
+        working-directory: gcjobs
+        run: uv run pytest
+
   audit:
     runs-on: ubuntu-latest
     defaults:
@@ -114,7 +140,7 @@ jobs:
   # OS or library CVEs. Populates the GHA build cache so `publish` can reuse
   # layers.
   build-and-scan:
-    needs: [pre-commit-lint, test, test-gcimport, audit, audit-gcimport]
+    needs: [pre-commit-lint, test, test-gcimport, test-gccore, test-gcjobs, audit, audit-gcimport]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

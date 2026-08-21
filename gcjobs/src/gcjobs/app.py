@@ -22,6 +22,48 @@ LOGGER = logging.getLogger("uvicorn.error").getChild("gcjobs.import_events")
 IMPORT_CLIENT_TIMEOUT = httpx2.Timeout(5.0, read=None)
 
 
+def _supported_profiles_detail() -> str:
+    supported = ", ".join(sorted(config.SUPPORTED_IMPORT_PROFILES))
+    return f"profile must be one of: {supported}"
+
+
+def _normalize_profile_name(profile_name: str) -> str:
+    normalized = profile_name.strip().casefold()
+    if normalized not in config.SUPPORTED_IMPORT_PROFILES:
+        raise HTTPException(status_code=400, detail=_supported_profiles_detail())
+    return normalized
+
+
+def _declared_content_length(headers: Any) -> int | None:
+    raw_value = headers.get("content-length")
+    if raw_value is None:
+        return None
+
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return None
+
+    return value if value >= 0 else None
+
+
+async def _read_bounded_request_body(request: Request, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total_bytes = 0
+
+    for declared_length in (_declared_content_length(request.headers),):
+        if declared_length is not None and declared_length > max_bytes:
+            raise HTTPException(status_code=413, detail="upload exceeds size limit")
+
+    async for chunk in request.stream():
+        total_bytes += len(chunk)
+        if total_bytes > max_bytes:
+            raise HTTPException(status_code=413, detail="upload exceeds size limit")
+        chunks.append(chunk)
+
+    return b"".join(chunks)
+
+
 def _lifespan(
     *,
     event_listener: ImportEventListener | None,
@@ -89,8 +131,9 @@ def _register_routes(application: FastAPI) -> None:
         request: Request,
         profile_name: str = Query(alias="profile"),
     ) -> JSONResponse:
+        normalized_profile_name = _normalize_profile_name(profile_name)
+        payload = await _read_bounded_request_body(request, config.max_upload_bytes())
         import_id = str(uuid4())
-        payload = await request.body()
         content_type = request.headers.get("content-type", "application/octet-stream")
 
         db.record_import_event(
@@ -98,7 +141,7 @@ def _register_routes(application: FastAPI) -> None:
                 "import_id": import_id,
                 "event": "import.accepted",
                 "phase": "accepted",
-                "profile": profile_name,
+                "profile": normalized_profile_name,
             }
         )
 
@@ -106,7 +149,7 @@ def _register_routes(application: FastAPI) -> None:
             _proxy_import,
             application.state.import_client,
             import_id,
-            profile_name,
+            normalized_profile_name,
             content_type,
             payload,
         )

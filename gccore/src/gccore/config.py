@@ -63,10 +63,3 @@ def sqlalchemy_url() -> str:
 
 def alembic_dir() -> Path:
     return Path(__file__).resolve().parent / "alembic"
-
-
-def redis_url() -> str:
-    redis = os.environ.get("REDIS_URL", "").strip()
-    if not redis:
-        raise RuntimeError(f"No Redis configured for {SERVICE_NAME}: set REDIS_URL.")
-    return redis

@@ -4,7 +4,6 @@
 the shared PostgreSQL database used by `geocomponents`.
 
 - Shared database: same `DB_*` environment variables as `geocomponents`
-- Shared Redis broker for cross-service event transport: set `REDIS_URL`
 - Owned schema: `gc_core`
 - Migration entrypoint: `gccore migrate-db`
 
@@ -12,7 +11,6 @@ the shared PostgreSQL database used by `geocomponents`.
 
 ```sh
 uv sync
-export REDIS_URL=redis://localhost:56379/0
 uv run gccore migrate-db
 uv run gccore serve --port 8002
 ```
@@ -20,7 +18,7 @@ uv run gccore serve --port 8002
 Or start the shared local stack from `geocomponents/`:
 
 ```sh
-docker compose up --build db redis gccore-migrate gccore
+docker compose up --build db gccore-migrate gccore
 ```
 
 ## Endpoints

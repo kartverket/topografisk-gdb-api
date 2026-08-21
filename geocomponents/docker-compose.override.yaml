@@ -109,7 +109,6 @@ services:
       DB_NAME: geocomponents
       DB_USER: geocomponents
       DB_PASSWORD: geocomponents
-      REDIS_URL: redis://redis:6379/0
     ports:
       - "8002:8000"
     volumes:
@@ -125,8 +124,6 @@ services:
       retries: 20
     depends_on:
       db:
-        condition: service_healthy
-      redis:
         condition: service_healthy
       gccore-migrate:
         condition: service_completed_successfully
@@ -172,6 +169,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      gcimport:
+        condition: service_started
       redis:
         condition: service_healthy
       gcjobs-migrate:

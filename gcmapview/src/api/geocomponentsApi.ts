@@ -83,36 +83,40 @@ function withBbox(url: string, bbox: OgcBbox) {
   return `${url}&bbox=${bbox.join(',')}`;
 }
 
+export function collectionItemsInBboxUrl(collectionId: CollectionId, bbox: OgcBbox) {
+  return withBbox(collectionItemsUrl(collectionId), bbox);
+}
+
 export function parcelsItemsInBboxUrl(bbox: OgcBbox) {
-  return withBbox(parcelsItemsUrl, bbox);
+  return collectionItemsInBboxUrl('parcels', bbox);
 }
 
 export function buildingsItemsInBboxUrl(bbox: OgcBbox) {
-  return withBbox(buildingsItemsUrl, bbox);
+  return collectionItemsInBboxUrl('buildings', bbox);
 }
 
 export function platformEdgesItemsInBboxUrl(bbox: OgcBbox) {
-  return withBbox(platformEdgesItemsUrl, bbox);
+  return collectionItemsInBboxUrl('jernbaneplattformkant', bbox);
 }
 
 export function trackCentresItemsInBboxUrl(bbox: OgcBbox) {
-  return withBbox(trackCentresItemsUrl, bbox);
+  return collectionItemsInBboxUrl('spormidt', bbox);
 }
 
 export function bygningItemsInBboxUrl(bbox: OgcBbox) {
-  return withBbox(bygningItemsUrl, bbox);
+  return collectionItemsInBboxUrl('bygning', bbox);
 }
 
 export function bygningOmradeItemsInBboxUrl(bbox: OgcBbox) {
-  return withBbox(bygningOmradeItemsUrl, bbox);
+  return collectionItemsInBboxUrl('bygning_omrade', bbox);
 }
 
 export function bygningSenterlinjeItemsInBboxUrl(bbox: OgcBbox) {
-  return withBbox(bygningSenterlinjeItemsUrl, bbox);
+  return collectionItemsInBboxUrl('bygning_senterlinje', bbox);
 }
 
 export function bygningPosisjonItemsInBboxUrl(bbox: OgcBbox) {
-  return withBbox(bygningPosisjonItemsUrl, bbox);
+  return collectionItemsInBboxUrl('bygning_posisjon', bbox);
 }
 
 export function parcelItemUrl(id: string | number) {
