@@ -20,7 +20,7 @@ System overview (Mermaid): [`ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 - [`gcimport/`](gcimport/) — a profile-driven, single-endpoint FastAPI service
   that validates JSON-FG uploads and idempotently imports dataset features.
 - [`gcmapview/`](gcmapview/) — local Vite + React map viewer with an `/import`
-  page for gcimport, editable Cadastre layers, and read-only Bane/Bygning layers on the map.
+  page that starts imports through gcjobs, editable Cadastre layers, and read-only Bane/Bygning layers on the map.
 - [`nibio/`](nibio/) NIBIO AR5 database dump and schema adjustments. Useful for Postgis Topology integration.
 
 ## Development
@@ -90,14 +90,15 @@ contract + integration tests against a local PostGIS), see
 With `make docker-up`, the local ports are:
 
 - `http://localhost:8000` for geocomponents
-- `http://localhost:8001/docs` for gcimport Swagger
+- `http://localhost:8001/docs` for gcimport Swagger (internal import worker API)
 - `http://localhost:8002/docs` for gccore Swagger
-- `http://localhost:8003/docs` for gcjobs Swagger
+- `http://localhost:8003/docs` for gcjobs Swagger and `http://localhost:8003/imports` as the public import API
 - `http://localhost:8080` for gcmapview
 
-gcimport requires an explicit import profile on every upload request. Use
-`?profile=fkb_bane` for Bane uploads and `?profile=bygning` for Bygning
-uploads. Examples:
+gcjobs accepts browser and curl uploads on port `8003` and proxies them to
+gcimport on port `8001` inside the local stack. gcimport still requires an
+explicit import profile on every upload request. Use `?profile=fkb_bane` for
+Bane uploads and `?profile=bygning` for Bygning uploads. Examples:
 
 ```bash
 curl -F 'file=@bane.json;type=application/json' \

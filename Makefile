@@ -1,4 +1,4 @@
-.PHONY: lock install docker-up docker-down docker-delete-db-volume docker-trivy-scan frontend-install frontend-build frontend-run frontend-lint frontend-format gcimport-lock gcimport-install gcimport-test gcimport-run gccore-lock gccore-install gccore-test gccore-run gcjobs-lock gcjobs-install gcjobs-test gcjobs-run
+.PHONY: lock install docker-up docker-down docker-delete-db-volumes docker-trivy-scan frontend-install frontend-build frontend-run frontend-lint frontend-format gcimport-lock gcimport-install gcimport-test gcimport-run gccore-lock gccore-install gccore-test gccore-run gcjobs-lock gcjobs-install gcjobs-test gcjobs-run
 
 DOCKER_COMPOSE := $(shell command -v docker-compose >/dev/null 2>&1 && echo docker-compose || echo 'docker compose')
 DOCKER_SERVICES := geocomponents gcimport gccore gcjobs gcmapview
@@ -28,8 +28,9 @@ docker-up:
 docker-down:
 	cd geocomponents && $(DOCKER_COMPOSE) down
 
-docker-delete-db-volume:
-	docker volume rm "geocomponents_pgdata"
+docker-delete-db-volumes:
+	@if docker volume inspect "geocomponents_pgdata" >/dev/null 2>&1; then docker volume rm "geocomponents_pgdata"; fi
+	@if docker volume inspect "geocomponents_redisdata" >/dev/null 2>&1; then docker volume rm "geocomponents_redisdata"; fi
 
 docker-trivy-scan:
 	@command -v docker >/dev/null 2>&1 || { echo "docker is required"; exit 1; }

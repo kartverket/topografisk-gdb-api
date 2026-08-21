@@ -7,6 +7,9 @@ from sqlalchemy import URL
 
 SERVICE_NAME = "gcjobs"
 DB_SCHEMA = "gc_jobs"
+# Keep synchronized with gcimport.profiles.BUILTIN_PROFILES without creating a runtime dependency.
+SUPPORTED_IMPORT_PROFILES = frozenset({"fkb_bane", "bygning"})
+DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 _DB_PARTS = (
     ("DB_HOST", "host"),
@@ -74,3 +77,18 @@ def redis_url() -> str:
 
 def gcimport_api_url() -> str:
     return os.environ.get("GCJOBS_IMPORT_API_URL", "http://localhost:8001").rstrip("/")
+
+
+def max_upload_bytes() -> int:
+    raw_value = os.environ.get("GCJOBS_MAX_UPLOAD_BYTES")
+    if raw_value is None:
+        return DEFAULT_MAX_UPLOAD_BYTES
+
+    try:
+        value = int(raw_value)
+    except ValueError as err:
+        raise RuntimeError("GCJOBS_MAX_UPLOAD_BYTES must be an integer") from err
+
+    if value <= 0:
+        raise RuntimeError("GCJOBS_MAX_UPLOAD_BYTES must be greater than zero")
+    return value

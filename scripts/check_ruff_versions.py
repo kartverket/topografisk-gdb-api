@@ -20,7 +20,7 @@ pc_match = re.search(r"astral-sh/ruff-pre-commit\s*\n\s*rev:\s*v?([\d.]+)", pc)
 if not pc_match:
     sys.exit("could not find astral-sh/ruff-pre-commit rev in .pre-commit-config.yaml")
 
-for project in ("geocomponents", "gcimport"):
+for project in ("geocomponents", "gcimport", "gccore", "gcjobs"):
     pp = (ROOT / project / "pyproject.toml").read_text()
     pp_match = re.search(r'"ruff==([\d.]+)"', pp)
     if not pp_match:

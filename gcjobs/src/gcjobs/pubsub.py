@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from importlib import import_module
 from typing import Any, Protocol
 
-IMPORT_EVENTS_STREAM = "gcimport.import-events"
+IMPORT_EVENTS_STREAM = "gcimport.import-events"  # This literal must remain identical in gcimport and gcjobs.
 IMPORT_EVENTS_GROUP = "gcjobs-import-events"
 IMPORT_EVENTS_IDLE_MS = 30_000
 IMPORT_EVENTS_READ_COUNT = 10

@@ -1,6 +1,6 @@
 # System architecture
 
-Current overview of **topografisk-gdb-api** as implemented in this workspace: YAML-described topographic datasets become PostGIS schemas and OGC API - Features services through `geocomponents`. `gcimport` validates and transforms uploaded FeatureCollections, upserts them through the generated OGC API, and appends import lifecycle events to a Redis Stream. `gcjobs` accepts import requests, proxies them to `gcimport` in the background, consumes those lifecycle events through a Redis consumer group, persists them, and exposes lightweight import-status/history APIs. `gcmapview` remains a local developer frontend for inspection, editing of the Cadastre example dataset, and import testing.
+Current overview of **topografisk-gdb-api** as implemented in this workspace: YAML-described topographic datasets become PostGIS schemas and OGC API - Features services through `geocomponents`. `gcimport` validates and transforms uploaded FeatureCollections, upserts them through the generated OGC API, and appends import lifecycle events to a Redis Stream. `gcjobs` accepts import requests, proxies them to `gcimport` in the background, consumes those lifecycle events through a Redis consumer group, persists them, and exposes lightweight import-status/history APIs. `gccore` is a small FastAPI service with health checks and Alembic-managed tables in the shared `gc_core` schema. `gcmapview` remains a developer frontend for inspection, editing of the Cadastre example dataset, and import testing.
 
 The tracked runtime in this repo is now centered on HTTP, PostgreSQL/PostGIS, and Redis. For the current POC there is one event flow only: `gcimport` appends import events to a Redis Stream, `gcjobs` consumes and acknowledges them through a consumer group, and `gcjobs` PostgreSQL is the durable source of truth for import tracking.
 
@@ -16,10 +16,12 @@ flowchart TB
   FE["gcmapview<br/>Vite + React + MapLibre"]
   IMP["gcimport<br/>FastAPI importer"]
   JOBS["gcjobs<br/>FastAPI jobs/status API"]
+  CORE["gccore<br/>FastAPI core service"]
   API["geocomponents<br/>gateway + per-dataset OGC APIs"]
   REDIS[("Redis<br/>event fanout")]
   DB[("PostgreSQL / PostGIS")]
   JOBDB[("gcjobs PostgreSQL schema")]
+  COREDB[("gccore PostgreSQL schema")]
   BASE["Kartverket WMTS raster basemaps<br/>topo / toporaster / topograatone"]
   TERRAIN["AWS Terrain Tiles<br/>raster-dem for 3D terrain"]
 
@@ -35,6 +37,8 @@ flowchart TB
   REDIS -->|consumer group + persist| JOBS
   API -->|ogc.feature_* dispatch| DB
   JOBS --> JOBDB
+  CORE -->|health + core tables| COREDB
+  COREDB --> DB
 ```
 
 ## Monorepo packages
@@ -44,7 +48,7 @@ flowchart TB
 | [geocomponents/](../geocomponents/) | Description-driven engine: YAML loader, schema generator, OGC API provider, and gateway |
 | [gcimport/](../gcimport/) | Profile-driven synchronous importer for JSON-FG and classic GeoJSON uploads plus import-event emission |
 | [gcmapview/](../gcmapview/) | Local Vite/React developer map viewer and import UI |
-| [gccore/](../gccore/) | Placeholder sibling package directory; no tracked runtime code in this workspace yet |
+| [gccore/](../gccore/) | Small FastAPI service with `/` and `/healthz`, plus Alembic-managed tables in schema `gc_core` |
 | [gcjobs/](../gcjobs/) | Lightweight jobs/status service: accepts imports asynchronously, consumes Redis Stream import events, persists run history, and exposes current/history APIs |
 | [nibio/](../nibio/) | AR5 / topology reference material, not part of the live runtime |
 
@@ -52,12 +56,12 @@ flowchart TB
 
 ## Local runtime topology
 
-`make docker-up` starts the backend stack from [geocomponents/docker-compose.yml](../geocomponents/docker-compose.yml) and [geocomponents/docker-compose.override.yaml](../geocomponents/docker-compose.override.yaml). `make frontend-run` starts the frontend on the host.
+`make docker-up` starts the local runtime from [geocomponents/docker-compose.yml](../geocomponents/docker-compose.yml) and [geocomponents/docker-compose.override.yaml](../geocomponents/docker-compose.override.yaml), including containerized `gcmapview` on port `8080`. `make frontend-run` is the optional host Vite alternative on port `5173`.
 
 ```mermaid
 flowchart TB
   subgraph Host
-    FE["gcmapview<br/>Vite dev server :5173"]
+    FEDEV["gcmapview<br/>optional Vite dev server :5173"]
   end
 
   subgraph "Docker Compose (geocomponents/)"
@@ -66,17 +70,22 @@ flowchart TB
     MIG["migrate<br/>geocomponents apply-schema"]
     API["api<br/>geocomponents serve :8000"]
     IMP["gcimport<br/>:8001 -> 8000"]
+    CORE["gccore<br/>:8002 -> 8000"]
     JOBS["gcjobs<br/>:8003 -> 8000"]
+    FE["gcmapview<br/>container :8080 -> 80"]
 
     DB --> MIG --> API
     API --> IMP
+    DB --> CORE
     DB --> JOBS
     REDIS --> IMP
     REDIS --> JOBS
+    API --> FE
+    JOBS --> FE
   end
 
-  FE -->|/geocomponents-api| API
-  FE -->|GCJOBS_API_URL| JOBS
+  FEDEV -->|/geocomponents-api| API
+  FEDEV -->|GCJOBS_API_URL| JOBS
   JOBS -->|proxy /imports| IMP
   IMP -->|HTTP items:upsert| API
   IMP -->|append import events| REDIS
@@ -87,10 +96,11 @@ flowchart TB
 
 Notes:
 
-- Vite rewrites `/geocomponents-api` to `http://localhost:8000` and the import UI should target `gcjobs` at `http://localhost:8003`.
-- `gcjobs` currently exposes import start and tracking on port `8003`; `gcmapview` should target that public browser URL for `/import`.
+- `make docker-up` serves `gcmapview` from the container at `http://localhost:8080`; `make frontend-run` serves the same UI from Vite at `http://localhost:5173`.
+- Both frontend modes should target `gcjobs` on `http://localhost:8003` for `/import` and `geocomponents` on `http://localhost:8000` for OGC API requests.
+- `gcimport` listens on port `8001` locally but is called internally by `gcjobs`, not directly by the browser-facing import UI.
 - `migrate` is the local analog of the production `apply-schema` job.
-- `gcmapview` is not containerized in the local default flow.
+- `gccore` is available locally on `http://localhost:8002` and reports service health plus Alembic revision state.
 
 ---
 

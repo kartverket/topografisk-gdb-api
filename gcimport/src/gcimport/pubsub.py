@@ -4,7 +4,7 @@ import json
 from importlib import import_module
 from typing import Any, Protocol
 
-IMPORT_EVENTS_STREAM = "gcimport.import-events"
+IMPORT_EVENTS_STREAM = "gcimport.import-events"  # This literal must remain identical in gcimport and gcjobs.
 IMPORT_EVENTS_MAXLEN = 10_000
 
 

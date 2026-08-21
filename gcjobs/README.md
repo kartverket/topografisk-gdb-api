@@ -5,6 +5,8 @@ shared PostgreSQL database used by `geocomponents`.
 
 - Shared database: same `DB_*` environment variables as `geocomponents`
 - Shared Redis broker for the import-event stream: set `REDIS_URL`
+- Import worker target: set `GCJOBS_IMPORT_API_URL` to the gcimport base URL
+- Upload limit: `GCJOBS_MAX_UPLOAD_BYTES` defaults to `104857600` (100 MiB)
 - Owned schema: `gc_jobs`
 - Migration entrypoint: `gcjobs migrate-db`
 
@@ -13,6 +15,7 @@ shared PostgreSQL database used by `geocomponents`.
 ```sh
 uv sync
 export REDIS_URL=redis://localhost:56379/0
+export GCJOBS_IMPORT_API_URL=http://localhost:8001
 uv run gcjobs migrate-db
 uv run gcjobs serve --port 8003
 ```
@@ -28,6 +31,12 @@ docker compose up --build db redis gcjobs-migrate gcjobs
 - `GET /` returns the service and schema identity
 - `GET /healthz` checks that the shared database is reachable and reports the
   current Alembic revision if migrations have been applied
+- `POST /imports?profile=fkb_bane|bygning` accepts an upload, records an
+  `import.accepted` event, and proxies the request to gcimport in the background
+- `GET /imports/current` returns active import runs
+- `GET /imports/history` returns historical import runs
+- `GET /imports/{import_id}` returns one import run summary
+- `GET /imports/{import_id}/events` returns the raw event history for one run
 
 ## Development
 

@@ -136,6 +136,7 @@ def test_import_start_proxies_to_gcimport(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(
         "gcjobs.app.config.gcimport_api_url", lambda: "http://gcimport:8000"
     )
+    monkeypatch.setattr("gcjobs.app.config.max_upload_bytes", lambda: 1024 * 1024)
     requests: list[httpx2.Request] = []
     recorded: list[dict[str, str]] = []
 
@@ -181,12 +182,157 @@ def test_import_start_proxies_to_gcimport(monkeypatch: pytest.MonkeyPatch) -> No
     ]
 
 
+def test_import_start_rejects_unknown_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("gcjobs.app.config.max_upload_bytes", lambda: 1024 * 1024)
+    requests: list[httpx2.Request] = []
+    recorded: list[dict[str, str]] = []
+
+    def fake_record_import_event(event, *, message_id=None):
+        recorded.append(event)
+        return {"id": event["import_id"]}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        return httpx2.Response(200, json={"total": 1, "features": []})
+
+    monkeypatch.setattr("gcjobs.app.db.record_import_event", fake_record_import_event)
+    proxy_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    app = create_app(
+        event_listener=StubImportEventListener([]),
+        import_client=proxy_client,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/imports?profile=not_a_profile",
+            content=b"{}",
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "profile must be one of: bygning, fkb_bane"}
+    assert recorded == []
+    assert requests == []
+
+
+def test_import_start_rejects_legacy_bygning_omrade_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("gcjobs.app.config.max_upload_bytes", lambda: 1024 * 1024)
+    requests: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        return httpx2.Response(200, json={"total": 1, "features": []})
+
+    proxy_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    app = create_app(
+        event_listener=StubImportEventListener([]),
+        import_client=proxy_client,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/imports?profile=bygning_omrade",
+            content=b"{}",
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 400
+    assert requests == []
+
+
+def test_import_start_normalizes_profile_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "gcjobs.app.config.gcimport_api_url", lambda: "http://gcimport:8000"
+    )
+    monkeypatch.setattr("gcjobs.app.config.max_upload_bytes", lambda: 1024 * 1024)
+    requests: list[httpx2.Request] = []
+    recorded: list[dict[str, str]] = []
+
+    def fake_record_import_event(event, *, message_id=None):
+        recorded.append(event)
+        return {"id": event["import_id"]}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        return httpx2.Response(200, json={"total": 1, "features": []})
+
+    monkeypatch.setattr("gcjobs.app.db.record_import_event", fake_record_import_event)
+    proxy_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    app = create_app(
+        event_listener=StubImportEventListener([]),
+        import_client=proxy_client,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/imports?profile= BYGNING ",
+            files={"file": ("source.geojson", "{}", "application/geo+json")},
+        )
+
+    assert response.status_code == 202
+    assert recorded == [
+        {
+            "import_id": response.json()["import_id"],
+            "event": "import.accepted",
+            "phase": "accepted",
+            "profile": "bygning",
+        }
+    ]
+    assert requests[0].url == "http://gcimport:8000/imports?profile=bygning"
+
+
+def test_import_start_rejects_oversized_request_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("gcjobs.app.config.max_upload_bytes", lambda: 4)
+    requests: list[httpx2.Request] = []
+    recorded: list[dict[str, str]] = []
+
+    def fake_record_import_event(event, *, message_id=None):
+        recorded.append(event)
+        return {"id": event["import_id"]}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        return httpx2.Response(200, json={"total": 1, "features": []})
+
+    monkeypatch.setattr("gcjobs.app.db.record_import_event", fake_record_import_event)
+    proxy_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    app = create_app(
+        event_listener=StubImportEventListener([]),
+        import_client=proxy_client,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/imports?profile=bygning",
+            content=b"12345",
+            headers={"content-type": "application/octet-stream"},
+        )
+
+    assert response.status_code == 413
+    assert response.json() == {"detail": "upload exceeds size limit"}
+    assert recorded == []
+    assert requests == []
+
+
+def test_declared_content_length_helper_rejects_oversized_value() -> None:
+    from gcjobs.app import _declared_content_length
+
+    assert _declared_content_length({"content-length": "6"}) == 6
+    assert _declared_content_length({"content-length": "abc"}) is None
+    assert _declared_content_length({"content-length": "-1"}) is None
+
+
 def test_import_start_records_forwarding_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         "gcjobs.app.config.gcimport_api_url", lambda: "http://gcimport:8000"
     )
+    monkeypatch.setattr("gcjobs.app.config.max_upload_bytes", lambda: 1024 * 1024)
     recorded: list[dict[str, str]] = []
 
     def fake_record_import_event(event, *, message_id=None):
@@ -230,6 +376,7 @@ def test_import_start_records_gcimport_http_failure(
     monkeypatch.setattr(
         "gcjobs.app.config.gcimport_api_url", lambda: "http://gcimport:8000"
     )
+    monkeypatch.setattr("gcjobs.app.config.max_upload_bytes", lambda: 1024 * 1024)
     recorded: list[dict[str, str]] = []
 
     def fake_record_import_event(event, *, message_id=None):
