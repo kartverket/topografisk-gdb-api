@@ -44,19 +44,23 @@ export function ImportView() {
   const [error, setError] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const profileMeta = PROFILE_META[profile];
+  const importId = result?.import_id;
+  const importLocation = result?.location;
+  const importProfile = result?.profile;
 
   useEffect(() => {
-    if (!result?.import_id) {
+    if (!importId || !importLocation || !importProfile) {
       return;
     }
-    const currentResult = result;
-    const importId: string = result.import_id;
+    const currentImportId = importId;
+    const currentImportLocation = importLocation;
+    const currentImportProfile = importProfile;
     let cancelled = false;
     let timer: number | undefined;
 
     async function poll() {
       try {
-        const run = await getImportRun(importId, currentResult.location, currentResult.profile);
+        const run = await getImportRun(currentImportId, currentImportLocation, currentImportProfile);
         if (cancelled) return;
         setImportRun(run);
         if (run.status === 'accepted' || run.status === 'running') {
@@ -75,7 +79,7 @@ export function ImportView() {
         window.clearTimeout(timer);
       }
     };
-  }, [result?.import_id]);
+  }, [importId, importLocation, importProfile]);
 
   async function submit() {
     if (!file) return;

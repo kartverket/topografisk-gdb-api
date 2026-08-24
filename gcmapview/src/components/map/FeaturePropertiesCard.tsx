@@ -47,6 +47,14 @@ function isJsonPropertyValue(value: unknown): value is Record<string, unknown> |
   return typeof value === 'object' && value !== null;
 }
 
+function formatPositionCoordinate(value: unknown): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return formatPropertyValue(value);
+  }
+
+  return Number(value.toFixed(4)).toString();
+}
+
 function propertyEntries(value: Record<string, unknown> | unknown[]) {
   if (Array.isArray(value)) {
     return value.map((item, index) => [`[${index}]`, item] as const);
@@ -228,29 +236,23 @@ export function FeaturePropertiesCard({
             {isSourceLoading ? (
               <p className="mt-2 pl-6 text-xs text-muted-foreground">Loading source coordinates…</p>
             ) : (
-              <div className="mt-2 overflow-x-auto pl-6">
-                <table className="min-w-full border-separate border-spacing-y-1 text-left text-[12px] font-mono">
-                  <thead>
-                    <tr className="text-muted-foreground">
-                      <th className="pr-3 font-medium">x</th>
-                      <th className="pr-3 font-medium">y</th>
-                      <th className="font-medium">z</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {feature.positions.map(([x, y, z], index) => (
-                      <tr
-                        key={`${x}-${y}-${z ?? 'na'}-${index}`}
-                        className="transition-colors hover:bg-accent/40"
-                        onMouseEnter={() => onHoverPositionIndex?.(index)}
-                        onMouseLeave={() => onHoverPositionIndex?.(undefined)}>
-                        <td className="pr-3 text-foreground">{formatPropertyValue(x)}</td>
-                        <td className="pr-3 text-foreground">{formatPropertyValue(y)}</td>
-                        <td className="text-foreground">{z === undefined ? '—' : formatPropertyValue(z)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="mt-2 space-y-1 pl-6 text-[12px] font-mono">
+                <div className="grid grid-cols-3 gap-x-3 text-muted-foreground">
+                  <span className="font-medium">x</span>
+                  <span className="font-medium">y</span>
+                  <span className="font-medium">z</span>
+                </div>
+                {feature.positions.map(([x, y, z], index) => (
+                  <div
+                    key={`${x}-${y}-${z ?? 'na'}-${index}`}
+                    className="grid grid-cols-3 gap-x-3 rounded-sm text-foreground transition-colors hover:bg-accent/40"
+                    onMouseEnter={() => onHoverPositionIndex?.(index)}
+                    onMouseLeave={() => onHoverPositionIndex?.(undefined)}>
+                    <span>{formatPositionCoordinate(x)}</span>
+                    <span>{formatPositionCoordinate(y)}</span>
+                    <span>{z === undefined ? '—' : formatPositionCoordinate(z)}</span>
+                  </div>
+                ))}
               </div>
             )}
           </details>
