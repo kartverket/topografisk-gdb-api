@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
@@ -167,6 +168,14 @@ def _job_links(request: Request, run: dict[str, Any]) -> list[dict[str, str]]:
     return links
 
 
+def _rfc3339_timestamp(value: Any) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    if isinstance(value, datetime):
+        return value.isoformat().replace("+00:00", "Z")
+    return None
+
+
 def _job_payload(request: Request, run: dict[str, Any]) -> dict[str, Any]:
     total_features = run.get("total_features")
     processed_features = int(run.get("processed_features") or 0)
@@ -180,7 +189,7 @@ def _job_payload(request: Request, run: dict[str, Any]) -> dict[str, Any]:
         "jobID": str(run["id"]),
         "status": _map_status(run),
         "links": _job_links(request, run),
-        "updated": run.get("last_event_at"),
+        "updated": _rfc3339_timestamp(run.get("last_event_at")),
         "phase": run.get("phase"),
         "totalFeatures": run.get("total_features"),
         "processedFeatures": processed_features,
@@ -194,12 +203,14 @@ def _job_payload(request: Request, run: dict[str, Any]) -> dict[str, Any]:
         payload["processID"] = PROCESS_IDS_BY_PROFILE[profile_name]
     if progress is not None:
         payload["progress"] = progress
-    if isinstance(run.get("started_at"), str):
-        payload["created"] = run["started_at"]
+    created_at = _rfc3339_timestamp(run.get("started_at"))
+    if created_at is not None:
+        payload["created"] = created_at
         if run.get("phase") not in {None, "accepted"}:
-            payload["started"] = run["started_at"]
-    if isinstance(run.get("completed_at"), str):
-        payload["finished"] = run["completed_at"]
+            payload["started"] = created_at
+    finished_at = _rfc3339_timestamp(run.get("completed_at"))
+    if finished_at is not None:
+        payload["finished"] = finished_at
     last_error = run.get("last_error")
     if isinstance(last_error, dict):
         payload["lastError"] = last_error

@@ -173,54 +173,94 @@ export async function startImport(file: File, profile: ImportProfile): Promise<I
   const payload = body as JobStatusResponse;
   return {
     import_id: typeof payload.jobID === 'string' ? payload.jobID : '',
-    status: payload.status === 'running' ? 'running' : 'accepted',
+    status: executionStatus(payload.status),
     location: response.headers.get('Location'),
     profile
   };
 }
 
-function integerOrZero(value: unknown) {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
-}
+function executionStatus(value: unknown): ImportResult['status'] {
+  if (value === 'accepted' || value === 'running') {
+    return value;
+  }
 
-function integerOrNull(value: unknown) {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  throw new Error(`Unexpected import execution status: ${String(value)}`);
 }
 
 function stringOrNull(value: unknown) {
   return typeof value === 'string' && value ? value : null;
 }
 
+function stringOrThrow(value: unknown, fieldName: string) {
+  if (typeof value === 'string' && value) {
+    return value;
+  }
+
+  throw new Error(`Unexpected import job response: missing ${fieldName}`);
+}
+
+function integerOrThrow(value: unknown, fieldName: string) {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
+    return value;
+  }
+
+  throw new Error(`Unexpected import job response: invalid ${fieldName}`);
+}
+
+function integerOrNull(value: unknown, fieldName: string) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return integerOrThrow(value, fieldName);
+}
+
+function jobStatus(value: unknown): ImportJobStatus {
+  if (value === 'accepted' || value === 'running' || value === 'successful' || value === 'failed') {
+    return value;
+  }
+
+  throw new Error(`Unexpected import job status: ${String(value)}`);
+}
+
+function objectOrNull<T extends object>(value: unknown, fieldName: string): T | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === 'object') {
+    return value as T;
+  }
+
+  throw new Error(`Unexpected import job response: invalid ${fieldName}`);
+}
+
 function mapJobStatus(body: JobStatusResponse): ImportRun {
-  const startedAt = stringOrNull(body.started) ?? stringOrNull(body.created) ?? new Date(0).toISOString();
-  const updatedAt = stringOrNull(body.updated) ?? startedAt;
+  const status = jobStatus(body.status);
+  const id = stringOrThrow(body.jobID, 'jobID');
+  const processId = stringOrThrow(body.processID, 'processID');
+  const createdAt = stringOrThrow(body.created, 'created');
+  const updatedAt = stringOrThrow(body.updated, 'updated');
+  const startedAt = stringOrNull(body.started) ?? createdAt;
   const completedAt = stringOrNull(body.finished);
-  const lastError =
-    typeof body.lastError === 'object' && body.lastError !== null ? (body.lastError as ImportRun['last_error']) : null;
+  const lastError = objectOrNull<NonNullable<ImportRun['last_error']>>(body.lastError, 'lastError');
 
   return {
-    id: typeof body.jobID === 'string' ? body.jobID : '',
-    process_id: stringOrNull(body.processID),
-    status:
-      body.status === 'accepted' ||
-      body.status === 'running' ||
-      body.status === 'successful' ||
-      body.status === 'failed'
-        ? body.status
-        : 'running',
+    id,
+    process_id: processId,
+    status,
     phase: stringOrNull(body.phase),
     started_at: startedAt,
     completed_at: completedAt,
     last_event_at: updatedAt,
-    total_features: integerOrNull(body.totalFeatures),
-    processed_features: integerOrZero(body.processedFeatures),
-    succeeded_features: integerOrZero(body.succeededFeatures),
-    failed_features: integerOrZero(body.failedFeatures),
-    processed_batches: integerOrZero(body.processedBatches),
-    succeeded_batches: integerOrZero(body.succeededBatches),
-    failed_batches: integerOrZero(body.failedBatches),
+    total_features: integerOrNull(body.totalFeatures, 'totalFeatures'),
+    processed_features: integerOrThrow(body.processedFeatures, 'processedFeatures'),
+    succeeded_features: integerOrThrow(body.succeededFeatures, 'succeededFeatures'),
+    failed_features: integerOrThrow(body.failedFeatures, 'failedFeatures'),
+    processed_batches: integerOrThrow(body.processedBatches, 'processedBatches'),
+    succeeded_batches: integerOrThrow(body.succeededBatches, 'succeededBatches'),
+    failed_batches: integerOrThrow(body.failedBatches, 'failedBatches'),
     last_error: lastError,
-    progress: integerOrNull(body.progress)
+    progress: integerOrNull(body.progress, 'progress')
   };
 }
 

@@ -1,5 +1,6 @@
 import json as jsonlib
 import logging
+from datetime import UTC, datetime
 
 import httpx2
 import pytest
@@ -536,3 +537,37 @@ def test_job_results_returns_summary_for_successful_import(
             "completed": "2026-08-24T10:01:00Z",
         }
     }
+
+
+def test_job_endpoint_serializes_datetime_timestamps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "gcjobs.app.db.get_import_run",
+        lambda _job_id: {
+            "id": "job-1",
+            "profile": "fkb_bane",
+            "status": "completed",
+            "phase": "completed",
+            "total_features": 2,
+            "processed_features": 2,
+            "succeeded_features": 2,
+            "failed_features": 0,
+            "processed_batches": 1,
+            "succeeded_batches": 1,
+            "failed_batches": 0,
+            "started_at": datetime(2026, 8, 24, 10, 0, tzinfo=UTC),
+            "completed_at": datetime(2026, 8, 24, 10, 1, tzinfo=UTC),
+            "last_event_at": datetime(2026, 8, 24, 10, 1, tzinfo=UTC),
+            "last_error": None,
+        },
+    )
+    client = TestClient(create_app(event_listener=StubImportEventListener([])))
+
+    response = client.get("/jobs/job-1")
+
+    assert response.status_code == 200
+    assert response.json()["created"] == "2026-08-24T10:00:00Z"
+    assert response.json()["started"] == "2026-08-24T10:00:00Z"
+    assert response.json()["finished"] == "2026-08-24T10:01:00Z"
+    assert response.json()["updated"] == "2026-08-24T10:01:00Z"
