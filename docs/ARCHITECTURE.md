@@ -39,7 +39,6 @@ flowchart TB
   API -->|ogc.feature_* dispatch| DB
   JOBS --> JOBDB
   CORE -->|health + core tables| COREDB
-  COREDB --> DB
 ```
 
 ## Monorepo packages
