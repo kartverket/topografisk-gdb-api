@@ -71,6 +71,8 @@ export const emptyVisibleFeatureCollections: VisibleFeatureCollections = {
 
 export const MIN_VECTOR_ZOOM = 10;
 export const MIN_BUILDING_ZOOM = 15;
+const FEATURE_PAGE_LIMIT = 1000;
+const MAX_FEATURE_PAGE_REQUESTS = 100;
 
 const BUILDING_COLOR = '#ff0000';
 const BUILDING_FILL_COLOR = '#9914d2';
@@ -118,8 +120,14 @@ function sanitizeMissingHeights(featureCollection: FeatureCollection): FeatureCo
   };
 }
 
-function visibleCollectionPromise(visible: boolean, url: string) {
-  return visible ? getFeatureCollection(url) : Promise.resolve(emptyFeatureCollection);
+export type VisibleFeatureCollectionKey = keyof VisibleFeatureCollections;
+
+function visibleCollectionPromise(
+  visible: boolean,
+  url: string,
+  onProgress?: (featureCollection: FeatureCollection) => Promise<void> | void
+) {
+  return visible ? getFeatureCollection(url, onProgress) : Promise.resolve(emptyFeatureCollection);
 }
 
 function normalizedFilterValue(value: string | undefined): string | undefined {
@@ -369,31 +377,156 @@ export function addNativeFeatureSourcesAndLayers(
   );
 }
 
-export async function getFeatureCollection(url: string) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Request failed with ${response.status}`);
-  }
-
-  return sanitizeMissingHeights((await response.json()) as FeatureCollection);
+export async function getFeatureCollection(
+  url: string,
+  onProgress?: (featureCollection: FeatureCollection) => Promise<void> | void
+) {
+  return getPagedFeatureCollection(url, onProgress);
 }
 
-export async function getVisibleFeatureCollections(map: maplibregl.Map, visibility: LayerVisibility) {
+type FeatureCollectionLink = {
+  rel?: unknown;
+  href?: unknown;
+};
+
+type FeatureCollectionPage = FeatureCollection & {
+  links?: FeatureCollectionLink[];
+};
+
+function pagedFeatureCollectionUrl(url: string, offset = 0) {
+  const nextUrl = new URL(url, window.location.origin);
+  nextUrl.searchParams.set('limit', String(FEATURE_PAGE_LIMIT));
+  if (offset > 0) {
+    nextUrl.searchParams.set('offset', String(offset));
+  } else {
+    nextUrl.searchParams.delete('offset');
+  }
+  return nextUrl.toString();
+}
+
+function nextFeatureCollectionUrl(payload: FeatureCollectionPage) {
+  const nextLink = payload.links?.find(link => link.rel === 'next' && typeof link.href === 'string');
+  return typeof nextLink?.href === 'string' && nextLink.href ? nextLink.href : null;
+}
+
+function mergedFeatureCollection(current: FeatureCollection, nextPage: FeatureCollection) {
+  if (current.features.length === 0) {
+    return nextPage;
+  }
+
+  return {
+    ...nextPage,
+    features: [...current.features, ...nextPage.features]
+  };
+}
+
+function featurePageSignature(featureCollection: FeatureCollection) {
+  const firstId = featureCollection.features[0]?.id;
+  const lastId = featureCollection.features.at(-1)?.id;
+  return `${String(firstId ?? '')}:${String(lastId ?? '')}:${featureCollection.features.length}`;
+}
+
+async function getPagedFeatureCollection(
+  url: string,
+  onProgress?: (featureCollection: FeatureCollection) => Promise<void> | void
+) {
+  let aggregated = emptyFeatureCollection;
+  let nextUrl: string | null = pagedFeatureCollectionUrl(url);
+  let offset = 0;
+  let requestCount = 0;
+  let previousSignature: string | null = null;
+
+  while (nextUrl !== null && requestCount < MAX_FEATURE_PAGE_REQUESTS) {
+    requestCount += 1;
+
+    const response = await fetch(nextUrl);
+    if (!response.ok) {
+      throw new Error(`Request failed with ${response.status}`);
+    }
+
+    const payload = (await response.json()) as FeatureCollectionPage;
+    const page = sanitizeMissingHeights(payload);
+    aggregated = mergedFeatureCollection(aggregated, page);
+    await onProgress?.(aggregated);
+
+    const linkedNextUrl = nextFeatureCollectionUrl(payload);
+    if (linkedNextUrl) {
+      nextUrl = linkedNextUrl;
+      offset = aggregated.features.length;
+      previousSignature = null;
+      continue;
+    }
+
+    if (page.features.length < FEATURE_PAGE_LIMIT) {
+      break;
+    }
+
+    const currentSignature = featurePageSignature(page);
+    if (currentSignature === previousSignature) {
+      break;
+    }
+
+    previousSignature = currentSignature;
+    offset += page.features.length;
+    nextUrl = pagedFeatureCollectionUrl(url, offset);
+  }
+
+  return aggregated;
+}
+
+export async function getVisibleFeatureCollections(
+  map: maplibregl.Map,
+  visibility: LayerVisibility,
+  onProgress?: (collections: VisibleFeatureCollections, layerId: VisibleFeatureCollectionKey) => Promise<void> | void
+) {
   const bbox = visibleOgcBbox(map);
   const buildingZoomActive = isBuildingZoom(map);
+
+  let currentCollections: VisibleFeatureCollections = emptyVisibleFeatureCollections;
+  async function updateCollection(layerId: VisibleFeatureCollectionKey, featureCollection: FeatureCollection) {
+    currentCollections = {
+      ...currentCollections,
+      [layerId]: featureCollection
+    };
+    await onProgress?.(currentCollections, layerId);
+  }
+
   const [parcels, buildings, platformEdges, trackCentres, bygning, bygningOmrade, bygningSenterlinje, bygningPosisjon] =
     await Promise.all([
-      visibleCollectionPromise(visibility.parcels, parcelsItemsInBboxUrl(bbox)),
-      visibleCollectionPromise(visibility.buildings && buildingZoomActive, buildingsItemsInBboxUrl(bbox)),
-      visibleCollectionPromise(visibility.platformEdges, platformEdgesItemsInBboxUrl(bbox)),
-      visibleCollectionPromise(visibility.trackCentres, trackCentresItemsInBboxUrl(bbox)),
-      visibleCollectionPromise(visibility.bygning && buildingZoomActive, bygningItemsInBboxUrl(bbox)),
-      visibleCollectionPromise(visibility.bygningOmrade && buildingZoomActive, bygningOmradeItemsInBboxUrl(bbox)),
+      visibleCollectionPromise(visibility.parcels, parcelsItemsInBboxUrl(bbox), featureCollection =>
+        updateCollection('parcels', featureCollection)
+      ),
+      visibleCollectionPromise(
+        visibility.buildings && buildingZoomActive,
+        buildingsItemsInBboxUrl(bbox),
+        featureCollection => updateCollection('buildings', featureCollection)
+      ),
+      visibleCollectionPromise(visibility.platformEdges, platformEdgesItemsInBboxUrl(bbox), featureCollection =>
+        updateCollection('platformEdges', featureCollection)
+      ),
+      visibleCollectionPromise(visibility.trackCentres, trackCentresItemsInBboxUrl(bbox), featureCollection =>
+        updateCollection('trackCentres', featureCollection)
+      ),
+      visibleCollectionPromise(
+        visibility.bygning && buildingZoomActive,
+        bygningItemsInBboxUrl(bbox),
+        featureCollection => updateCollection('bygning', featureCollection)
+      ),
+      visibleCollectionPromise(
+        visibility.bygningOmrade && buildingZoomActive,
+        bygningOmradeItemsInBboxUrl(bbox),
+        featureCollection => updateCollection('bygningOmrade', featureCollection)
+      ),
       visibleCollectionPromise(
         visibility.bygningSenterlinje && buildingZoomActive,
-        bygningSenterlinjeItemsInBboxUrl(bbox)
+        bygningSenterlinjeItemsInBboxUrl(bbox),
+        featureCollection => updateCollection('bygningSenterlinje', featureCollection)
       ),
-      visibleCollectionPromise(visibility.bygningPosisjon && buildingZoomActive, bygningPosisjonItemsInBboxUrl(bbox))
+      visibleCollectionPromise(
+        visibility.bygningPosisjon && buildingZoomActive,
+        bygningPosisjonItemsInBboxUrl(bbox),
+        featureCollection => updateCollection('bygningPosisjon', featureCollection)
+      )
     ]);
 
   return {
@@ -479,6 +612,52 @@ export async function upsertGeoJsonSource(map: maplibregl.Map, sourceId: string,
     type: 'geojson',
     data
   });
+}
+
+export async function setVisibleFeatureCollectionSource(
+  map: maplibregl.Map,
+  layerId: VisibleFeatureCollectionKey,
+  featureCollection: FeatureCollection
+) {
+  switch (layerId) {
+    case 'parcels':
+      await upsertGeoJsonSource(map, 'parcels', normalizePolygonFeatureCollection(featureCollection));
+      return;
+    case 'buildings': {
+      const normalizedBuildings = normalizePolygonFeatureCollection(featureCollection);
+      await Promise.all([
+        upsertGeoJsonSource(map, 'buildings', normalizedBuildings),
+        upsertGeoJsonSource(map, 'building-centroids', buildingCentroidsFeatureCollection(normalizedBuildings))
+      ]);
+      return;
+    }
+    case 'platformEdges':
+      await upsertGeoJsonSource(map, platformEdgesSourceId, normalizeBaneFeatureCollection(featureCollection));
+      return;
+    case 'trackCentres':
+      await upsertGeoJsonSource(map, trackCentresSourceId, normalizeBaneFeatureCollection(featureCollection));
+      return;
+    case 'bygning':
+      await upsertGeoJsonSource(map, bygningSourceId, normalizeBygningFeatureCollection(featureCollection));
+      return;
+    case 'bygningOmrade':
+      await upsertGeoJsonSource(map, bygningOmradeSourceId, normalizePolygonFeatureCollection(featureCollection));
+      return;
+    case 'bygningSenterlinje':
+      await upsertGeoJsonSource(
+        map,
+        bygningSenterlinjeSourceId,
+        normalizeBygningSenterlinjeFeatureCollection(featureCollection)
+      );
+      return;
+    case 'bygningPosisjon':
+      await upsertGeoJsonSource(
+        map,
+        bygningPosisjonSourceId,
+        normalizeBygningPosisjonFeatureCollection(featureCollection)
+      );
+      return;
+  }
 }
 
 export async function setNativeFeatureSources(

@@ -196,16 +196,18 @@ function mapJobStatus(body: JobStatusResponse): ImportRun {
   const updatedAt = stringOrNull(body.updated) ?? startedAt;
   const completedAt = stringOrNull(body.finished);
   const lastError =
-    typeof body.lastError === 'object' && body.lastError !== null
-      ? (body.lastError as ImportRun['last_error'])
-      : null;
+    typeof body.lastError === 'object' && body.lastError !== null ? (body.lastError as ImportRun['last_error']) : null;
 
   return {
     id: typeof body.jobID === 'string' ? body.jobID : '',
     process_id: stringOrNull(body.processID),
-    status: body.status === 'accepted' || body.status === 'running' || body.status === 'successful' || body.status === 'failed'
-      ? body.status
-      : 'running',
+    status:
+      body.status === 'accepted' ||
+      body.status === 'running' ||
+      body.status === 'successful' ||
+      body.status === 'failed'
+        ? body.status
+        : 'running',
     phase: stringOrNull(body.phase),
     started_at: startedAt,
     completed_at: completedAt,
@@ -222,7 +224,11 @@ function mapJobStatus(body: JobStatusResponse): ImportRun {
   };
 }
 
-export async function getImportRun(importId: string, resultLocation: string | null, profile: ImportProfile): Promise<ImportRun> {
+export async function getImportRun(
+  importId: string,
+  resultLocation: string | null,
+  profile: ImportProfile
+): Promise<ImportRun> {
   const fallbackUrl = `${gcapiApiBaseUrl}/datasets/${profile}/ogc_api/jobs/${encodeURIComponent(importId)}`;
   const response = await fetch(resultLocation ?? fallbackUrl);
   const body: unknown = await response.json().catch(() => null);
