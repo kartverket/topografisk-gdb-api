@@ -6,14 +6,21 @@ It discovers dataset collections and synchronous processes from `geocomponents`,
 adapts asynchronous import jobs from `gcjobs`, and rewrites links so browser
 clients only see one public API surface.
 
-The public asynchronous processing surface follows OGC API - Processes Part 1:
+The public root mirrors the `geocomponents` gateway structure:
 
-- `POST /processes/{processID}/execution`
-- `GET /jobs`
-- `GET /jobs/{jobID}`
-- `GET /jobs/{jobID}/results`
+- `GET /datasets`
+- `GET /datasets/{datasetId}/ogc_api/`
+- `GET /datasets/{datasetId}/ogc_api/collections`
+- `GET /datasets/{datasetId}/ogc_api/processes`
 
-Process-specific job views are expressed through the root-level job list using
+The public asynchronous import surface is dataset-scoped as well:
+
+- `POST /datasets/{datasetId}/ogc_api/processes/{processID}/execution`
+- `GET /datasets/{datasetId}/ogc_api/jobs`
+- `GET /datasets/{datasetId}/ogc_api/jobs/{jobID}`
+- `GET /datasets/{datasetId}/ogc_api/jobs/{jobID}/results`
+
+Process-specific job views are expressed through the dataset-local job list using
 query parameters such as `processID`, `status`, `datetime`, `minDuration`, and
 `maxDuration`.
 

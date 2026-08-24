@@ -23,31 +23,35 @@ export type CollectionMetadata = {
   crs?: string[];
 };
 
-const collectionPublicIds: Record<CollectionId, string> = {
-  parcels: 'cadastre.parcels',
-  buildings: 'cadastre.buildings',
-  jernbaneplattformkant: 'fkb_bane.jernbaneplattformkant',
-  spormidt: 'fkb_bane.spormidt',
-  bygning: 'bygning.bygning',
-  bygning_omrade: 'bygning.bygning_omrade',
-  bygning_senterlinje: 'bygning.bygning_senterlinje',
-  bygning_posisjon: 'bygning.bygning_posisjon'
+type CollectionRoute = {
+  datasetId: string;
+  collectionId: string;
 };
 
-const collectionIds = Object.keys(collectionPublicIds) as CollectionId[];
-
-type CollectionsResponse = {
-  collections?: Array<{
-    id?: string;
-  }>;
+const collectionRoutes: Record<CollectionId, CollectionRoute> = {
+  parcels: { datasetId: 'cadastre', collectionId: 'parcels' },
+  buildings: { datasetId: 'cadastre', collectionId: 'buildings' },
+  jernbaneplattformkant: { datasetId: 'fkb_bane', collectionId: 'jernbaneplattformkant' },
+  spormidt: { datasetId: 'fkb_bane', collectionId: 'spormidt' },
+  bygning: { datasetId: 'bygning', collectionId: 'bygning' },
+  bygning_omrade: { datasetId: 'bygning', collectionId: 'bygning_omrade' },
+  bygning_senterlinje: { datasetId: 'bygning', collectionId: 'bygning_senterlinje' },
+  bygning_posisjon: { datasetId: 'bygning', collectionId: 'bygning_posisjon' }
 };
+
+const collectionIds = Object.keys(collectionRoutes) as CollectionId[];
 
 function isCollectionId(value: string): value is CollectionId {
   return collectionIds.includes(value as CollectionId);
 }
 
+function datasetOgcApiBaseUrl(datasetId: string) {
+  return `${gcapiApiBaseUrl}/datasets/${datasetId}/ogc_api`;
+}
+
 function collectionBaseUrl(collectionId: CollectionId) {
-  return `${gcapiApiBaseUrl}/collections/${collectionPublicIds[collectionId]}`;
+  const route = collectionRoutes[collectionId];
+  return `${datasetOgcApiBaseUrl(route.datasetId)}/collections/${route.collectionId}`;
 }
 
 function collectionItemsUrl(collectionId: CollectionId) {
@@ -124,25 +128,38 @@ export function buildingItemUrl(id: string | number) {
 }
 
 export async function getDatasetCollectionIds() {
-  const response = await fetch(`${gcapiApiBaseUrl}/collections`);
+  const response = await fetch(`${gcapiApiBaseUrl}/datasets`);
   if (!response.ok) {
-    throw new Error(`Collections request failed with ${response.status}`);
+    throw new Error(`Datasets request failed with ${response.status}`);
   }
 
-  const body = (await response.json()) as CollectionsResponse;
+  const body = (await response.json()) as {
+    datasets?: Array<{
+      id?: unknown;
+      collections?: unknown;
+    }>;
+  };
   const availableCollectionIds = new Set<CollectionId>();
-  const publicToLocal = new Map<string, CollectionId>(
-    collectionIds.map(collectionId => [collectionPublicIds[collectionId], collectionId])
+  const routeToLocal = new Map<string, CollectionId>(
+    collectionIds.map(collectionId => {
+      const route = collectionRoutes[collectionId];
+      return [`${route.datasetId}.${route.collectionId}`, collectionId];
+    })
   );
 
-  for (const collection of body.collections ?? []) {
-    const publicId = collection.id;
-    if (typeof publicId !== 'string') {
+  for (const dataset of body.datasets ?? []) {
+    const datasetId = typeof dataset.id === 'string' ? dataset.id : null;
+    if (datasetId === null || !Array.isArray(dataset.collections)) {
       continue;
     }
-    const localId = publicToLocal.get(publicId);
-    if (localId && isCollectionId(localId)) {
-      availableCollectionIds.add(localId);
+    for (const collectionId of dataset.collections) {
+      if (typeof collectionId !== 'string') {
+        continue;
+      }
+      const localId = routeToLocal.get(`${datasetId}.${collectionId}`);
+      if (localId && isCollectionId(localId)) {
+        availableCollectionIds.add(localId);
+      }
     }
   }
 

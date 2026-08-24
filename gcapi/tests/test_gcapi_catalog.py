@@ -41,10 +41,92 @@ def _build_transport(
                                     "href": f"{service_desc_base}/datasets/cadastre/ogc_api",
                                 }
                             ],
-                        }
+                        },
+                        {
+                            "id": "bygning",
+                            "title": "Bygning",
+                            "description": "Bygning data",
+                            "links": [
+                                {
+                                    "rel": "service-desc",
+                                    "href": f"{service_desc_base}/datasets/bygning/ogc_api",
+                                }
+                            ],
+                        },
+                        {
+                            "id": "fkb_bane",
+                            "title": "FKB-Bane",
+                            "description": "FKB-Bane data",
+                            "links": [
+                                {
+                                    "rel": "service-desc",
+                                    "href": f"{service_desc_base}/datasets/fkb_bane/ogc_api",
+                                }
+                            ],
+                        },
                     ]
                 }
             )
+        if (
+            method == "GET"
+            and url
+            == "http://geocomponents.test/datasets/bygning/ogc_api/collections?f=json"
+        ):
+            return _json_response({"collections": []})
+        if (
+            method == "GET"
+            and url
+            == "http://geocomponents.test/datasets/bygning/ogc_api/conformance?f=json"
+        ):
+            return _json_response(
+                {
+                    "conformsTo": [
+                        "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/core"
+                    ]
+                }
+            )
+        if (
+            method == "GET"
+            and url
+            == "http://geocomponents.test/datasets/bygning/ogc_api/processes?f=json"
+        ):
+            return _json_response({"processes": []})
+        if (
+            method == "GET"
+            and url
+            == "http://geocomponents.test/datasets/bygning/ogc_api/openapi?f=json"
+        ):
+            return _json_response({"paths": {}})
+        if (
+            method == "GET"
+            and url
+            == "http://geocomponents.test/datasets/fkb_bane/ogc_api/collections?f=json"
+        ):
+            return _json_response({"collections": []})
+        if (
+            method == "GET"
+            and url
+            == "http://geocomponents.test/datasets/fkb_bane/ogc_api/conformance?f=json"
+        ):
+            return _json_response(
+                {
+                    "conformsTo": [
+                        "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/core"
+                    ]
+                }
+            )
+        if (
+            method == "GET"
+            and url
+            == "http://geocomponents.test/datasets/fkb_bane/ogc_api/processes?f=json"
+        ):
+            return _json_response({"processes": []})
+        if (
+            method == "GET"
+            and url
+            == "http://geocomponents.test/datasets/fkb_bane/ogc_api/openapi?f=json"
+        ):
+            return _json_response({"paths": {}})
         if (
             method == "GET"
             and url
@@ -484,44 +566,58 @@ def test_gcapi_proxies_and_rewrites_collection_and_job_routes() -> None:
     )
 
     with TestClient(app) as client:
-        landing = client.get("/")
-        assert landing.status_code == 200
-        assert landing.json()["links"][3]["href"] == "http://gcapi.test/collections"
+        datasets = client.get("/datasets")
+        assert datasets.status_code == 200
+        cadastre_dataset = next(
+            dataset
+            for dataset in datasets.json()["datasets"]
+            if dataset["id"] == "cadastre"
+        )
+        assert cadastre_dataset["links"][0]["href"] == (
+            "http://gcapi.test/datasets/cadastre/ogc_api/"
+        )
 
-        collections = client.get("/collections")
+        landing = client.get("/datasets/cadastre/ogc_api/")
+        assert landing.status_code == 200
+        assert landing.json()["links"][3]["href"] == (
+            "http://gcapi.test/datasets/cadastre/ogc_api/collections"
+        )
+
+        collections = client.get("/datasets/cadastre/ogc_api/collections")
         assert collections.status_code == 200
-        assert collections.json()["collections"][0]["id"] == "cadastre.parcels"
+        assert collections.json()["collections"][0]["id"] == "parcels"
 
         items = client.get(
-            "/collections/cadastre.parcels/items", params={"f": "json", "limit": 1}
+            "/datasets/cadastre/ogc_api/collections/parcels/items",
+            params={"f": "json", "limit": 1},
         )
         assert items.status_code == 200
         assert (
             items.json()["links"][0]["href"]
-            == "http://gcapi.test/collections/cadastre.parcels/items?f=json&limit=1"
+            == "http://gcapi.test/datasets/cadastre/ogc_api/collections/parcels/items?f=json&limit=1"
         )
 
         created = client.post(
-            "/collections/cadastre.parcels/items",
+            "/datasets/cadastre/ogc_api/collections/parcels/items",
             content=json.dumps({"type": "Feature", "properties": {}, "geometry": None}),
             headers={"content-type": "application/geo+json"},
         )
         assert created.status_code == 201
         assert (
             created.headers["location"]
-            == "http://gcapi.test/collections/cadastre.parcels/items/feature-1"
+            == "http://gcapi.test/datasets/cadastre/ogc_api/collections/parcels/items/feature-1"
         )
 
-        process = client.get("/processes/cadastre.hello")
+        process = client.get("/datasets/cadastre/ogc_api/processes/hello")
         assert process.status_code == 200
-        assert process.json()["id"] == "cadastre.hello"
+        assert process.json()["id"] == "hello"
         assert (
             process.json()["links"][-1]["href"]
-            == "http://gcapi.test/jobs?processID=cadastre.hello&type=process"
+            == "http://gcapi.test/datasets/cadastre/ogc_api/jobs?processID=hello&type=process"
         )
 
         executed = client.post(
-            "/processes/cadastre.hello/execution",
+            "/datasets/cadastre/ogc_api/processes/hello/execution",
             content=json.dumps({"inputs": {"name": "world"}}),
             headers={"content-type": "application/json"},
         )
@@ -529,19 +625,22 @@ def test_gcapi_proxies_and_rewrites_collection_and_job_routes() -> None:
         assert "Dataset echoes: world" in executed.text
 
         accepted = client.post(
-            "/processes/import-fkb-bane/execution",
+            "/datasets/fkb_bane/ogc_api/processes/import-fkb-bane/execution",
             files={"file": ("data.geojson", b"{}", "application/geo+json")},
         )
         assert accepted.status_code == 201
-        assert accepted.headers["location"] == "http://gcapi.test/jobs/job-1"
+        assert (
+            accepted.headers["location"]
+            == "http://gcapi.test/datasets/fkb_bane/ogc_api/jobs/job-1"
+        )
         assert accepted.json()["status"] == "accepted"
 
-        jobs = client.get("/jobs")
+        jobs = client.get("/datasets/fkb_bane/ogc_api/jobs")
         assert jobs.status_code == 200
         assert jobs.json()["jobs"][0]["processID"] == "import-fkb-bane"
 
         filtered_jobs = client.get(
-            "/jobs",
+            "/datasets/bygning/ogc_api/jobs",
             params={
                 "type": "process",
                 "processID": "import-bygning",
@@ -559,19 +658,19 @@ def test_gcapi_proxies_and_rewrites_collection_and_job_routes() -> None:
                 "status": "successful",
                 "links": [
                     {
-                        "href": "http://gcapi.test/jobs/job-2",
+                        "href": "http://gcapi.test/datasets/bygning/ogc_api/jobs/job-2",
                         "rel": "self",
                         "type": "application/json",
                         "title": "This document",
                     },
                     {
-                        "href": "http://gcapi.test/jobs",
+                        "href": "http://gcapi.test/datasets/bygning/ogc_api/jobs",
                         "rel": "up",
                         "type": "application/json",
                         "title": "Job list",
                     },
                     {
-                        "href": "http://gcapi.test/jobs/job-2/results",
+                        "href": "http://gcapi.test/datasets/bygning/ogc_api/jobs/job-2/results",
                         "rel": "http://www.opengis.net/def/rel/ogc/1.0/results",
                         "type": "application/json",
                         "title": "Job results",
@@ -595,13 +694,13 @@ def test_gcapi_proxies_and_rewrites_collection_and_job_routes() -> None:
             }
         ]
         assert filtered_jobs.json()["links"][0]["href"] == (
-            "http://testserver/jobs?type=process&processID=import-bygning&status=successful&datetime=2026-08-24T09%3A10%3A00Z%2F2026-08-24T09%3A30%3A00Z&minDuration=300&maxDuration=900"
+            "http://testserver/datasets/bygning/ogc_api/jobs?type=process&processID=import-bygning&status=successful&datetime=2026-08-24T09%3A10%3A00Z%2F2026-08-24T09%3A30%3A00Z&minDuration=300&maxDuration=900"
         )
 
-        job = client.get("/jobs/job-1")
+        job = client.get("/datasets/fkb_bane/ogc_api/jobs/job-1")
         assert job.status_code == 200
         assert job.json()["status"] == "successful"
 
-        results = client.get("/jobs/job-1/results")
+        results = client.get("/datasets/fkb_bane/ogc_api/jobs/job-1/results")
         assert results.status_code == 200
         assert results.json()["summary"]["succeededFeatures"] == 4

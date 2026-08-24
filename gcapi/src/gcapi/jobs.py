@@ -8,12 +8,16 @@ from fastapi import APIRouter, Query, Request
 from gcapi.catalog import CatalogSnapshot
 from gcapi.config import Settings
 from gcapi.problems import problem_response
-from gcapi.rewrite import rewrite_document
+from gcapi.rewrite import dataset_api_path, rewrite_document
 from gcapi.transport import proxy_request
 
 router = APIRouter(tags=["jobs"])
 
 PROCESS_JOB_TYPE = "process"
+IMPORT_PROCESS_IDS_BY_DATASET = {
+    "bygning": "import-bygning",
+    "fkb_bane": "import-fkb-bane",
+}
 
 
 def _settings(request: Request) -> Settings:
@@ -22,6 +26,10 @@ def _settings(request: Request) -> Settings:
 
 def _catalog(request: Request) -> CatalogSnapshot:
     return request.app.state.catalog
+
+
+def _dataset_exists(request: Request, dataset_id: str) -> bool:
+    return dataset_id in _catalog(request).datasets
 
 
 def _csv_values(raw_value: str | None) -> set[str]:
@@ -118,7 +126,7 @@ def _filter_jobs(  # noqa: PLR0913
     return filtered
 
 
-async def _gcjobs_jobs(request: Request) -> list[dict[str, Any]] | Any:
+async def _gcjobs_jobs(request: Request, dataset_id: str) -> list[dict[str, Any]] | Any:
     upstream_url = f"{_settings(request).gcjobs_url}/jobs"
     try:
         response = await request.app.state.http_client.get(
@@ -145,15 +153,17 @@ async def _gcjobs_jobs(request: Request) -> list[dict[str, Any]] | Any:
             settings=_settings(request),
             catalog=_catalog(request),
             upstream_base_url=upstream_url,
+            public_api_base_path=dataset_api_path(dataset_id),
         )
         for job in jobs
         if isinstance(job, dict)
     ]
 
 
-@router.get("/jobs")
+@router.get("/datasets/{dataset_id}/ogc_api/jobs")
 async def jobs(  # noqa: PLR0913, PLR0917
     request: Request,
+    dataset_id: str,
     limit: int = 10,
     type_values: str | None = Query(default=None, alias="type"),
     status: str | None = None,
@@ -162,7 +172,14 @@ async def jobs(  # noqa: PLR0913, PLR0917
     min_duration: int | None = Query(default=None, alias="minDuration", ge=0),
     max_duration: int | None = Query(default=None, alias="maxDuration", ge=0),
 ):
-    payload = await _gcjobs_jobs(request)
+    if not _dataset_exists(request, dataset_id):
+        return problem_response(
+            status_code=404,
+            title="Dataset not found",
+            detail=f"Unknown dataset '{dataset_id}'",
+        )
+
+    payload = await _gcjobs_jobs(request, dataset_id)
     if hasattr(payload, "status_code"):
         return payload
 
@@ -170,7 +187,13 @@ async def jobs(  # noqa: PLR0913, PLR0917
     if type_filter and PROCESS_JOB_TYPE not in type_filter:
         mapped: list[dict[str, Any]] = []
     else:
-        mapped = payload
+        import_process_id = IMPORT_PROCESS_IDS_BY_DATASET.get(dataset_id)
+        if import_process_id is None:
+            mapped = []
+        else:
+            mapped = [
+                job for job in payload if job.get("processID") == import_process_id
+            ]
     try:
         mapped = _filter_jobs(
             mapped,
@@ -201,8 +224,14 @@ async def jobs(  # noqa: PLR0913, PLR0917
     }
 
 
-@router.get("/jobs/{job_id}")
-async def job(request: Request, job_id: str):
+@router.get("/datasets/{dataset_id}/ogc_api/jobs/{job_id}")
+async def job(request: Request, dataset_id: str, job_id: str):
+    if not _dataset_exists(request, dataset_id):
+        return problem_response(
+            status_code=404,
+            title="Dataset not found",
+            detail=f"Unknown dataset '{dataset_id}'",
+        )
     return await proxy_request(
         client=request.app.state.http_client,
         request=request,
@@ -210,11 +239,18 @@ async def job(request: Request, job_id: str):
         settings=_settings(request),
         catalog=_catalog(request),
         max_upload_bytes=_settings(request).max_upload_bytes,
+        public_api_base_path=dataset_api_path(dataset_id),
     )
 
 
-@router.get("/jobs/{job_id}/results")
-async def job_results(request: Request, job_id: str):
+@router.get("/datasets/{dataset_id}/ogc_api/jobs/{job_id}/results")
+async def job_results(request: Request, dataset_id: str, job_id: str):
+    if not _dataset_exists(request, dataset_id):
+        return problem_response(
+            status_code=404,
+            title="Dataset not found",
+            detail=f"Unknown dataset '{dataset_id}'",
+        )
     return await proxy_request(
         client=request.app.state.http_client,
         request=request,
@@ -222,4 +258,5 @@ async def job_results(request: Request, job_id: str):
         settings=_settings(request),
         catalog=_catalog(request),
         max_upload_bytes=_settings(request).max_upload_bytes,
+        public_api_base_path=dataset_api_path(dataset_id),
     )

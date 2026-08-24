@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 import httpx2
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from gcapi import __version__
 from gcapi.catalog import CatalogSnapshot
@@ -15,8 +15,9 @@ from gcapi.discovery import discover_catalog
 from gcapi.features import router as features_router
 from gcapi.jobs import router as jobs_router
 from gcapi.openapi_doc import build_openapi
+from gcapi.problems import problem_response
 from gcapi.processes import router as processes_router
-from gcapi.rewrite import landing_links
+from gcapi.rewrite import dataset_api_path, landing_links, public_url
 from gcapi.transport import build_runtime_client
 
 # The facade exposes process-like routes, but its built-in import execution does not yet
@@ -80,12 +81,47 @@ def create_app(
         ],
     )
 
-    @application.get("/")
-    def root() -> dict[str, object]:
+    def _dataset_payload(dataset_id: str) -> dict[str, object] | None:
+        dataset = application.state.catalog.datasets.get(dataset_id)
+        if dataset is None:
+            return None
+        collections = sorted(
+            route.local_id
+            for route in application.state.catalog.collections.values()
+            if route.dataset_id == dataset_id
+        )
         return {
-            "title": "gcapi",
-            "description": "Canonical OGC API facade for geocomponents features, processes, and import jobs.",
-            "links": landing_links(application.state.settings),
+            "id": dataset.dataset_id,
+            "title": dataset.title,
+            "description": dataset.description,
+            "collections": collections,
+            "links": [
+                {
+                    "rel": "service-desc",
+                    "type": "application/json",
+                    "title": f"OGC API for '{dataset.dataset_id}'",
+                    "href": public_url(
+                        application.state.settings,
+                        dataset_api_path(dataset.dataset_id, "/"),
+                    ),
+                }
+            ],
+        }
+
+    @application.get("/")
+    def root():
+        return RedirectResponse(url="/datasets")
+
+    @application.get("/datasets")
+    def datasets() -> dict[str, object]:
+        return {
+            "title": "gcapi datasets",
+            "description": "Each dataset is served as its own OGC API.",
+            "datasets": [
+                payload
+                for dataset_id in sorted(application.state.catalog.datasets)
+                if (payload := _dataset_payload(dataset_id)) is not None
+            ],
         }
 
     @application.get("/healthz")
@@ -96,19 +132,51 @@ def create_app(
             )
         return {"status": "ok", "service": SERVICE_NAME}
 
-    @application.get("/conformance")
-    def conformance() -> dict[str, object]:
+    @application.get("/datasets/{dataset_id}/ogc_api/")
+    def dataset_landing(dataset_id: str):
+        dataset = application.state.catalog.datasets.get(dataset_id)
+        if dataset is None:
+            return problem_response(
+                status_code=404,
+                title="Dataset not found",
+                detail=f"Unknown dataset '{dataset_id}'",
+            )
+        return {
+            "title": dataset.title or dataset.dataset_id,
+            "description": dataset.description or "Dataset OGC API facade.",
+            "links": landing_links(application.state.settings, dataset_id),
+        }
+
+    @application.get("/datasets/{dataset_id}/ogc_api/conformance")
+    def conformance(dataset_id: str):
+        dataset = application.state.catalog.datasets.get(dataset_id)
+        if dataset is None:
+            return problem_response(
+                status_code=404,
+                title="Dataset not found",
+                detail=f"Unknown dataset '{dataset_id}'",
+            )
         public_feature_conformance = {
             uri
-            for uri in application.state.catalog.feature_conformance
+            for uri in dataset.conformance
             if uri in PUBLIC_FEATURE_CONFORMANCE_CLASSES
         }
         merged = sorted(public_feature_conformance | set(PROCESS_CONFORMANCE_CLASSES))
         return {"conformsTo": merged}
 
-    @application.get("/openapi")
-    def openapi_document() -> dict:
-        return build_openapi(application.state.settings, application.state.catalog)
+    @application.get("/datasets/{dataset_id}/ogc_api/openapi")
+    def openapi_document(dataset_id: str):
+        if dataset_id not in application.state.catalog.datasets:
+            return problem_response(
+                status_code=404,
+                title="Dataset not found",
+                detail=f"Unknown dataset '{dataset_id}'",
+            )
+        return build_openapi(
+            application.state.settings,
+            application.state.catalog,
+            dataset_id,
+        )
 
     application.include_router(features_router)
     application.include_router(processes_router)

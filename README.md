@@ -109,32 +109,41 @@ With `make docker-up`, the local ports are:
 ports for `geocomponents`, `gcjobs`, and `gcimport` remain exposed for
 diagnostics and service-local testing, not for browser use.
 
-`gcapi` exposes OGC API - Processes job resources at the root level:
+`gcapi` now exposes a top-level dataset index at `/datasets`, and each public
+OGC API is served under `/datasets/{datasetId}/ogc_api/`.
 
-- `GET /jobs`
-- `GET /jobs/{jobID}`
-- `GET /jobs/{jobID}/results`
+For example:
+
+- `GET /datasets`
+- `GET /datasets/cadastre/ogc_api/collections`
+- `GET /datasets/cadastre/ogc_api/processes`
+
+Import-related job resources are dataset-scoped as well:
+
+- `GET /datasets/fkb_bane/ogc_api/jobs`
+- `GET /datasets/fkb_bane/ogc_api/jobs/{jobID}`
+- `GET /datasets/fkb_bane/ogc_api/jobs/{jobID}/results`
 
 To scope jobs to a specific process, use the standard `processID` query
-parameter on `/jobs`, for example:
+parameter on the dataset-local `/jobs`, for example:
 
 ```bash
-curl 'http://localhost:8004/jobs?type=process&processID=import-fkb-bane'
-curl 'http://localhost:8004/jobs?type=process&processID=import-bygning&status=successful'
+curl 'http://localhost:8004/datasets/fkb_bane/ogc_api/jobs?type=process&processID=import-fkb-bane'
+curl 'http://localhost:8004/datasets/bygning/ogc_api/jobs?type=process&processID=import-bygning&status=successful'
 ```
 
 For manual import testing against the canonical facade, use the gcapi-owned
-process execution endpoints:
+dataset-scoped process execution endpoints:
 
 ```bash
 curl -F 'file=@bane.json;type=application/json' \
-  'http://localhost:8004/processes/import-fkb-bane/execution'
+  'http://localhost:8004/datasets/fkb_bane/ogc_api/processes/import-fkb-bane/execution'
 curl -F 'file=@bygning.geojson;type=application/geo+json' \
-  'http://localhost:8004/processes/import-bygning/execution'
+  'http://localhost:8004/datasets/bygning/ogc_api/processes/import-bygning/execution'
 ```
 
 The `201 Created` response includes a `Location` header pointing at the created
-job resource under `/jobs/{jobID}`.
+job resource under the same dataset-local `/jobs/{jobID}` path.
 
 # Technical details
 

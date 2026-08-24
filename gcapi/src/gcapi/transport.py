@@ -57,12 +57,13 @@ def _should_rewrite_json(content_type: str | None) -> bool:
     )
 
 
-def _response_headers(
+def _response_headers(  # noqa: PLR0913
     response: httpx2.Response,
     *,
     settings: Settings,
     catalog: CatalogSnapshot,
     upstream_base_url: str,
+    public_api_base_path: str | None,
     override_content_length: bool,
 ) -> dict[str, str]:
     headers = filter_hop_by_hop_headers(response.headers)
@@ -74,6 +75,7 @@ def _response_headers(
                     settings=settings,
                     catalog=catalog,
                     upstream_base_url=upstream_base_url,
+                    public_api_base_path=public_api_base_path,
                 )
     if override_content_length:
         headers.pop("content-length", None)
@@ -88,6 +90,7 @@ async def proxy_request(  # noqa: PLR0913
     settings: Settings,
     catalog: CatalogSnapshot,
     max_upload_bytes: int,
+    public_api_base_path: str | None = None,
 ) -> Response:
     headers = filter_hop_by_hop_headers(request.headers)
     headers.pop("host", None)
@@ -135,6 +138,7 @@ async def proxy_request(  # noqa: PLR0913
             settings=settings,
             catalog=catalog,
             upstream_base_url=upstream_url,
+            public_api_base_path=public_api_base_path,
         )
         encoded = json.dumps(rewritten).encode("utf-8")
         return Response(
@@ -145,6 +149,7 @@ async def proxy_request(  # noqa: PLR0913
                 settings=settings,
                 catalog=catalog,
                 upstream_base_url=upstream_url,
+                public_api_base_path=public_api_base_path,
                 override_content_length=True,
             ),
             media_type=content_type,
@@ -160,6 +165,7 @@ async def proxy_request(  # noqa: PLR0913
             settings=settings,
             catalog=catalog,
             upstream_base_url=upstream_url,
+            public_api_base_path=public_api_base_path,
             override_content_length=True,
         ),
         media_type=content_type,

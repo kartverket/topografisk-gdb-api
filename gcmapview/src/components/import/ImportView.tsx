@@ -49,13 +49,14 @@ export function ImportView() {
     if (!result?.import_id) {
       return;
     }
+    const currentResult = result;
     const importId: string = result.import_id;
     let cancelled = false;
     let timer: number | undefined;
 
     async function poll() {
       try {
-        const run = await getImportRun(importId);
+        const run = await getImportRun(importId, currentResult.location, currentResult.profile);
         if (cancelled) return;
         setImportRun(run);
         if (run.status === 'accepted' || run.status === 'running') {

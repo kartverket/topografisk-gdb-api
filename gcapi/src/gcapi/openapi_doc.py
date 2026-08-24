@@ -2,12 +2,35 @@ from __future__ import annotations
 
 from gcapi.catalog import CatalogSnapshot
 from gcapi.config import Settings
-from gcapi.rewrite import public_url
+from gcapi.rewrite import dataset_api_path, public_url
+
+IMPORT_PROCESS_IDS_BY_DATASET = {
+    "bygning": "import-bygning",
+    "fkb_bane": "import-fkb-bane",
+}
 
 
-def build_openapi(settings: Settings, catalog: CatalogSnapshot) -> dict:
-    collection_ids = sorted(catalog.collections)
-    process_ids = sorted(set(catalog.processes) | {"import-fkb-bane", "import-bygning"})
+def build_openapi(
+    settings: Settings, catalog: CatalogSnapshot, dataset_id: str
+) -> dict:
+    collection_ids = sorted(
+        route.local_id
+        for route in catalog.collections.values()
+        if route.dataset_id == dataset_id
+    )
+    process_ids = sorted(
+        {
+            route.local_id
+            for route in catalog.processes.values()
+            if route.dataset_id == dataset_id
+        }
+        | (
+            {IMPORT_PROCESS_IDS_BY_DATASET[dataset_id]}
+            if dataset_id in IMPORT_PROCESS_IDS_BY_DATASET
+            else set()
+        )
+    )
+    server_url = public_url(settings, dataset_api_path(dataset_id))
     return {
         "openapi": "3.0.3",
         "info": {
@@ -15,7 +38,7 @@ def build_openapi(settings: Settings, catalog: CatalogSnapshot) -> dict:
             "version": "0.1.0",
             "description": "Canonical OGC facade for geocomponents and gcjobs.",
         },
-        "servers": [{"url": settings.public_url}],
+        "servers": [{"url": server_url}],
         "paths": {
             "/": {"get": {"responses": {"200": {"description": "Landing page"}}}},
             "/conformance": {
@@ -232,5 +255,7 @@ def build_openapi(settings: Settings, catalog: CatalogSnapshot) -> dict:
                 }
             }
         },
-        "externalDocs": {"url": public_url(settings, "/")},
+        "externalDocs": {
+            "url": public_url(settings, dataset_api_path(dataset_id, "/"))
+        },
     }

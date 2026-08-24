@@ -101,7 +101,7 @@ flowchart TB
 Notes:
 
 - `make docker-up` serves `gcmapview` from the container at `http://localhost:8080`; `make frontend-run` serves the same UI from Vite at `http://localhost:5173`.
-- Both frontend modes should target `gcapi` on `http://localhost:8004` for collections, processes, jobs, and import execution.
+- Both frontend modes should target `gcapi` on `http://localhost:8004` through `/datasets/{dataset}/ogc_api/...` for collections, processes, jobs, and import execution.
 - `gcimport` listens on port `8001` locally but is called internally by `gcjobs`, not directly by the browser-facing import UI.
 - `geocomponents` on `:8000` and `gcjobs` on `:8003` remain host-exposed for diagnostics, contract testing, and service-local inspection, but not for browser use.
 - `migrate` is the local analog of the production `apply-schema` job.
@@ -185,8 +185,8 @@ Current built-in profiles:
 Request shape now:
 
 ```http
-POST /processes/import-fkb-bane/execution
-POST /processes/import-bygning/execution
+POST /datasets/fkb_bane/ogc_api/processes/import-fkb-bane/execution
+POST /datasets/bygning/ogc_api/processes/import-bygning/execution
 Content-Type: multipart/form-data
 ```
 
@@ -293,11 +293,11 @@ sequenceDiagram
   participant DB as PostGIS
   participant JDB as gc_jobs schema
 
-  U->>A: POST /processes/import-*/execution
+  U->>A: POST /datasets/{dataset}/ogc_api/processes/import-*/execution
   A->>J: POST /processes/import-*/execution
   J->>JDB: record import.accepted
   J-->>A: 201 Created + Location: /jobs/{jobID}
-  A-->>U: 201 Created + Location: /jobs/{jobID}
+  A-->>U: 201 Created + Location: /datasets/{dataset}/ogc_api/jobs/{jobID}
   J->>I: background proxy multipart request + X-Import-Id
   I->>R: publish import.started
   R->>J: import.started
@@ -318,7 +318,7 @@ sequenceDiagram
   I->>R: publish batch/completed events
   R->>J: batch/completed events
   J->>JDB: update run + append event
-  U->>A: GET /jobs/{id}
+  U->>A: GET /datasets/{dataset}/ogc_api/jobs/{id}
   A->>J: GET /jobs/{id}
   J-->>A: statusInfo
   A-->>U: OGC statusInfo
@@ -337,11 +337,11 @@ sequenceDiagram
   participant R as Redis
   participant JDB as gc_jobs PostgreSQL
 
-  FE->>A: POST /processes/import-*/execution
+  FE->>A: POST /datasets/{dataset}/ogc_api/processes/import-*/execution
   A->>J: POST /processes/import-*/execution
   J->>JDB: store import.accepted
   J-->>A: 201 Created + Location: /jobs/{jobID}
-  A-->>FE: 201 Created + Location: /jobs/{jobID}
+  A-->>FE: 201 Created + Location: /datasets/{dataset}/ogc_api/jobs/{jobID}
   J->>I: background proxy request + X-Import-Id
   I-->>R: publish started
   R-->>J: consume started
@@ -360,7 +360,7 @@ sequenceDiagram
   I-->>R: publish completed.succeeded|completed.failed
   R-->>J: consume completed.succeeded|completed.failed
   J->>JDB: mark terminal state
-  FE->>A: GET /jobs or /jobs/{id}
+  FE->>A: GET /datasets/{dataset}/ogc_api/jobs or /datasets/{dataset}/ogc_api/jobs/{id}
   A->>J: GET /jobs or /jobs/{id}
   J-->>A: current status / job list
   A-->>FE: statusInfo/jobList

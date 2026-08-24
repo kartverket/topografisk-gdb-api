@@ -9,7 +9,13 @@ from fastapi import APIRouter, Request
 from gcapi.catalog import CatalogSnapshot, ProcessRoute
 from gcapi.config import Settings
 from gcapi.problems import problem_response
-from gcapi.rewrite import EXECUTE_REL, JOB_LIST_REL, public_url, rewrite_document
+from gcapi.rewrite import (
+    EXECUTE_REL,
+    JOB_LIST_REL,
+    dataset_api_path,
+    public_url,
+    rewrite_document,
+)
 from gcapi.transport import (
     proxy_request,
 )
@@ -21,6 +27,10 @@ IMPORT_PROCESS_IDS = {
     "import-bygning": "bygning",
 }
 
+IMPORT_PROCESS_IDS_BY_DATASET = {
+    dataset_id: process_id for process_id, dataset_id in IMPORT_PROCESS_IDS.items()
+}
+
 
 def _settings(request: Request) -> Settings:
     return request.app.state.settings
@@ -30,11 +40,19 @@ def _catalog(request: Request) -> CatalogSnapshot:
     return request.app.state.catalog
 
 
-def _process_route(request: Request, process_id: str) -> ProcessRoute | None:
-    return _catalog(request).processes.get(process_id)
+def _process_route(
+    request: Request, dataset_id: str, process_id: str
+) -> ProcessRoute | None:
+    return _catalog(request).processes.get(f"{dataset_id}.{process_id}")
 
 
-def _owned_import_description(request: Request, process_id: str) -> dict[str, Any]:
+def _dataset_exists(request: Request, dataset_id: str) -> bool:
+    return dataset_id in _catalog(request).datasets
+
+
+def _owned_import_description(
+    request: Request, dataset_id: str, process_id: str
+) -> dict[str, Any]:
     title = "Import FKB-Bane" if process_id == "import-fkb-bane" else "Import Bygning"
     dataset = "FKB-Bane" if process_id == "import-fkb-bane" else "Bygning"
     return {
@@ -46,14 +64,18 @@ def _owned_import_description(request: Request, process_id: str) -> dict[str, An
         "outputTransmission": ["value"],
         "links": [
             {
-                "href": public_url(_settings(request), f"/processes/{process_id}"),
+                "href": public_url(
+                    _settings(request),
+                    dataset_api_path(dataset_id, f"/processes/{process_id}"),
+                ),
                 "rel": "self",
                 "type": "application/json",
                 "title": "This document",
             },
             {
                 "href": public_url(
-                    _settings(request), f"/processes/{process_id}/execution"
+                    _settings(request),
+                    dataset_api_path(dataset_id, f"/processes/{process_id}/execution"),
                 ),
                 "rel": EXECUTE_REL,
                 "type": "multipart/form-data",
@@ -62,7 +84,10 @@ def _owned_import_description(request: Request, process_id: str) -> dict[str, An
             {
                 "href": public_url(
                     _settings(request),
-                    f"/jobs?{urlencode({'processID': process_id, 'type': 'process'})}",
+                    dataset_api_path(
+                        dataset_id,
+                        f"/jobs?{urlencode({'processID': process_id, 'type': 'process'})}",
+                    ),
                 ),
                 "rel": JOB_LIST_REL,
                 "type": "application/json",
@@ -106,13 +131,16 @@ def _owned_import_description(request: Request, process_id: str) -> dict[str, An
 
 
 def _append_job_list_link(
-    payload: dict[str, Any], request: Request, process_id: str
+    payload: dict[str, Any], request: Request, dataset_id: str, process_id: str
 ) -> dict[str, Any]:
     links = payload.get("links")
     job_list_link = {
         "href": public_url(
             _settings(request),
-            f"/jobs?{urlencode({'processID': process_id, 'type': 'process'})}",
+            dataset_api_path(
+                dataset_id,
+                f"/jobs?{urlencode({'processID': process_id, 'type': 'process'})}",
+            ),
         ),
         "rel": JOB_LIST_REL,
         "type": "application/json",
@@ -129,34 +157,43 @@ def _canonical_process_document(
     route: ProcessRoute, request: Request
 ) -> dict[str, Any]:
     payload = deepcopy(route.description)
-    payload["id"] = route.public_id
+    payload["id"] = route.local_id
     rewritten = rewrite_document(
         payload,
         settings=_settings(request),
         catalog=_catalog(request),
         upstream_base_url=route.upstream_base_url,
+        public_api_base_path=dataset_api_path(route.dataset_id),
     )
-    return _append_job_list_link(rewritten, request, route.public_id)
+    return _append_job_list_link(rewritten, request, route.dataset_id, route.local_id)
 
 
-@router.get("/processes")
-def processes(request: Request, limit: int = 10) -> dict[str, Any]:
+@router.get("/datasets/{dataset_id}/ogc_api/processes")
+def processes(request: Request, dataset_id: str, limit: int = 10):
+    if not _dataset_exists(request, dataset_id):
+        return problem_response(
+            status_code=404,
+            title="Dataset not found",
+            detail=f"Unknown dataset '{dataset_id}'",
+        )
     settings = _settings(request)
     process_payloads = [
         _canonical_process_document(route, request)
         for route in _catalog(request).processes.values()
+        if route.dataset_id == dataset_id
     ]
-    process_payloads.extend(
-        [
-            _owned_import_description(request, process_id)
-            for process_id in IMPORT_PROCESS_IDS
-        ]
-    )
+    import_process_id = IMPORT_PROCESS_IDS_BY_DATASET.get(dataset_id)
+    if import_process_id is not None:
+        process_payloads.append(
+            _owned_import_description(request, dataset_id, import_process_id)
+        )
     return {
         "processes": process_payloads[: max(1, min(limit, 10000))],
         "links": [
             {
-                "href": public_url(settings, "/processes"),
+                "href": public_url(
+                    settings, dataset_api_path(dataset_id, "/processes")
+                ),
                 "rel": "self",
                 "type": "application/json",
                 "title": "This document",
@@ -165,22 +202,28 @@ def processes(request: Request, limit: int = 10) -> dict[str, Any]:
     }
 
 
-@router.get("/processes/{process_id}")
-def process(request: Request, process_id: str):
-    if process_id in IMPORT_PROCESS_IDS:
-        return _owned_import_description(request, process_id)
-    route = _process_route(request, process_id)
+@router.get("/datasets/{dataset_id}/ogc_api/processes/{process_id}")
+def process(request: Request, dataset_id: str, process_id: str):
+    if not _dataset_exists(request, dataset_id):
+        return problem_response(
+            status_code=404,
+            title="Dataset not found",
+            detail=f"Unknown dataset '{dataset_id}'",
+        )
+    if IMPORT_PROCESS_IDS_BY_DATASET.get(dataset_id) == process_id:
+        return _owned_import_description(request, dataset_id, process_id)
+    route = _process_route(request, dataset_id, process_id)
     if route is None:
         return problem_response(
             status_code=404,
             title="Process not found",
-            detail=f"Unknown process '{process_id}'",
+            detail=f"Unknown process '{process_id}' for dataset '{dataset_id}'",
             type_url="http://www.opengis.net/def/exceptions/ogcapi-processes-1/1.0/no-such-process",
         )
     return _canonical_process_document(route, request)
 
 
-async def _execute_import_process(request: Request, process_id: str):
+async def _execute_import_process(request: Request, dataset_id: str, process_id: str):
     content_type = request.headers.get("content-type", "")
     if not content_type.lower().startswith("multipart/form-data"):
         return problem_response(
@@ -195,19 +238,26 @@ async def _execute_import_process(request: Request, process_id: str):
         settings=_settings(request),
         catalog=_catalog(request),
         max_upload_bytes=_settings(request).max_upload_bytes,
+        public_api_base_path=dataset_api_path(dataset_id),
     )
 
 
-@router.post("/processes/{process_id}/execution")
-async def execute_process(request: Request, process_id: str):
-    if process_id in IMPORT_PROCESS_IDS:
-        return await _execute_import_process(request, process_id)
-    route = _process_route(request, process_id)
+@router.post("/datasets/{dataset_id}/ogc_api/processes/{process_id}/execution")
+async def execute_process(request: Request, dataset_id: str, process_id: str):
+    if not _dataset_exists(request, dataset_id):
+        return problem_response(
+            status_code=404,
+            title="Dataset not found",
+            detail=f"Unknown dataset '{dataset_id}'",
+        )
+    if IMPORT_PROCESS_IDS_BY_DATASET.get(dataset_id) == process_id:
+        return await _execute_import_process(request, dataset_id, process_id)
+    route = _process_route(request, dataset_id, process_id)
     if route is None:
         return problem_response(
             status_code=404,
             title="Process not found",
-            detail=f"Unknown process '{process_id}'",
+            detail=f"Unknown process '{process_id}' for dataset '{dataset_id}'",
             type_url="http://www.opengis.net/def/exceptions/ogcapi-processes-1/1.0/no-such-process",
         )
     return await proxy_request(
@@ -217,4 +267,5 @@ async def execute_process(request: Request, process_id: str):
         settings=_settings(request),
         catalog=_catalog(request),
         max_upload_bytes=_settings(request).max_upload_bytes,
+        public_api_base_path=dataset_api_path(dataset_id),
     )

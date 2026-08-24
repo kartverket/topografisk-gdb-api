@@ -41,6 +41,7 @@ export type ImportResult = {
   import_id: string;
   status: 'accepted' | 'running';
   location: string | null;
+  profile: ImportProfile;
 };
 
 export type ImportJobStatus = 'accepted' | 'running' | 'successful' | 'failed';
@@ -160,7 +161,7 @@ export async function startImport(file: File, profile: ImportProfile): Promise<I
   const form = new FormData();
   form.append('file', file);
   const processId = profile === 'fkb_bane' ? 'import-fkb-bane' : 'import-bygning';
-  const response = await fetch(`${gcapiApiBaseUrl}/processes/${processId}/execution`, {
+  const response = await fetch(`${gcapiApiBaseUrl}/datasets/${profile}/ogc_api/processes/${processId}/execution`, {
     method: 'POST',
     body: form
   });
@@ -173,7 +174,8 @@ export async function startImport(file: File, profile: ImportProfile): Promise<I
   return {
     import_id: typeof payload.jobID === 'string' ? payload.jobID : '',
     status: payload.status === 'running' ? 'running' : 'accepted',
-    location: response.headers.get('Location')
+    location: response.headers.get('Location'),
+    profile
   };
 }
 
@@ -220,8 +222,9 @@ function mapJobStatus(body: JobStatusResponse): ImportRun {
   };
 }
 
-export async function getImportRun(importId: string): Promise<ImportRun> {
-  const response = await fetch(`${gcapiApiBaseUrl}/jobs/${encodeURIComponent(importId)}`);
+export async function getImportRun(importId: string, resultLocation: string | null, profile: ImportProfile): Promise<ImportRun> {
+  const fallbackUrl = `${gcapiApiBaseUrl}/datasets/${profile}/ogc_api/jobs/${encodeURIComponent(importId)}`;
+  const response = await fetch(resultLocation ?? fallbackUrl);
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     throw new Error(errorMessage(body, response.status));
