@@ -31,12 +31,13 @@ docker compose up --build db redis gcjobs-migrate gcjobs
 - `GET /` returns the service and schema identity
 - `GET /healthz` checks that the shared database is reachable and reports the
   current Alembic revision if migrations have been applied
-- `POST /imports?profile=fkb_bane|bygning` accepts an upload, records an
-  `import.accepted` event, and proxies the request to gcimport in the background
-- `GET /imports/current` returns active import runs
-- `GET /imports/history` returns historical import runs
-- `GET /imports/{import_id}` returns one import run summary
-- `GET /imports/{import_id}/events` returns the raw event history for one run
+- `GET /processes` lists the built-in async import processes
+- `GET /processes/{process_id}` describes one built-in async import process
+- `POST /processes/import-fkb-bane/execution` starts an async FKB-Bane import
+- `POST /processes/import-bygning/execution` starts an async Bygning import
+- `GET /jobs` returns root-level job resources for import runs
+- `GET /jobs/{job_id}` returns one job document
+- `GET /jobs/{job_id}/results` returns the terminal summary for a successful job
 
 ## Development
 

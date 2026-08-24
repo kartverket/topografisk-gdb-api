@@ -20,17 +20,28 @@ from gcjobs.pubsub import ImportEventListener, RedisImportEventListener
 LOGGER = logging.getLogger("uvicorn.error").getChild("gcjobs.import_events")
 
 IMPORT_CLIENT_TIMEOUT = httpx2.Timeout(5.0, read=None)
+IMPORT_PROCESS_IDS = {
+    "import-bygning": "bygning",
+    "import-fkb-bane": "fkb_bane",
+}
+PROCESS_IDS_BY_PROFILE = {
+    profile_name: process_id for process_id, profile_name in IMPORT_PROCESS_IDS.items()
+}
+PROCESS_JOB_TYPE = "process"
+JOB_LIST_REL = "http://www.opengis.net/def/rel/ogc/1.0/job-list"
+RESULTS_REL = "http://www.opengis.net/def/rel/ogc/1.0/results"
+EXECUTE_REL = "http://www.opengis.net/def/rel/ogc/1.0/execute"
 
 
-def _supported_profiles_detail() -> str:
-    supported = ", ".join(sorted(config.SUPPORTED_IMPORT_PROFILES))
-    return f"profile must be one of: {supported}"
+def _supported_processes_detail() -> str:
+    supported = ", ".join(sorted(IMPORT_PROCESS_IDS))
+    return f"processID must be one of: {supported}"
 
 
-def _normalize_profile_name(profile_name: str) -> str:
-    normalized = profile_name.strip().casefold()
-    if normalized not in config.SUPPORTED_IMPORT_PROFILES:
-        raise HTTPException(status_code=400, detail=_supported_profiles_detail())
+def _normalize_process_id(process_id: str) -> str:
+    normalized = process_id.strip().casefold()
+    if normalized not in IMPORT_PROCESS_IDS:
+        raise HTTPException(status_code=404, detail=_supported_processes_detail())
     return normalized
 
 
@@ -102,6 +113,225 @@ async def _cancel_task(task: asyncio.Task[None]) -> None:
         await task
 
 
+def _map_status(run: dict[str, Any]) -> str:
+    status = run.get("status")
+    phase = run.get("phase")
+    if status == "completed":
+        return "successful"
+    if status == "failed":
+        return "failed"
+    if phase in {None, "accepted"}:
+        return "accepted"
+    return "running"
+
+
+def _csv_values(raw_value: str | None) -> set[str]:
+    if raw_value is None:
+        return set()
+    return {part.strip() for part in raw_value.split(",") if part.strip()}
+
+
+def _job_url(request: Request, path: str) -> str:
+    return f"{str(request.base_url).rstrip('/')}{path}"
+
+
+def _process_url(request: Request, process_id: str) -> str:
+    return _job_url(request, f"/processes/{process_id}")
+
+
+def _job_links(request: Request, run: dict[str, Any]) -> list[dict[str, str]]:
+    job_id = str(run["id"])
+    links = [
+        {
+            "href": _job_url(request, f"/jobs/{job_id}"),
+            "rel": "self",
+            "type": "application/json",
+            "title": "This document",
+        },
+        {
+            "href": _job_url(request, "/jobs"),
+            "rel": "up",
+            "type": "application/json",
+            "title": "Job list",
+        },
+    ]
+    if _map_status(run) == "successful":
+        links.append(
+            {
+                "href": _job_url(request, f"/jobs/{job_id}/results"),
+                "rel": RESULTS_REL,
+                "type": "application/json",
+                "title": "Job results",
+            }
+        )
+    return links
+
+
+def _job_payload(request: Request, run: dict[str, Any]) -> dict[str, Any]:
+    total_features = run.get("total_features")
+    processed_features = int(run.get("processed_features") or 0)
+    progress = None
+    if isinstance(total_features, int) and total_features > 0:
+        progress = max(0, min(100, round((processed_features / total_features) * 100)))
+
+    profile_name = run.get("profile")
+    payload: dict[str, Any] = {
+        "type": PROCESS_JOB_TYPE,
+        "jobID": str(run["id"]),
+        "status": _map_status(run),
+        "links": _job_links(request, run),
+        "updated": run.get("last_event_at"),
+        "phase": run.get("phase"),
+        "totalFeatures": run.get("total_features"),
+        "processedFeatures": processed_features,
+        "succeededFeatures": int(run.get("succeeded_features") or 0),
+        "failedFeatures": int(run.get("failed_features") or 0),
+        "processedBatches": int(run.get("processed_batches") or 0),
+        "succeededBatches": int(run.get("succeeded_batches") or 0),
+        "failedBatches": int(run.get("failed_batches") or 0),
+    }
+    if isinstance(profile_name, str) and profile_name in PROCESS_IDS_BY_PROFILE:
+        payload["processID"] = PROCESS_IDS_BY_PROFILE[profile_name]
+    if progress is not None:
+        payload["progress"] = progress
+    if isinstance(run.get("started_at"), str):
+        payload["created"] = run["started_at"]
+        if run.get("phase") not in {None, "accepted"}:
+            payload["started"] = run["started_at"]
+    if isinstance(run.get("completed_at"), str):
+        payload["finished"] = run["completed_at"]
+    last_error = run.get("last_error")
+    if isinstance(last_error, dict):
+        payload["lastError"] = last_error
+    if isinstance(last_error, dict) and isinstance(last_error.get("reason"), str):
+        payload["message"] = last_error["reason"]
+    elif payload["status"] == "accepted":
+        payload["message"] = "Import accepted"
+    elif payload["status"] == "running":
+        payload["message"] = "Import running"
+    elif payload["status"] == "successful":
+        payload["message"] = "Import completed"
+    return payload
+
+
+def _accepted_job_payload(
+    request: Request, import_id: str, process_id: str
+) -> dict[str, Any]:
+    return {
+        "type": PROCESS_JOB_TYPE,
+        "jobID": import_id,
+        "processID": process_id,
+        "status": "accepted",
+        "message": "Import accepted",
+        "links": [
+            {
+                "href": _job_url(request, f"/jobs/{import_id}"),
+                "rel": "self",
+                "type": "application/json",
+                "title": "This document",
+            },
+            {
+                "href": _job_url(request, "/jobs"),
+                "rel": "up",
+                "type": "application/json",
+                "title": "Job list",
+            },
+        ],
+    }
+
+
+def _process_payload(request: Request, process_id: str) -> dict[str, Any]:
+    return {
+        "id": process_id,
+        "title": f"Import {IMPORT_PROCESS_IDS[process_id]}",
+        "description": f"Asynchronously import data using the {IMPORT_PROCESS_IDS[process_id]} profile.",
+        "jobControlOptions": ["async-execute"],
+        "links": [
+            {
+                "href": _process_url(request, process_id),
+                "rel": "self",
+                "type": "application/json",
+                "title": "This process",
+            },
+            {
+                "href": _job_url(request, f"/processes/{process_id}/execution"),
+                "rel": EXECUTE_REL,
+                "type": "multipart/form-data",
+                "title": "Execute process",
+            },
+            {
+                "href": _job_url(request, f"/jobs?type=process&processID={process_id}"),
+                "rel": JOB_LIST_REL,
+                "type": "application/json",
+                "title": "Process jobs",
+            },
+        ],
+    }
+
+
+async def _queue_import_request(
+    application: FastAPI,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    profile_name: str,
+) -> str:
+    payload = await _read_bounded_request_body(request, config.max_upload_bytes())
+    import_id = str(uuid4())
+    content_type = request.headers.get("content-type", "application/octet-stream")
+
+    db.record_import_event(
+        {
+            "import_id": import_id,
+            "event": "import.accepted",
+            "phase": "accepted",
+            "profile": profile_name,
+        }
+    )
+
+    background_tasks.add_task(
+        _proxy_import,
+        application.state.import_client,
+        import_id,
+        profile_name,
+        content_type,
+        payload,
+    )
+    return import_id
+
+
+def _filter_jobs(
+    jobs: list[dict[str, Any]],
+    *,
+    type_values: set[str],
+    process_ids: set[str],
+    statuses: set[str],
+) -> list[dict[str, Any]]:
+    filtered = jobs
+    if type_values:
+        filtered = [job for job in filtered if job.get("type") in type_values]
+    if process_ids:
+        filtered = [job for job in filtered if job.get("processID") in process_ids]
+    if statuses:
+        filtered = [job for job in filtered if job.get("status") in statuses]
+    return filtered
+
+
+def _job_results_payload(run: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "summary": {
+            "jobID": str(run["id"]),
+            "processedFeatures": run.get("processed_features"),
+            "succeededFeatures": run.get("succeeded_features"),
+            "failedFeatures": run.get("failed_features"),
+            "processedBatches": run.get("processed_batches"),
+            "succeededBatches": run.get("succeeded_batches"),
+            "failedBatches": run.get("failed_batches"),
+            "totalFeatures": run.get("total_features"),
+            "completed": run.get("completed_at"),
+        }
+    }
+
+
 def _register_routes(application: FastAPI) -> None:
     @application.get("/")
     def root() -> dict[str, str]:
@@ -125,63 +355,113 @@ def _register_routes(application: FastAPI) -> None:
             return JSONResponse(payload, status_code=503)
         return payload
 
-    @application.post("/imports")
-    async def create_import(
+    @application.get("/processes")
+    def processes(request: Request) -> dict[str, Any]:
+        return {
+            "processes": [
+                _process_payload(request, process_id)
+                for process_id in sorted(IMPORT_PROCESS_IDS)
+            ],
+            "links": [
+                {
+                    "href": _job_url(request, "/processes"),
+                    "rel": "self",
+                    "type": "application/json",
+                    "title": "This document",
+                }
+            ],
+        }
+
+    @application.get("/processes/{process_id}")
+    def process(request: Request, process_id: str) -> dict[str, Any]:
+        return _process_payload(request, _normalize_process_id(process_id))
+
+    @application.post("/processes/{process_id}/execution")
+    async def execute_process(
         background_tasks: BackgroundTasks,
         request: Request,
-        profile_name: str = Query(alias="profile"),
+        process_id: str,
     ) -> JSONResponse:
-        normalized_profile_name = _normalize_profile_name(profile_name)
-        payload = await _read_bounded_request_body(request, config.max_upload_bytes())
-        import_id = str(uuid4())
-        content_type = request.headers.get("content-type", "application/octet-stream")
-
-        db.record_import_event(
-            {
-                "import_id": import_id,
-                "event": "import.accepted",
-                "phase": "accepted",
-                "profile": normalized_profile_name,
-            }
+        normalized_process_id = _normalize_process_id(process_id)
+        content_type = request.headers.get("content-type", "")
+        if not content_type.lower().startswith("multipart/form-data"):
+            raise HTTPException(
+                status_code=415,
+                detail="Import processes require multipart/form-data uploads",
+            )
+        profile_name = IMPORT_PROCESS_IDS[normalized_process_id]
+        import_id = await _queue_import_request(
+            application,
+            background_tasks,
+            request,
+            profile_name,
         )
-
-        background_tasks.add_task(
-            _proxy_import,
-            application.state.import_client,
-            import_id,
-            normalized_profile_name,
-            content_type,
-            payload,
-        )
-
+        location = _job_url(request, f"/jobs/{import_id}")
         return JSONResponse(
-            {
-                "import_id": import_id,
-                "status": "accepted",
-            },
-            status_code=202,
+            _accepted_job_payload(request, import_id, normalized_process_id),
+            status_code=201,
+            headers={"Location": location},
         )
 
-    @application.get("/imports/current")
-    def current_imports() -> dict[str, list[dict[str, Any]]]:
-        return {"imports": db.list_import_runs(active_only=True)}
+    @application.get("/jobs")
+    def jobs(
+        request: Request,
+        limit: int = Query(default=10, ge=1, le=10000),
+        type_values: str | None = Query(default=None, alias="type"),
+        status: str | None = None,
+        process_id: str | None = Query(default=None, alias="processID"),
+    ) -> dict[str, Any]:
+        jobs_list = [
+            _job_payload(request, run)
+            for run in db.list_import_runs(active_only=False, limit=10000)
+        ]
+        type_filter = _csv_values(type_values)
+        if type_filter and PROCESS_JOB_TYPE not in type_filter:
+            filtered: list[dict[str, Any]] = []
+        else:
+            filtered = _filter_jobs(
+                jobs_list,
+                type_values=type_filter,
+                process_ids=_csv_values(process_id),
+                statuses=_csv_values(status),
+            )
+        return {
+            "jobs": filtered[:limit],
+            "links": [
+                {
+                    "href": str(request.url),
+                    "rel": "self",
+                    "type": "application/json",
+                    "title": "This document",
+                }
+            ],
+        }
 
-    @application.get("/imports/history")
-    def import_history() -> dict[str, list[dict[str, Any]]]:
-        return {"imports": db.list_import_runs(active_only=False)}
+    @application.get("/jobs/{job_id}")
+    def job(request: Request, job_id: str) -> dict[str, Any]:
+        run = db.get_import_run(job_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        return _job_payload(request, run)
 
-    @application.get("/imports/{import_id}")
-    def import_run(import_id: str) -> dict[str, Any]:
-        row = db.get_import_run(import_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="import run not found")
-        return row
+    @application.get("/jobs/{job_id}/results")
+    def job_results(job_id: str) -> dict[str, Any]:
+        run = db.get_import_run(job_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="job not found")
 
-    @application.get("/imports/{import_id}/events")
-    def import_events_history(import_id: str) -> dict[str, list[dict[str, Any]]]:
-        if db.get_import_run(import_id) is None:
-            raise HTTPException(status_code=404, detail="import run not found")
-        return {"events": db.get_import_events(import_id)}
+        mapped_status = _map_status(run)
+        if mapped_status in {"accepted", "running"}:
+            raise HTTPException(status_code=404, detail="job results are not ready")
+        if mapped_status == "failed":
+            last_error = run.get("last_error")
+            detail = "job failed"
+            if isinstance(last_error, dict) and isinstance(
+                last_error.get("reason"), str
+            ):
+                detail = last_error["reason"]
+            raise HTTPException(status_code=422, detail=detail)
+        return _job_results_payload(run)
 
 
 def create_app(

@@ -1,6 +1,5 @@
 type RuntimeConfig = {
-  geocomponentsApiUrl?: unknown;
-  gcjobsApiUrl?: unknown;
+  gcapiApiUrl?: unknown;
 };
 
 declare global {
@@ -38,10 +37,6 @@ export function resolveApiBaseUrl(
   throw new Error(`${variableName} must be configured`);
 }
 
-export function geocomponentsRuntimeApiUrl() {
-  return getRuntimeConfig()?.geocomponentsApiUrl;
-}
-
-export function gcjobsRuntimeApiUrl() {
-  return getRuntimeConfig()?.gcjobsApiUrl;
+export function gcapiRuntimeApiUrl() {
+  return getRuntimeConfig()?.gcapiApiUrl;
 }

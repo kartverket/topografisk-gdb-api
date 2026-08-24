@@ -1,10 +1,10 @@
-import { gcjobsRuntimeApiUrl, resolveApiBaseUrl } from './runtimeConfig';
+import { gcapiRuntimeApiUrl, resolveApiBaseUrl } from './runtimeConfig';
 
-export const importApiBaseUrl = resolveApiBaseUrl(
-  gcjobsRuntimeApiUrl(),
-  import.meta.env.GCJOBS_API_URL,
-  'GCJOBS_API_URL',
-  'http://localhost:8003'
+export const gcapiApiBaseUrl = resolveApiBaseUrl(
+  gcapiRuntimeApiUrl(),
+  import.meta.env.GCAPI_API_URL,
+  'GCAPI_API_URL',
+  'http://localhost:8004'
 );
 
 export type ImportProfile = 'fkb_bane' | 'bygning';
@@ -39,12 +39,16 @@ const profileTokens: Record<ImportProfile, ReadonlySet<string>> = {
 
 export type ImportResult = {
   import_id: string;
-  status: 'accepted';
+  status: 'accepted' | 'running';
+  location: string | null;
 };
+
+export type ImportJobStatus = 'accepted' | 'running' | 'successful' | 'failed';
 
 export type ImportRun = {
   id: string;
-  status: 'running' | 'completed' | 'failed';
+  process_id: string | null;
+  status: ImportJobStatus;
   phase: string | null;
   started_at: string;
   completed_at: string | null;
@@ -62,6 +66,27 @@ export type ImportRun = {
     collection?: string;
     feature_id?: string;
   } | null;
+  progress: number | null;
+};
+
+type JobStatusResponse = {
+  jobID?: unknown;
+  processID?: unknown;
+  status?: unknown;
+  phase?: unknown;
+  created?: unknown;
+  started?: unknown;
+  finished?: unknown;
+  updated?: unknown;
+  progress?: unknown;
+  totalFeatures?: unknown;
+  processedFeatures?: unknown;
+  succeededFeatures?: unknown;
+  failedFeatures?: unknown;
+  processedBatches?: unknown;
+  succeededBatches?: unknown;
+  failedBatches?: unknown;
+  lastError?: unknown;
 };
 
 function inferProfileFromToken(value: unknown): ImportProfile | null {
@@ -134,7 +159,8 @@ function errorMessage(body: unknown, status: number) {
 export async function startImport(file: File, profile: ImportProfile): Promise<ImportResult> {
   const form = new FormData();
   form.append('file', file);
-  const response = await fetch(`${importApiBaseUrl}/imports?profile=${encodeURIComponent(profile)}`, {
+  const processId = profile === 'fkb_bane' ? 'import-fkb-bane' : 'import-bygning';
+  const response = await fetch(`${gcapiApiBaseUrl}/processes/${processId}/execution`, {
     method: 'POST',
     body: form
   });
@@ -143,14 +169,62 @@ export async function startImport(file: File, profile: ImportProfile): Promise<I
   if (!response.ok) {
     throw new Error(errorMessage(body, response.status));
   }
-  return body as ImportResult;
+  const payload = body as JobStatusResponse;
+  return {
+    import_id: typeof payload.jobID === 'string' ? payload.jobID : '',
+    status: payload.status === 'running' ? 'running' : 'accepted',
+    location: response.headers.get('Location')
+  };
+}
+
+function integerOrZero(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function integerOrNull(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function stringOrNull(value: unknown) {
+  return typeof value === 'string' && value ? value : null;
+}
+
+function mapJobStatus(body: JobStatusResponse): ImportRun {
+  const startedAt = stringOrNull(body.started) ?? stringOrNull(body.created) ?? new Date(0).toISOString();
+  const updatedAt = stringOrNull(body.updated) ?? startedAt;
+  const completedAt = stringOrNull(body.finished);
+  const lastError =
+    typeof body.lastError === 'object' && body.lastError !== null
+      ? (body.lastError as ImportRun['last_error'])
+      : null;
+
+  return {
+    id: typeof body.jobID === 'string' ? body.jobID : '',
+    process_id: stringOrNull(body.processID),
+    status: body.status === 'accepted' || body.status === 'running' || body.status === 'successful' || body.status === 'failed'
+      ? body.status
+      : 'running',
+    phase: stringOrNull(body.phase),
+    started_at: startedAt,
+    completed_at: completedAt,
+    last_event_at: updatedAt,
+    total_features: integerOrNull(body.totalFeatures),
+    processed_features: integerOrZero(body.processedFeatures),
+    succeeded_features: integerOrZero(body.succeededFeatures),
+    failed_features: integerOrZero(body.failedFeatures),
+    processed_batches: integerOrZero(body.processedBatches),
+    succeeded_batches: integerOrZero(body.succeededBatches),
+    failed_batches: integerOrZero(body.failedBatches),
+    last_error: lastError,
+    progress: integerOrNull(body.progress)
+  };
 }
 
 export async function getImportRun(importId: string): Promise<ImportRun> {
-  const response = await fetch(`${importApiBaseUrl}/imports/${encodeURIComponent(importId)}`);
+  const response = await fetch(`${gcapiApiBaseUrl}/jobs/${encodeURIComponent(importId)}`);
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     throw new Error(errorMessage(body, response.status));
   }
-  return body as ImportRun;
+  return mapJobStatus(body as JobStatusResponse);
 }

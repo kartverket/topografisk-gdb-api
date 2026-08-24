@@ -58,7 +58,7 @@ export function ImportView() {
         const run = await getImportRun(importId);
         if (cancelled) return;
         setImportRun(run);
-        if (run.status === 'running') {
+        if (run.status === 'accepted' || run.status === 'running') {
           timer = window.setTimeout(poll, 1000);
         }
       } catch (pollError) {
@@ -119,9 +119,9 @@ export function ImportView() {
   }
 
   const progressPercent = progressValue(importRun);
-  const isActive = isUploading || importRun?.status === 'running';
+  const isActive = isUploading || importRun?.status === 'accepted' || importRun?.status === 'running';
   const currentPhase = importRun?.phase ?? 'accepted';
-  const currentStatus = importRun?.status ?? 'running';
+  const currentStatus = importRun?.status ?? 'accepted';
 
   return (
     <Card className="mx-auto w-full max-w-xl">
@@ -297,6 +297,9 @@ function progressValue(importRun: ImportRun | null): number | null {
   if (!importRun) {
     return null;
   }
+  if (importRun.progress !== null) {
+    return importRun.progress;
+  }
   if (importRun.total_features === null || importRun.total_features <= 0) {
     return null;
   }
@@ -323,7 +326,7 @@ function statusTitle(importRun: ImportRun | null, result: ImportResult): string 
   if (!importRun) {
     return `Import ${result.import_id} er mottatt`;
   }
-  if (importRun.status === 'completed') {
+  if (importRun.status === 'successful') {
     return `Importerte ${importRun.succeeded_features} objekt${importRun.succeeded_features === 1 ? '' : 'er'}`;
   }
   if (importRun.status === 'failed') {
@@ -414,7 +417,7 @@ function phaseLabel(phase: string | null): string {
 
 function phaseSteps(
   phase: string | null,
-  status: ImportRun['status'] | 'running'
+  status: ImportRun['status'] | 'accepted'
 ): Array<{ label: string; variant: 'default' | 'secondary' | 'outline' | 'destructive' }> {
   const current = phase ?? 'accepted';
   const currentIndex = ['accepted', 'parsing', 'importing', 'completed'].indexOf(current);
@@ -430,7 +433,7 @@ function phaseSteps(
     if (step.phase === current) {
       return { label: step.label, variant: 'default' as const };
     }
-    if (step.phase === 'completed' && status === 'completed') {
+    if (step.phase === 'completed' && status === 'successful') {
       return { label: step.label, variant: 'default' as const };
     }
     const stepIndex = ['accepted', 'parsing', 'importing', 'completed'].indexOf(step.phase);

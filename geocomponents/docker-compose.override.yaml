@@ -72,19 +72,41 @@ services:
       redis:
         condition: service_healthy
 
-  gcmapview:
-    build: ../gcmapview
+  gcapi:
+    build: ../gcapi
     environment:
-      GEOCOMPONENTS_API_URL: http://localhost:8000
-      GCJOBS_API_URL: http://localhost:8003
-    read_only: true
+      GCAPI_PUBLIC_URL: http://localhost:8004
+      GCAPI_GEOCOMPONENTS_URL: http://api:8000
+      GCAPI_GCJOBS_URL: http://gcjobs:8000
     ports:
-      - "8080:80"
+      - "8004:8000"
+    volumes:
+      - ../gcapi/src:/app/src:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"
+      interval: 3s
+      timeout: 3s
+      retries: 20
     depends_on:
       api:
         condition: service_healthy
       gcjobs:
-        condition: service_started
+        condition: service_healthy
+
+  gcmapview:
+    build: ../gcmapview
+    environment:
+      GCAPI_API_URL: http://localhost:8004
+    read_only: true
+    ports:
+      - "8080:80"
+    depends_on:
+      gcapi:
+        condition: service_healthy
 
   gccore-migrate:
     build: ../gccore

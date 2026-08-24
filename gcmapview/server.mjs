@@ -20,8 +20,7 @@ function requireEnv(name) {
 
 const runtimeConfigSource = `window.__GCMAPVIEW_CONFIG__ = ${JSON.stringify(
   {
-    geocomponentsApiUrl: requireEnv('GEOCOMPONENTS_API_URL'),
-    gcjobsApiUrl: requireEnv('GCJOBS_API_URL')
+    gcapiApiUrl: requireEnv('GCAPI_API_URL')
   },
   null,
   2
