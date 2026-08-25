@@ -9,10 +9,16 @@ from gcjobs import config
 app = typer.Typer(add_completion=False, help="gcjobs service commands.")
 
 
+def _escape_alembic_config_value(value: str) -> str:
+    return value.replace("%", "%%")
+
+
 def alembic_config() -> Config:
     alembic_cfg = Config()
     alembic_cfg.set_main_option("script_location", str(config.alembic_dir()))
-    alembic_cfg.set_main_option("sqlalchemy.url", config.sqlalchemy_url())
+    alembic_cfg.set_main_option(
+        "sqlalchemy.url", _escape_alembic_config_value(config.sqlalchemy_url())
+    )
     alembic_cfg.set_main_option("version_table_schema", config.DB_SCHEMA)
     return alembic_cfg
 
