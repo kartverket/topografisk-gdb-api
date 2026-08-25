@@ -16,7 +16,7 @@ from geocomponents.api.pygeoapi_provider import (
 from geocomponents.descriptions.loader import load_resolved_datasets
 from geocomponents.descriptions.models import ResolvedField
 
-DESCRIPTIONS = Path(__file__).resolve().parents[1] / "descriptions"
+DESCRIPTIONS = Path(__file__).resolve().parents[2] / "descriptions"
 PUBLIC_URL = "http://example.org/datasets/cadastre/ogc_api"
 
 

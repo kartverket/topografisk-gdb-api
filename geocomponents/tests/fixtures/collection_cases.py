@@ -11,7 +11,7 @@ from pathlib import Path
 from geocomponents.descriptions.loader import load_resolved_datasets
 from geocomponents.descriptions.models import ResolvedCollection, ResolvedDataset
 
-DESCRIPTIONS_DIR = Path(__file__).resolve().parents[2] / "descriptions"
+DESCRIPTIONS_DIR = Path(__file__).resolve().parents[3] / "descriptions"
 DATASETS: list[ResolvedDataset] = load_resolved_datasets(DESCRIPTIONS_DIR)
 
 

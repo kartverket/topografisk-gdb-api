@@ -245,7 +245,7 @@ collections:
 
 ### A working example
 
-The [`descriptions/`](descriptions/) folder is a complete, runnable example:
+The [shared descriptions folder](../descriptions/) is a complete, runnable example:
 `cadastre.yaml` (a `parcels` collection using a code list and a shared type, a
 `buildings` collection with a relationship, and a read-only `blocks` topology
 collection), `hydro.yaml`, `bane.yaml`, `bygning.yaml`, and a shared

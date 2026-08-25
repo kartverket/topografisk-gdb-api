@@ -7,6 +7,8 @@ result through ``conninfo_to_dict`` to assert on the parsed keywords.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from psycopg.conninfo import conninfo_to_dict
 
@@ -77,3 +79,18 @@ def test_ssl_keys_included_only_when_set(clean_env):
 def test_raises_when_unconfigured(clean_env):
     with pytest.raises(RuntimeError, match="DB_HOST"):
         config.database_dsn()
+
+
+def test_descriptions_dir_defaults_to_shared_repo_folder(clean_env):
+    clean_env.delenv("GEOCOMPONENTS_DESCRIPTIONS", raising=False)
+
+    assert (
+        config.descriptions_dir()
+        == Path(__file__).resolve().parents[2] / "descriptions"
+    )
+
+
+def test_descriptions_dir_honors_env_override(clean_env):
+    clean_env.setenv("GEOCOMPONENTS_DESCRIPTIONS", "/opt/custom-descriptions")
+
+    assert config.descriptions_dir() == Path("/opt/custom-descriptions")

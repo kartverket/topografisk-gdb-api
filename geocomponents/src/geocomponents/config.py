@@ -20,6 +20,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
 # DB_* var -> libpq keyword. Included in the DSN only when the var is set.
 _DB_PARTS = (
     ("DB_HOST", "host"),
@@ -52,7 +54,14 @@ def database_dsn() -> str:
 
 
 def descriptions_dir() -> Path:
-    return Path(os.environ.get("GEOCOMPONENTS_DESCRIPTIONS", "descriptions"))
+    if configured := os.environ.get("GEOCOMPONENTS_DESCRIPTIONS"):
+        return Path(configured)
+
+    shared_repo_descriptions = _REPO_ROOT / "descriptions"
+    if shared_repo_descriptions.exists():
+        return shared_repo_descriptions
+
+    return Path("descriptions")
 
 
 def public_base_url() -> str:

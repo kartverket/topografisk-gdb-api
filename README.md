@@ -13,6 +13,8 @@ System overview (Mermaid): [`ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Repository layout
 
+- [`descriptions/`](descriptions/) — shared dataset YAML declarations used by
+  geocomponents and available for reuse by sibling projects.
 - [`geocomponents/`](geocomponents/) — the engine. Start with its
   [README](geocomponents/README.md) for describing datasets and running
   locally; see [DEPLOY.md](geocomponents/DEPLOY.md) for deployment.

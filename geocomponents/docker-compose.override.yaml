@@ -17,7 +17,7 @@ services:
     volumes:
       - ./src:/app/src:ro
       - type: bind
-        source: ${DESCRIPTIONS_DIR:-./descriptions}
+        source: ${DESCRIPTIONS_DIR:-../descriptions}
         target: /app/descriptions
         read_only: true
     depends_on:
@@ -37,7 +37,7 @@ services:
     volumes:
       - ./src:/app/src:ro
       - type: bind
-        source: ${DESCRIPTIONS_DIR:-./descriptions}
+        source: ${DESCRIPTIONS_DIR:-../descriptions}
         target: /app/descriptions
         read_only: true
     ports:
