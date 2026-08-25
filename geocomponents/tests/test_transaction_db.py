@@ -31,7 +31,7 @@ def test_transaction_class_42_deployment_error_propagates_as_psycopg_error(conn)
 
     with conn.cursor() as cur:
         cur.execute(
-            "alter function cadastre._parcels_create(jsonb) rename to _parcels_create_broken"
+            f"alter function cadastre._parcels_create(jsonb) rename to {broken_name}"
         )
         try:
             with pytest.raises(psycopg.Error) as excinfo:

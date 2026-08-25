@@ -64,9 +64,9 @@ def db(datasets):
     return dsn
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def conn(db):
-    """A fresh autocommit connection for a test (closed afterwards)."""
+    """A shared autocommit connection for one test module."""
     connection = psycopg.connect(db, autocommit=True)
     try:
         yield connection
@@ -76,7 +76,11 @@ def conn(db):
 
 @pytest.fixture
 def conn_non_autocommit(db):
-    """A fresh non-autocommit connection for tests that probe savepoint scope."""
+    """A fresh non-autocommit connection per test.
+
+    Transaction state must not leak between these tests, and two of them exist
+    specifically to verify what a failed transaction leaves behind.
+    """
     connection = psycopg.connect(db, autocommit=False)
     try:
         yield connection

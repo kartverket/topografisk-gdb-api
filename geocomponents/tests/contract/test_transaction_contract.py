@@ -13,25 +13,14 @@ from uuid import UUID, uuid4
 
 import orjson
 import psycopg
-
-_GEOM = {
-    "Point": {"type": "Point", "coordinates": [10, 55]},
-    "MultiPoint": {"type": "MultiPoint", "coordinates": [[10, 55]]},
-    "LineString": {"type": "LineString", "coordinates": [[10, 55], [11, 56]]},
-    "MultiLineString": {
-        "type": "MultiLineString",
-        "coordinates": [[[10, 55], [11, 56]]],
-    },
-    "Polygon": {
-        "type": "Polygon",
-        "coordinates": [[[10, 55], [10, 56], [11, 56], [11, 55], [10, 55]]],
-    },
-    "MultiPolygon": {
-        "type": "MultiPolygon",
-        "coordinates": [[[[10, 55], [10, 56], [11, 56], [11, 55], [10, 55]]]],
-    },
-}
-_DEFAULT_GEOMETRY = object()
+import pytest
+from fixtures.collection_cases import COLLECTION_CASES, CollectionCase
+from fixtures.features import _sample_feature
+from fixtures.transaction_cases import (
+    MALFORMED_DOCUMENT_CASES,
+    REJECTION_CASES,
+    RejectionCase,
+)
 
 
 @dataclass(frozen=True)
@@ -44,51 +33,6 @@ class _MixedParcelSetup:
     replace_id: UUID
     delete_id: UUID
     rejected_id: UUID
-
-
-def _value(sql_type, variant=0):
-    s = sql_type.lower()
-    if s == "integer":
-        return 1 + variant
-    if s in ("double precision", "real", "numeric"):
-        return 1.0 + variant
-    if s == "boolean":
-        return variant == 0
-    if s in ("timestamptz", "timestamp with time zone", "timestamp"):
-        return "2026-01-01T00:00:00Z" if variant == 0 else "2026-02-01T00:00:00Z"
-    if s == "date":
-        return "2026-01-01" if variant == 0 else "2026-02-01"
-    return "x" if variant == 0 else "y"
-
-
-def _field_value(f, variant=0):
-    if f.codelist_values:
-        return f.codelist_values[variant % len(f.codelist_values)]
-    if f.sql_type == "jsonb":
-        return {sf.name: _field_value(sf, variant) for sf in f.sub_fields}
-    return _value(f.sql_type, variant)
-
-
-def _sample_feature(coll, *, geometry=_DEFAULT_GEOMETRY, properties=None, fid=None):
-    props = {
-        f.name: _field_value(f)
-        for f in coll.fields
-        if f.required and not f.auto_increment
-    }
-    if any(f.name == "source" for f in coll.fields):
-        props["source"] = "orig"
-    if properties:
-        props.update(properties)
-    feature = {
-        "type": "Feature",
-        "properties": props,
-    }
-    if fid is not None:
-        feature["id"] = str(fid)
-    feature["geometry"] = (
-        _GEOM[coll.geometry_type] if geometry is _DEFAULT_GEOMETRY else geometry
-    )
-    return feature
 
 
 def _malformed_geometry(coll):
@@ -201,6 +145,63 @@ def _assert_rejected_item(item, expected):
     assert item["id"] == (str(expected["id"]) if expected["id"] is not None else None)
     assert item["status"] == "rejected"
     assert item["sqlstate"] == expected["sqlstate"]
+    assert isinstance(item["reason"], str)
+    assert item["reason"]
+
+
+def _assert_document_level_rejection(report):
+    assert set(report) == {
+        "committed",
+        "phase",
+        "reason",
+        "items",
+        "structure",
+        "geometry",
+    }
+    assert report["committed"] is False
+    assert report["phase"] == "items"
+    assert report["items"] == []
+    assert report["structure"] == []
+    assert report["geometry"] == []
+    assert isinstance(report["reason"], str)
+    assert report["reason"]
+
+
+def _successful_insert_items(coll, count):
+    inserted_ids = [uuid4() for _ in range(count)]
+    items = [
+        {
+            "action": "insert",
+            "collection": coll.name,
+            "feature": _sample_feature(
+                coll,
+                fid=fid,
+                properties={
+                    "label": f"will-rollback-{index}",
+                    "area_m2": 140.0 + index,
+                },
+            ),
+        }
+        for index, fid in enumerate(inserted_ids, start=1)
+    ]
+    return inserted_ids, items
+
+
+def _assert_rejection_case_item(item, case: RejectionCase):
+    expected = case.expected
+    _assert_item_keys(item)
+    assert item["index"] == expected.index
+    assert item["action"] == expected.action
+    assert item["collection"] == expected.collection
+    if expected.id_is_null:
+        assert item["id"] is None
+    else:
+        expected_id = case.failing_item.get("id")
+        if expected_id is None:
+            expected_id = case.failing_item["feature"]["id"]
+        assert item["id"] == expected_id
+    assert item["status"] == "rejected"
+    assert item["sqlstate"] == expected.sqlstate
     assert isinstance(item["reason"], str)
     assert item["reason"]
 
@@ -604,41 +605,45 @@ def test_transaction_empty_document_commits_with_empty_items_and_no_state_change
         _remove_feature(cur, "cadastre", coll, witness_id)
 
 
-def test_transaction_reachability_insert_works_for_every_collection(datasets, conn):
+@pytest.mark.parametrize(
+    "case", COLLECTION_CASES, ids=[case.id for case in COLLECTION_CASES]
+)
+def test_transaction_reachability_insert_works_for_every_collection(
+    case: CollectionCase, conn
+):
     with conn.cursor() as cur:
-        for dataset in datasets:
-            for coll in dataset.collections:
-                fid = uuid4()
-                report = _transaction(
-                    cur,
-                    dataset.name,
+        coll = case.collection
+        fid = uuid4()
+        report = _transaction(
+            cur,
+            case.dataset,
+            {
+                "semantic": "atomic",
+                "transaction": [
                     {
-                        "semantic": "atomic",
-                        "transaction": [
-                            {
-                                "action": "insert",
-                                "collection": coll.name,
-                                "feature": _sample_feature(coll, fid=fid),
-                            }
-                        ],
-                    },
-                )
-
-                _assert_report_shell(report, committed=True, item_count=1)
-                _assert_committed_item(
-                    report["items"][0],
-                    {
-                        "index": 0,
                         "action": "insert",
                         "collection": coll.name,
-                        "id": fid,
-                        "status": "created",
-                    },
-                )
-                got = _item(cur, dataset.name, coll.name, fid)
-                assert got is not None
-                assert str(got["id"]) == str(fid)
-                _remove_feature(cur, dataset.name, coll, fid)
+                        "feature": _sample_feature(coll, fid=fid),
+                    }
+                ],
+            },
+        )
+
+        _assert_report_shell(report, committed=True, item_count=1)
+        _assert_committed_item(
+            report["items"][0],
+            {
+                "index": 0,
+                "action": "insert",
+                "collection": coll.name,
+                "id": fid,
+                "status": "created",
+            },
+        )
+        got = _item(cur, case.dataset, coll.name, fid)
+        assert got is not None
+        assert str(got["id"]) == str(fid)
+        _remove_feature(cur, case.dataset, coll, fid)
 
 
 def test_transaction_topology_insert_succeeds_while_feature_create_is_refused(
@@ -696,151 +701,40 @@ def test_transaction_topology_insert_succeeds_while_feature_create_is_refused(
             )
 
 
-def test_transaction_data_rejection_reports_sqlstate_expected(datasets, conn):
-    coll = _collection(datasets, "cadastre", "parcels")
-    bad_id = uuid4()
-
-    with conn.cursor() as cur:
-        report = _transaction(
-            cur,
-            "cadastre",
-            {
-                "semantic": "atomic",
-                "transaction": [
-                    {
-                        "action": "insert",
-                        "collection": "parcels",
-                        "feature": _sample_feature(
-                            coll,
-                            fid=bad_id,
-                            geometry=_malformed_geometry(coll),
-                            properties={"label": "bad-geometry", "area_m2": 130.0},
-                        ),
-                    }
-                ],
-            },
-        )
-
-        _assert_report_shell(report, committed=False, item_count=1)
-        _assert_rejected_item(
-            report["items"][0],
-            {
-                "index": 0,
-                "action": "insert",
-                "collection": "parcels",
-                "id": bad_id,
-                "sqlstate": "XX000",
-            },
-        )
-
-
-def test_transaction_unknown_action_keeps_null_id_key_on_rejected_item(datasets, conn):
-    _collection(datasets, "cadastre", "parcels")
-
-    with conn.cursor() as cur:
-        report = _transaction(
-            cur,
-            "cadastre",
-            {
-                "semantic": "atomic",
-                "transaction": [{"action": "bogus", "collection": "parcels"}],
-            },
-        )
-
-        _assert_report_shell(report, committed=False, item_count=1)
-        _assert_rejected_item(
-            report["items"][0],
-            {
-                "index": 0,
-                "action": "bogus",
-                "collection": "parcels",
-                "id": None,
-                "sqlstate": "P0001",
-            },
-        )
-        assert "id" in report["items"][0]
-        assert report["items"][0]["id"] is None
-
-
-def test_transaction_missing_action_after_success_reports_only_rejected_item(
-    datasets, conn
+@pytest.mark.parametrize(
+    "case", REJECTION_CASES, ids=[case.id for case in REJECTION_CASES]
+)
+def test_transaction_rejected_item_after_success_reports_only_the_failure(
+    datasets, conn, case: RejectionCase
 ):
     coll = _collection(datasets, "cadastre", "parcels")
-    inserted_id = uuid4()
 
     with conn.cursor() as cur:
+        inserted_ids, inserted_items = _successful_insert_items(
+            coll, case.preceding_ok_items
+        )
         report = _transaction(
             cur,
             "cadastre",
             {
                 "semantic": "atomic",
-                "transaction": [
-                    {
-                        "action": "insert",
-                        "collection": "parcels",
-                        "feature": _sample_feature(
-                            coll,
-                            fid=inserted_id,
-                            properties={"label": "will-rollback", "area_m2": 140.0},
-                        ),
-                    },
-                    {"collection": "parcels"},
-                ],
+                "transaction": [*inserted_items, case.failing_item],
             },
         )
 
         _assert_report_shell(report, committed=False, item_count=1)
-        _assert_rejected_item(
-            report["items"][0],
-            {
-                "index": 1,
-                "action": None,
-                "collection": "parcels",
-                "id": None,
-                "sqlstate": "P0001",
-            },
-        )
-        assert _item(cur, "cadastre", "parcels", inserted_id) is None
+        _assert_rejection_case_item(report["items"][0], case)
+        for inserted_id in inserted_ids:
+            assert _item(cur, "cadastre", "parcels", inserted_id) is None
 
 
-def test_transaction_missing_semantic_returns_document_level_reason(conn):
+@pytest.mark.parametrize(
+    "case",
+    MALFORMED_DOCUMENT_CASES,
+    ids=[case.id for case in MALFORMED_DOCUMENT_CASES],
+)
+def test_transaction_malformed_document_is_rejected_before_any_item(conn, case):
     with conn.cursor() as cur:
-        report = _transaction(cur, "cadastre", {"transaction": []})
+        report = _transaction(cur, "cadastre", case.document)
 
-        assert set(report) == {
-            "committed",
-            "phase",
-            "reason",
-            "items",
-            "structure",
-            "geometry",
-        }
-        assert report["committed"] is False
-        assert report["phase"] == "items"
-        assert report["items"] == []
-        assert report["structure"] == []
-        assert report["geometry"] == []
-        assert isinstance(report["reason"], str)
-        assert report["reason"]
-
-
-def test_transaction_wrong_semantic_returns_document_level_reason(conn):
-    with conn.cursor() as cur:
-        report = _transaction(cur, "cadastre", {"semantic": "batch", "transaction": []})
-
-        assert report["committed"] is False
-        assert report["items"] == []
-        assert isinstance(report["reason"], str)
-        assert report["reason"]
-
-
-def test_transaction_non_array_transaction_returns_document_level_reason(conn):
-    with conn.cursor() as cur:
-        report = _transaction(
-            cur, "cadastre", {"semantic": "atomic", "transaction": {}}
-        )
-
-        assert report["committed"] is False
-        assert report["items"] == []
-        assert isinstance(report["reason"], str)
-        assert report["reason"]
+        _assert_document_level_rejection(report)

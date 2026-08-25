@@ -16,6 +16,13 @@ from http import HTTPStatus
 
 import orjson
 import pytest
+from fixtures.collection_cases import (
+    COLLECTION_CASES,
+    DATASETS,
+    SIMPLE_CASES,
+    TOPOLOGY_CASES,
+    CollectionCase,
+)
 from starlette.testclient import TestClient
 
 from geocomponents.api.pygeoapi_provider import PygeoapiProvider
@@ -49,9 +56,14 @@ def _api(dataset_name: str) -> str:
 # ===========================================================================
 # Generic (derived from the descriptions)
 # ===========================================================================
-def test_gateway_cors_applies_to_mounted_dataset_routes(offline_client, datasets):
+@pytest.mark.parametrize(
+    "dataset",
+    DATASETS,
+    ids=[dataset.name.replace("_", "-") for dataset in DATASETS],
+)
+def test_gateway_cors_applies_to_mounted_dataset_routes(offline_client, dataset):
     response = offline_client.get(
-        f"{_api(datasets[0].name)}/?f=json",
+        f"{_api(dataset.name)}/?f=json",
         headers={"origin": "https://example.no"},
     )
 
@@ -59,88 +71,108 @@ def test_gateway_cors_applies_to_mounted_dataset_routes(offline_client, datasets
     assert response.headers["access-control-allow-origin"] == "*"
 
 
-def test_landing_and_collections_listed_for_every_dataset(client, datasets):
-    for d in datasets:
-        api = _api(d.name)
-        assert client.get(f"{api}/?f=json").status_code == HTTPStatus.OK
-        listed = client.get(f"{api}/collections?f=json").json()["collections"]
-        assert {c["id"] for c in listed} == {c.name for c in d.collections}
+@pytest.mark.parametrize(
+    "dataset",
+    DATASETS,
+    ids=[dataset.name.replace("_", "-") for dataset in DATASETS],
+)
+def test_landing_and_collections_listed_for_every_dataset(client, dataset):
+    api = _api(dataset.name)
+    assert client.get(f"{api}/?f=json").status_code == HTTPStatus.OK
+    listed = client.get(f"{api}/collections?f=json").json()["collections"]
+    assert {c["id"] for c in listed} == {c.name for c in dataset.collections}
 
 
-def test_html_landing_is_isolated_per_dataset(datasets):
+@pytest.mark.parametrize(
+    "dataset",
+    DATASETS,
+    ids=[dataset.name.replace("_", "-") for dataset in DATASETS],
+)
+def test_html_landing_is_isolated_per_dataset(dataset):
     # Regression: pygeoapi memoizes the translated config in a process-global
     # cache keyed only by locale, which leaked the first dataset's HTML chrome
     # (links/title/static) into every dataset's page. Landing-page HTML needs no
     # DB, so this runs without one. (Vacuous with a single dataset.)
     client = TestClient(
-        build_gateway(datasets, PygeoapiProvider(dsn="host=unused"), base_url=BASE_URL)
+        build_gateway(DATASETS, PygeoapiProvider(dsn="host=unused"), base_url=BASE_URL)
     )
-    for d in datasets:
-        html = client.get(f"{_api(d.name)}/?f=html").text
-        assert f"/datasets/{d.name}/ogc_api" in html
-        for other in datasets:
-            if other.name != d.name:
-                assert f"/datasets/{other.name}/ogc_api" not in html
+    html = client.get(f"{_api(dataset.name)}/?f=html").text
+    assert f"/datasets/{dataset.name}/ogc_api" in html
+    for other in DATASETS:
+        if other.name != dataset.name:
+            assert f"/datasets/{other.name}/ogc_api" not in html
 
 
-def test_items_return_featurecollection_with_links(client, datasets):
-    for d in datasets:
-        for coll in d.collections:
-            r = client.get(f"{_api(d.name)}/collections/{coll.name}/items?f=json")
-            assert r.status_code == HTTPStatus.OK
-            fc = r.json()
-            assert fc["type"] == "FeatureCollection"
-            assert isinstance(fc["links"], list) and fc["links"]  # pygeoapi envelope
+@pytest.mark.parametrize(
+    "case", COLLECTION_CASES, ids=[case.id for case in COLLECTION_CASES]
+)
+def test_items_return_featurecollection_with_links(client, case: CollectionCase):
+    r = client.get(
+        f"{_api(case.dataset)}/collections/{case.collection.name}/items?f=json"
+    )
+    assert r.status_code == HTTPStatus.OK
+    fc = r.json()
+    assert fc["type"] == "FeatureCollection"
+    assert isinstance(fc["links"], list) and fc["links"]  # pygeoapi envelope
 
 
-def test_capability_matches_feature_model(client, datasets):
+@pytest.mark.parametrize("case", SIMPLE_CASES, ids=[case.id for case in SIMPLE_CASES])
+def test_simple_collection_capability_matches_feature_model(
+    client, case: CollectionCase
+):
+    items = f"{_api(case.dataset)}/collections/{case.collection.name}/items"
+    opts = client.options(items).headers.get("Allow", "")
+    assert "POST" in opts
+
+
+@pytest.mark.parametrize(
+    "case", TOPOLOGY_CASES, ids=[case.id for case in TOPOLOGY_CASES]
+)
+def test_topology_collection_capability_matches_feature_model(
+    client, case: CollectionCase
+):
     """Simple collections are writable; topology collections reject writes (405)."""
     empty = orjson.dumps(
         {"type": "Feature", "geometry": _GEOM_MULTIPOLYGON, "properties": {}}
     ).decode()
-    for d in datasets:
-        for coll in d.collections:
-            items = f"{_api(d.name)}/collections/{coll.name}/items"
-            opts = client.options(items).headers.get("Allow", "")
-            if coll.supports_crud:
-                assert "POST" in opts
-            else:
-                assert "POST" not in opts
-                # Every write verb is rejected with 405.
-                assert (
-                    client.post(
-                        items,
-                        content=empty,
-                        headers={"content-type": "application/geo+json"},
-                    ).status_code
-                    == HTTPStatus.METHOD_NOT_ALLOWED
-                )
-                assert (
-                    client.put(
-                        f"{items}/x",
-                        content=empty,
-                        headers={"content-type": "application/geo+json"},
-                    ).status_code
-                    == HTTPStatus.METHOD_NOT_ALLOWED
-                )
-                assert (
-                    client.patch(
-                        f"{items}/x",
-                        content=empty,
-                        headers={"content-type": "application/geo+json"},
-                    ).status_code
-                    == HTTPStatus.METHOD_NOT_ALLOWED
-                )
-                assert (
-                    client.delete(f"{items}/x").status_code
-                    == HTTPStatus.METHOD_NOT_ALLOWED
-                )
-                # ...but reads still work.
-                assert client.get(f"{items}?f=json").status_code == HTTPStatus.OK
+    items = f"{_api(case.dataset)}/collections/{case.collection.name}/items"
+    opts = client.options(items).headers.get("Allow", "")
+    assert "POST" not in opts
+    # Every write verb is rejected with 405.
+    assert (
+        client.post(
+            items,
+            content=empty,
+            headers={"content-type": "application/geo+json"},
+        ).status_code
+        == HTTPStatus.METHOD_NOT_ALLOWED
+    )
+    assert (
+        client.put(
+            f"{items}/x",
+            content=empty,
+            headers={"content-type": "application/geo+json"},
+        ).status_code
+        == HTTPStatus.METHOD_NOT_ALLOWED
+    )
+    assert (
+        client.patch(
+            f"{items}/x",
+            content=empty,
+            headers={"content-type": "application/geo+json"},
+        ).status_code
+        == HTTPStatus.METHOD_NOT_ALLOWED
+    )
+    assert client.delete(f"{items}/x").status_code == HTTPStatus.METHOD_NOT_ALLOWED
+    # ...but reads still work.
+    assert client.get(f"{items}?f=json").status_code == HTTPStatus.OK
 
 
+@pytest.mark.parametrize(
+    "case", TOPOLOGY_CASES, ids=[case.id for case in TOPOLOGY_CASES]
+)
 def test_405_on_non_editable_collection_advertises_all_allowed_methods(
-    client, datasets
+    client, case: CollectionCase
 ):
     """RFC 9110 §15.5.6: a 405 must list every method the resource
     supports in Allow. Both /items and /items/{id} support GET, HEAD, OPTIONS
@@ -148,49 +180,49 @@ def test_405_on_non_editable_collection_advertises_all_allowed_methods(
     empty = orjson.dumps(
         {"type": "Feature", "geometry": _GEOM_MULTIPOLYGON, "properties": {}}
     ).decode()
-    for d in datasets:
-        for coll in d.collections:
-            if coll.supports_crud:
-                continue  # editable collections don't produce the 405 we care about
-            items = f"{_api(d.name)}/collections/{coll.name}/items"
-            expected = {"GET", "HEAD", "OPTIONS"}
-            # /items rejects POST for non-editable
-            r = client.post(
-                items,
-                content=empty,
-                headers={"content-type": "application/geo+json"},
-            )
-            assert r.status_code == HTTPStatus.METHOD_NOT_ALLOWED
-            assert {
-                v.strip() for v in r.headers.get("Allow", "").split(",")
-            } == expected
-            # /items/{id} rejects PUT for non-editable
-            r = client.put(
-                f"{items}/x",
-                content=empty,
-                headers={"content-type": "application/geo+json"},
-            )
-            assert r.status_code == HTTPStatus.METHOD_NOT_ALLOWED
-            assert {
-                v.strip() for v in r.headers.get("Allow", "").split(",")
-            } == expected
+    items = f"{_api(case.dataset)}/collections/{case.collection.name}/items"
+    expected = {"GET", "HEAD", "OPTIONS"}
+    # /items rejects POST for non-editable
+    r = client.post(
+        items,
+        content=empty,
+        headers={"content-type": "application/geo+json"},
+    )
+    assert r.status_code == HTTPStatus.METHOD_NOT_ALLOWED
+    assert {v.strip() for v in r.headers.get("Allow", "").split(",")} == expected
+    # /items/{id} rejects PUT for non-editable
+    r = client.put(
+        f"{items}/x",
+        content=empty,
+        headers={"content-type": "application/geo+json"},
+    )
+    assert r.status_code == HTTPStatus.METHOD_NOT_ALLOWED
+    assert {v.strip() for v in r.headers.get("Allow", "").split(",")} == expected
 
 
-def test_declared_processes_are_exactly_what_the_dataset_lists(client, datasets):
-    for d in datasets:
-        listed = client.get(f"{_api(d.name)}/processes?f=json").json()["processes"]
-        assert {p["id"] for p in listed} == set(d.processes)
+@pytest.mark.parametrize(
+    "dataset",
+    DATASETS,
+    ids=[dataset.name.replace("_", "-") for dataset in DATASETS],
+)
+def test_declared_processes_are_exactly_what_the_dataset_lists(client, dataset):
+    listed = client.get(f"{_api(dataset.name)}/processes?f=json").json()["processes"]
+    assert {p["id"] for p in listed} == set(dataset.processes)
 
 
 # ===========================================================================
 # OpenAPI / interface honesty (no DB): the advertised surface matches reality
 # ===========================================================================
-def test_openapi_omits_unimplemented_job_management(offline_client, datasets):
+@pytest.mark.parametrize(
+    "dataset",
+    DATASETS,
+    ids=[dataset.name.replace("_", "-") for dataset in DATASETS],
+)
+def test_openapi_omits_unimplemented_job_management(offline_client, dataset):
     # Processes run synchronously with no job store; the async /jobs paths that
     # pygeoapi would advertise are pruned so nothing dangles.
-    for d in datasets:
-        oas = offline_client.get(f"{_api(d.name)}/openapi?f=json").json()
-        assert not any(p.startswith("/jobs") for p in oas["paths"])
+    oas = offline_client.get(f"{_api(dataset.name)}/openapi?f=json").json()
+    assert not any(p.startswith("/jobs") for p in oas["paths"])
 
 
 def test_openapi_post_items_documents_only_a_geojson_create(offline_client):
@@ -219,30 +251,38 @@ def test_openapi_advertises_upsert_only_for_configured_collections(offline_clien
     assert not any(path.endswith("items:upsert") for path in cadastre_oas["paths"])
 
 
-def test_collection_schema_endpoint_describes_the_feature(offline_client, datasets):
-    for d in datasets:
-        for coll in d.collections:
-            r = offline_client.get(f"{_api(d.name)}/collections/{coll.name}/schema")
-            assert r.status_code == HTTPStatus.OK
-            schema = r.json()
-            assert schema["properties"]["type"]["enum"] == ["Feature"]
-            assert schema["properties"]["geometry"]["properties"]["type"]["enum"] == [
-                coll.geometry_type
-            ]
+@pytest.mark.parametrize(
+    "case", COLLECTION_CASES, ids=[case.id for case in COLLECTION_CASES]
+)
+def test_collection_schema_endpoint_describes_the_feature(
+    offline_client, case: CollectionCase
+):
+    r = offline_client.get(
+        f"{_api(case.dataset)}/collections/{case.collection.name}/schema"
+    )
+    assert r.status_code == HTTPStatus.OK
+    schema = r.json()
+    assert schema["properties"]["type"]["enum"] == ["Feature"]
+    assert schema["properties"]["geometry"]["properties"]["type"]["enum"] == [
+        case.collection.geometry_type
+    ]
 
 
-def test_collections_do_not_advertise_the_deferred_queryables(offline_client, datasets):
+@pytest.mark.parametrize(
+    "case", COLLECTION_CASES, ids=[case.id for case in COLLECTION_CASES]
+)
+def test_collections_do_not_advertise_the_deferred_queryables(
+    offline_client, case: CollectionCase
+):
     # queryables belongs with real filtering (deferred to the DB dispatch); the
     # schema link, now routed, stays.
-    for d in datasets:
-        for coll in d.collections:
-            links = offline_client.get(
-                f"{_api(d.name)}/collections/{coll.name}?f=json"
-            ).json()["links"]
-            rels = [ln["rel"] for ln in links]
-            assert not any(r.rstrip("/").endswith("queryables") for r in rels)
-            assert any(r.rstrip("/").endswith("schema") for r in rels)
-            assert "items" in rels
+    links = offline_client.get(
+        f"{_api(case.dataset)}/collections/{case.collection.name}?f=json"
+    ).json()["links"]
+    rels = [ln["rel"] for ln in links]
+    assert not any(r.rstrip("/").endswith("queryables") for r in rels)
+    assert any(r.rstrip("/").endswith("schema") for r in rels)
+    assert "items" in rels
 
 
 def test_cql_filter_is_refused_until_the_db_supports_it(offline_client):
