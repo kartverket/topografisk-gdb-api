@@ -71,8 +71,53 @@ def dispatch_statements() -> list[str]:
     """
 
     s = DISPATCH_SCHEMA
+
+    def _write_dispatch_statement(
+        operation: str,
+        *,
+        args_sql: str,
+        result_type: str,
+        using_sql: str,
+    ) -> str:
+        return f"""\
+create or replace function {s}.feature_{operation}(dataset text, collection text, {args_sql})
+returns {result_type} language plpgsql as $disp$
+declare result {result_type};
+begin
+  perform {s}._assert_direct_write_allowed(dataset, collection);
+  execute format('select %I.%I({using_sql})', dataset, '_' || collection || '_{operation}')
+    into result using {using_sql};
+  return result;
+end;
+$disp$"""
+
+    def _comment_statement(signature: str, text: str) -> str:
+        return f"comment on function {s}.{signature} is $$" + text + "$$"
+
     return [
         f"create schema if not exists {s}",
+        f"""\
+create or replace function {s}._collection_feature_model(dataset text, collection text)
+returns text language plpgsql stable as $disp$
+declare result text;
+begin
+  execute format(
+    'select feature_model from %I.collection_capability where collection = $1',
+    dataset)
+    into result using collection;
+  return result;
+end;
+$disp$""",
+        f"""\
+create or replace function {s}._assert_direct_write_allowed(dataset text, collection text)
+returns void language plpgsql stable as $disp$
+begin
+  if {s}._collection_feature_model(dataset, collection) = 'topology' then
+    raise exception 'collection % does not support direct write operations', collection
+      using errcode = 'P0001';
+  end if;
+end;
+$disp$""",
         f"""\
 create or replace function {s}.feature_items(
     dataset text, collection text,
@@ -96,56 +141,249 @@ begin
   return result;
 end;
 $disp$""",
+        _write_dispatch_statement(
+            "create",
+            args_sql="feature jsonb",
+            result_type="uuid",
+            using_sql="$1",
+        ).replace("using $1", "using feature - 'id'"),
+        _write_dispatch_statement(
+            "replace",
+            args_sql="fid uuid, feature jsonb",
+            result_type="boolean",
+            using_sql="$1, $2",
+        ).replace("using $1, $2", "using fid, feature"),
+        _write_dispatch_statement(
+            "update",
+            args_sql="fid uuid, feature jsonb",
+            result_type="boolean",
+            using_sql="$1, $2",
+        ).replace("using $1, $2", "using fid, feature"),
+        _write_dispatch_statement(
+            "delete",
+            args_sql="fid uuid",
+            result_type="boolean",
+            using_sql="$1",
+        ).replace("using $1", "using fid"),
         f"""\
-create or replace function {s}.feature_create(dataset text, collection text, feature jsonb)
-returns uuid language plpgsql as $disp$
-declare result uuid;
+create or replace function {s}.transaction(dataset text, document jsonb)
+returns jsonb language plpgsql as $disp$
+declare
+    tx_items jsonb := coalesce(document->'transaction', '[]'::jsonb);
+    report_items jsonb := '[]'::jsonb;
+    current_item record;
+    current_action text;
+    current_collection text;
+    current_id text;
+    current_feature jsonb;
+    current_feature_model text;
+    in_item boolean := false;
+    created_id uuid;
+    wrote boolean;
+    report_reason text := null;
 begin
-  execute format('select %I.%I($1)', dataset, '_' || collection || '_create')
-    into result using feature;
-  return result;
+    perform {s}._collection_feature_model(dataset, null);
+
+    begin
+        if coalesce(document->>'semantic', '') <> 'atomic' then
+            raise exception 'unsupported semantic: %', coalesce(document->>'semantic', '<null>')
+                using errcode = 'P0001';
+        end if;
+        if jsonb_typeof(tx_items) <> 'array' then
+            raise exception 'transaction must be an array' using errcode = 'P0001';
+        end if;
+
+        for current_item in
+            select ordinality - 1 as item_index, value as item
+            from jsonb_array_elements(tx_items) with ordinality
+        loop
+            in_item := true;
+            current_action := current_item.item->>'action';
+            current_collection := current_item.item->>'collection';
+            current_feature := current_item.item->'feature';
+            current_id := case
+                when current_action = 'insert' then current_feature->>'id'
+                else current_item.item->>'id'
+            end;
+
+            current_feature_model := {s}._collection_feature_model(dataset, current_collection);
+            if current_feature_model is null then
+                raise exception 'unknown collection: %', current_collection using errcode = 'P0001';
+            end if;
+
+            if current_action = 'insert' then
+                execute format('select %I.%I($1)', dataset, '_' || current_collection || '_create')
+                    into created_id using current_feature;
+                current_id := created_id::text;
+                report_items := report_items || jsonb_build_array(jsonb_build_object(
+                    'index', current_item.item_index,
+                    'action', current_action,
+                    'collection', current_collection,
+                    'id', current_id,
+                    'status', 'created',
+                    'sqlstate', null,
+                    'reason', null));
+            elsif current_action = 'replace' then
+                execute format('select %I.%I($1, $2)', dataset, '_' || current_collection || '_replace')
+                    into wrote using current_id::uuid, current_feature;
+                if not wrote then
+                    raise exception 'feature not found: %', current_id using errcode = 'P0001';
+                end if;
+                report_items := report_items || jsonb_build_array(jsonb_build_object(
+                    'index', current_item.item_index,
+                    'action', current_action,
+                    'collection', current_collection,
+                    'id', current_id,
+                    'status', 'updated',
+                    'sqlstate', null,
+                    'reason', null));
+            elsif current_action = 'update' then
+                execute format('select %I.%I($1, $2)', dataset, '_' || current_collection || '_update')
+                    into wrote using current_id::uuid, current_feature;
+                if not wrote then
+                    raise exception 'feature not found: %', current_id using errcode = 'P0001';
+                end if;
+                report_items := report_items || jsonb_build_array(jsonb_build_object(
+                    'index', current_item.item_index,
+                    'action', current_action,
+                    'collection', current_collection,
+                    'id', current_id,
+                    'status', 'updated',
+                    'sqlstate', null,
+                    'reason', null));
+            elsif current_action = 'delete' then
+                execute format('select %I.%I($1)', dataset, '_' || current_collection || '_delete')
+                    into wrote using current_id::uuid;
+                if not wrote then
+                    raise exception 'feature not found: %', current_id using errcode = 'P0001';
+                end if;
+                report_items := report_items || jsonb_build_array(jsonb_build_object(
+                    'index', current_item.item_index,
+                    'action', current_action,
+                    'collection', current_collection,
+                    'id', current_id,
+                    'status', 'deleted',
+                    'sqlstate', null,
+                    'reason', null));
+            else
+                raise exception 'unknown action: %', coalesce(current_action, '<null>')
+                    using errcode = 'P0001';
+            end if;
+        end loop;
+    exception
+        when syntax_error_or_access_rule_violation then
+            raise;
+        when others then
+            if in_item then
+                report_items := jsonb_build_array(jsonb_build_object(
+                    'index', current_item.item_index,
+                    'action', current_action,
+                    'collection', current_collection,
+                    'id', current_id,
+                    'status', 'rejected',
+                    'sqlstate', sqlstate,
+                    'reason', sqlerrm));
+            else
+                report_items := '[]'::jsonb;
+                report_reason := sqlerrm;
+            end if;
+            return jsonb_build_object(
+                'committed', false,
+                'phase', 'items',
+                'reason', report_reason,
+                'items', report_items,
+                'structure', '[]'::jsonb,
+                'geometry', '[]'::jsonb);
+    end;
+
+    return jsonb_build_object(
+        'committed', true,
+        'phase', 'items',
+        'reason', null,
+        'items', report_items,
+        'structure', '[]'::jsonb,
+        'geometry', '[]'::jsonb);
 end;
 $disp$""",
-        f"""\
-create or replace function {s}.feature_replace(dataset text, collection text, fid uuid, feature jsonb)
-returns boolean language plpgsql as $disp$
-declare result boolean;
-begin
-  execute format('select %I.%I($1, $2)', dataset, '_' || collection || '_replace')
-    into result using fid, feature;
-  return result;
-end;
-$disp$""",
-        f"""\
-create or replace function {s}.feature_update(dataset text, collection text, fid uuid, feature jsonb)
-returns boolean language plpgsql as $disp$
-declare result boolean;
-begin
-  execute format('select %I.%I($1, $2)', dataset, '_' || collection || '_update')
-    into result using fid, feature;
-  return result;
-end;
-$disp$""",
-        f"""\
-create or replace function {s}.feature_delete(dataset text, collection text, fid uuid)
-returns boolean language plpgsql as $disp$
-declare result boolean;
-begin
-  execute format('select %I.%I($1)', dataset, '_' || collection || '_delete')
-    into result using fid;
-  return result;
-end;
-$disp$""",
-        f"""\
-create or replace function {s}.feature_upsert(dataset text, collection text, feature jsonb)
-returns uuid language plpgsql as $disp$
-declare result uuid;
-begin
-  execute format('select %I.%I($1)', dataset, '_' || collection || '_upsert')
-    into result using feature;
-  return result;
-end;
-$disp$""",
+        _write_dispatch_statement(
+            "upsert",
+            args_sql="feature jsonb",
+            result_type="uuid",
+            using_sql="$1",
+        ).replace("using $1", "using feature"),
+        _comment_statement(
+            "_collection_feature_model(text, text)",
+            "Return the feature_model declared for one dataset collection from <dataset>.collection_capability. "
+            "Precondition: dataset must resolve to a generated dataset schema. "
+            "Returns text, or NULL when the collection is unknown. "
+            "Raises class 42 if the dataset capability table is missing.",
+        ),
+        _comment_statement(
+            "_assert_direct_write_allowed(text, text)",
+            "Check whether direct ogc.feature_* writes are allowed for one collection. "
+            "Precondition: dataset must resolve to a generated dataset schema. "
+            "Returns void. "
+            "Raises P0001 for feature_model topology, where ogc.transaction is the write path. "
+            "Raises class 42 for an unknown dataset or broken deployment.",
+        ),
+        _comment_statement(
+            "feature_items(text, text, float8[], integer, integer, boolean)",
+            "Return a GeoJSON FeatureCollection for one dataset collection. "
+            "Precondition: dataset and collection must resolve to generated read functions. "
+            "Returns a jsonb FeatureCollection. "
+            "Raises if the generated read function is missing.",
+        ),
+        _comment_statement(
+            "feature_item(text, text, uuid)",
+            "Return one GeoJSON Feature for a dataset collection id. "
+            "Precondition: dataset and collection must resolve to generated read functions. "
+            "Returns a jsonb Feature, or NULL when the id is absent. "
+            "Raises if the generated read function is missing.",
+        ),
+        _comment_statement(
+            "feature_create(text, text, jsonb)",
+            "Create one feature through the generated per-collection writer. "
+            "Precondition: dataset and collection must resolve to a simple-feature collection with a generated create function. "
+            "Client-supplied feature ids are stripped here and the server generates the row id. "
+            "Returns the new uuid. "
+            "Raises P0001 for topology collections, where ogc.transaction is the write path, and class 42 for unknown dataset or broken deployment.",
+        ),
+        _comment_statement(
+            "feature_replace(text, text, uuid, jsonb)",
+            "Replace one feature through the generated per-collection writer. "
+            "Precondition: dataset and collection must resolve to a simple-feature collection with a generated replace function. "
+            "Returns true when a matching feature was replaced. "
+            "Raises P0001 for topology collections, where ogc.transaction is the write path, and class 42 for unknown dataset or broken deployment.",
+        ),
+        _comment_statement(
+            "feature_update(text, text, uuid, jsonb)",
+            "Patch one feature through the generated per-collection writer. "
+            "Precondition: dataset and collection must resolve to a simple-feature collection with a generated update function. "
+            "Returns true when a matching feature was updated. "
+            "Raises P0001 for topology collections, where ogc.transaction is the write path, and class 42 for unknown dataset or broken deployment.",
+        ),
+        _comment_statement(
+            "feature_delete(text, text, uuid)",
+            "Delete one feature through the generated per-collection writer. "
+            "Precondition: dataset and collection must resolve to a simple-feature collection with a generated delete function. "
+            "Returns true when a matching feature was deleted. "
+            "Raises P0001 for topology collections, where ogc.transaction is the write path, and class 42 for unknown dataset or broken deployment.",
+        ),
+        _comment_statement(
+            "transaction(text, jsonb)",
+            'Apply an atomic transaction document of the form {"semantic": "atomic", "transaction": [...]} where action is the closed set insert | update | replace | delete. '
+            "Returns a report whose shape is documented in geocomponents/README.md. "
+            "For a data problem it rolls back to a savepoint and returns committed:false carrying the rejected item or document-level reason; it does not raise. "
+            "Client-supplied feature ids are honored on insert here; ogc.feature_create strips them. "
+            "Raises only for an unknown dataset, or a class-42 error from an undefined function, table, or column, which signals a broken deployment rather than bad input.",
+        ),
+        _comment_statement(
+            "feature_upsert(text, text, jsonb)",
+            "Upsert one feature by the collection business key through the generated per-collection writer. "
+            "Precondition: dataset and collection must resolve to a collection with a generated upsert function. "
+            "Returns the stable uuid for the stored feature. "
+            "Raises P0001 for topology collections, where ogc.transaction is the write path, and class 42 for unknown dataset, missing upsert support, or broken deployment.",
+        ),
     ]
 
 
@@ -323,12 +561,12 @@ def _fn_create(plan: CollectionPlan) -> str:
     writable = _writable_columns(t)
     sw = _server_write_columns(t)
     cols = ", ".join(
-        [f'"{t.geometry.name}"']
+        [f'"{t.id_column}"', f'"{t.geometry.name}"']
         + [f'"{c.name}"' for c in writable]
         + [f'"{c.name}"' for c in sw]
     )
     vals = ", ".join(
-        [_geom_from_feature(t)]
+        ["coalesce((feature->>'id')::uuid, gen_random_uuid())", _geom_from_feature(t)]
         + [_prop_read(c) for c in writable]
         + [c.server_write_expr for c in sw]
     )
@@ -480,7 +718,6 @@ _BUILDER_BY_OP = {
 def function_statements(plan: SchemaPlan) -> list[str]:
     stmts: list[str] = []
     for coll in plan.collections:
-        # Only the operations this collection declares (topology = reads only).
         for op in coll.functions:
             stmts.append(_BUILDER_BY_OP[op](coll))
     return stmts

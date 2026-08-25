@@ -174,14 +174,14 @@ def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
     collections: list[CollectionPlan] = []
     for coll in dataset.collections:
         table = _build_table(schema, coll)
-        # Reads for every collection; writes only for simple-feature collections.
-        ops = READ_OPS + WRITE_OPS if coll.supports_crud else READ_OPS
+        ops = READ_OPS + WRITE_OPS
         if coll.supports_upsert:
             ops += (UPSERT_OP,)
         functions = {op: internal_function(schema, coll.name, op) for op in ops}
         collections.append(
             CollectionPlan(
                 collection_name=coll.name,
+                feature_model=coll.feature_model,
                 table=table,
                 functions=functions,
                 upsert_field=coll.upsert_field,
