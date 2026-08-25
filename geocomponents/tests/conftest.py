@@ -72,3 +72,15 @@ def conn(db):
         yield connection
     finally:
         connection.close()
+
+
+@pytest.fixture
+def conn_non_autocommit(db):
+    """A fresh non-autocommit connection for tests that probe savepoint scope."""
+    connection = psycopg.connect(db, autocommit=False)
+    try:
+        yield connection
+    finally:
+        if not connection.closed:
+            connection.rollback()
+            connection.close()

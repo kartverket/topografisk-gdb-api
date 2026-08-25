@@ -67,6 +67,7 @@ def test_dispatch_exposes_all_feature_entrypoints_taking_dataset_and_collection(
     sql = "\n".join(dispatch_statements())
     for op in (*OPERATIONS, "upsert"):
         assert f"function ogc.feature_{op}(" in sql
+    assert "function ogc.transaction(" in sql
     # The fixed entrypoints route by OGC identifiers, not physical names.
     assert "dataset text, collection text" in sql
 
@@ -79,19 +80,33 @@ def test_dispatch_layer_is_dataset_agnostic_no_table_names_leak():
         assert leaked not in sql
 
 
+def test_every_direct_write_dispatcher_calls_the_guard_helper():
+    for stmt in dispatch_statements():
+        if "function ogc.feature_" not in stmt:
+            continue
+        if any(f"function ogc.feature_{read}(" in stmt for read in READ_OPS):
+            continue
+        assert "perform ogc._assert_direct_write_allowed(dataset, collection);" in stmt
+
+
 def test_internal_functions_match_each_collections_declared_operations():
     plan = _plan()
     stmts = "\n".join(function_statements(plan))
-    # Simple collections get all ops; topology collections only reads.
     for coll in plan.collections:
         for op in coll.functions:
             assert f"function {coll.functions[op]}(" in stmts
 
 
-def test_topology_collection_has_reads_only():
+def test_topology_collection_has_internal_write_functions_for_transaction_path():
     plan = _plan()
     blocks = next(c for c in plan.collections if c.collection_name == "blocks")
-    assert set(blocks.functions) == set(READ_OPS)
+    assert blocks.feature_model == "topology"
+    assert set(blocks.functions) == set(READ_OPS) | {
+        "create",
+        "replace",
+        "update",
+        "delete",
+    }
 
 
 def test_create_function_omits_auto_increment_fields():
@@ -166,6 +181,7 @@ def _plan_with_field_named(field_name: str) -> SchemaPlan:
     )
     coll = CollectionPlan(
         collection_name="c",
+        feature_model="simple",
         table=table,
         functions={op: internal_function("s", "c", op) for op in OPERATIONS},
     )
@@ -333,6 +349,7 @@ def _plan_with_codelist_col(codes: tuple[str, ...]) -> SchemaPlan:
     table = _table_with_cols(ColumnPlan("medium", "text", codelist_values=codes))
     coll = CollectionPlan(
         collection_name="t",
+        feature_model="simple",
         table=table,
         functions={op: internal_function("s", "t", op) for op in OPERATIONS},
     )
@@ -347,6 +364,7 @@ def _plan_with_server_write_col() -> SchemaPlan:
     )
     coll = CollectionPlan(
         collection_name="t",
+        feature_model="simple",
         table=table,
         functions={op: internal_function("s", "t", op) for op in OPERATIONS},
     )

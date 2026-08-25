@@ -11,6 +11,8 @@ apply to any dataset. A couple of *fixed* golden assertions pin the examples.
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import orjson
 import psycopg
 import pytest
@@ -120,6 +122,49 @@ def _update(cur, ds, coll, fid, feature):
     return cur.fetchone()[0]
 
 
+def _delete(cur, ds, coll, fid):
+    cur.execute("select ogc.feature_delete(%s,%s,%s)", (ds, coll, fid))
+    return cur.fetchone()[0]
+
+
+def _upsert(cur, ds, coll, feature):
+    cur.execute(
+        "select ogc.feature_upsert(%s,%s,%s)",
+        (ds, coll, orjson.dumps(feature).decode()),
+    )
+    return cur.fetchone()[0]
+
+
+def _write_entrypoints(cur):
+    cur.execute(
+        """
+        select p.proname
+        from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'ogc'
+          and p.proname like 'feature_%'
+          and p.proname not in ('feature_item', 'feature_items')
+        order by p.proname
+        """
+    )
+    return [row[0].removeprefix("feature_") for row in cur.fetchall()]
+
+
+def _call_write_entrypoint(cur, op, ds, coll, feature):
+    fid = uuid4()
+    if op == "create":
+        return _create(cur, ds, coll, feature)
+    if op == "delete":
+        return _delete(cur, ds, coll, fid)
+    if op == "replace":
+        return _replace(cur, ds, coll, fid, feature)
+    if op == "update":
+        return _update(cur, ds, coll, fid, feature)
+    if op == "upsert":
+        return _upsert(cur, ds, coll, feature)
+    raise AssertionError(f"unhandled public write entrypoint: {op}")
+
+
 def _collection(datasets, dataset_name, collection_name):
     for dataset in datasets:
         if dataset.name != dataset_name:
@@ -202,14 +247,21 @@ def test_simple_collections_support_full_crud_roundtrip(datasets, conn):
 
 def test_topology_collections_reject_writes_at_the_db(datasets, conn):
     with conn.cursor() as cur:
+        write_ops = _write_entrypoints(cur)
         for d in datasets:
             for coll in d.collections:
                 if coll.supports_crud:
                     continue
-                # No internal write function exists → the dispatch call errors.
-                # (autocommit: the failed statement is its own transaction.)
-                with pytest.raises(psycopg.Error):
-                    _create(cur, d.name, coll.name, _sample_feature(coll))
+                for op in write_ops:
+                    with pytest.raises(psycopg.errors.RaiseException) as excinfo:
+                        _call_write_entrypoint(
+                            cur,
+                            op,
+                            d.name,
+                            coll.name,
+                            _sample_feature(coll),
+                        )
+                    assert excinfo.value.sqlstate == "P0001"
                 # Reads still work.
                 assert _items(cur, d.name, coll.name)["type"] == "FeatureCollection"
 

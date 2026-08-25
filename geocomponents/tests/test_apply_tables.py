@@ -39,6 +39,7 @@ def _fk_plan(schema: str, table_names: list[str]) -> SchemaPlan:
         colls.append(
             CollectionPlan(
                 collection_name=name,
+                feature_model="simple",
                 table=table,
                 functions={},  # apply_tables doesn't touch functions
             )
@@ -74,7 +75,7 @@ def test_apply_tables_grown_plan_survives_duplicate_fk_from_prior_run(db):
                 "where table_schema = %s order by table_name",
                 (schema,),
             ).fetchall()
-        assert [r[0] for r in rows] == ["a", "b"]
+        assert [r[0] for r in rows] == ["a", "b", "collection_capability"]
     finally:
         try:
             with conn.transaction():
