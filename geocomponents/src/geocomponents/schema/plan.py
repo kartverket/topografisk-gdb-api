@@ -12,8 +12,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Operations split by capability: reads exist for every collection; writes
-# (Part 4 CRUD) are generated only for "simple" collections.
+# Operations split by capability: reads exist for every collection; the
+# generator emits write functions for every collection, while the public
+# dispatch layer decides which collections expose direct Part 4 CRUD.
 READ_OPS = ("items", "item")
 WRITE_OPS = ("create", "replace", "update", "delete")
 OPERATIONS = READ_OPS + WRITE_OPS
@@ -137,6 +138,7 @@ class TablePlan:
 @dataclass(frozen=True)
 class CollectionPlan:
     collection_name: str
+    feature_model: str
     table: TablePlan
     functions: dict[str, str]  # operation -> internal function name (private)
     upsert_field: str | None = None

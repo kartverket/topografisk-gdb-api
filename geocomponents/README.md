@@ -320,46 +320,138 @@ dataset → one OGC API app), and **`gateway/`** (many apps → one service).
 ### The DB ↔ API contract
 
 The database and the API share a **standard-shaped surface** for how they
-communicate. The database delivers functions in the format `ogc.feature_*`
-which the API calls. The functions follow naming and formatting expected by
-the OGC standards. The API uses these functions to read and write features
-which makes either database or API substitutable as long as they adhere to
-the same contract.
+communicate. The database delivers a fixed `ogc.*` surface which callers use
+with OGC identifiers (`dataset`, `collection`) rather than physical table or
+function names. Single-feature reads and writes go through `ogc.feature_*`;
+atomic multi-feature writes go through `ogc.transaction`. The functions follow
+the naming and formatting expected by the OGC standards. The API uses these
+functions to read and write features, which makes either database or API
+substitutable as long as they adhere to the same contract.
 
-Note that writing is currently only supported for simple features. In the
-future, processes and atomic transactions will be added for topological
-features following the same design: named functions in the database exposed
-for the API.
+**The public ogc.* contract:**
 
-**The six core functions, plus optional business-key upsert:**
-
-| Endpoint (per collection)            | Function              | Arguments                                                                | Returns                                                                 |
-| ------------------------------------ | --------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
-| `GET /collections/{c}/items`         | `ogc.feature_items`   | `dataset, collection, bbox float8[], lim int, off int, with_matched bool` | `jsonb` — a GeoJSON `FeatureCollection`                                 |
-| `GET /collections/{c}/items/{id}`    | `ogc.feature_item`    | `dataset, collection, fid uuid`                                          | `jsonb` — a `Feature`, or null if the id is absent                      |
-| `POST /collections/{c}/items`        | `ogc.feature_create`  | `dataset, collection, feature jsonb`                                     | `uuid` of the new feature                                               |
-| `PUT /collections/{c}/items/{id}`    | `ogc.feature_replace` | `dataset, collection, fid uuid, feature jsonb`                           | `boolean` — true when a matching feature was replaced                   |
-| `PATCH /collections/{c}/items/{id}`  | `ogc.feature_update`  | `dataset, collection, fid uuid, feature jsonb`                           | `boolean` — true when updated; only fields present in the input change  |
-| `DELETE /collections/{c}/items/{id}` | `ogc.feature_delete`  | `dataset, collection, fid uuid`                                          | `boolean` — true when a matching feature was deleted                    |
-| `POST /collections/{c}/items:upsert` | `ogc.feature_upsert` | `dataset, collection, feature jsonb` | stable `uuid`; available when the collection resolves an upsert key |
+| Surface                              | Function              | Arguments                                                                  | Returns                                                                  |
+| ------------------------------------ | --------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `GET /collections/{c}/items`         | `ogc.feature_items`   | `dataset, collection, bbox float8[], lim int, off int, with_matched bool` | `jsonb` — a GeoJSON `FeatureCollection`                                  |
+| `GET /collections/{c}/items/{id}`    | `ogc.feature_item`    | `dataset, collection, fid uuid`                                            | `jsonb` — a `Feature`, or null if the id is absent                       |
+| `POST /collections/{c}/items`        | `ogc.feature_create`  | `dataset, collection, feature jsonb`                                       | `uuid` of the new feature                                                |
+| `PUT /collections/{c}/items/{id}`    | `ogc.feature_replace` | `dataset, collection, fid uuid, feature jsonb`                             | `boolean` — true when a matching feature was replaced                    |
+| `PATCH /collections/{c}/items/{id}`  | `ogc.feature_update`  | `dataset, collection, fid uuid, feature jsonb`                             | `boolean` — true when updated; only fields present in the input change   |
+| `DELETE /collections/{c}/items/{id}` | `ogc.feature_delete`  | `dataset, collection, fid uuid`                                            | `boolean` — true when a matching feature was deleted                     |
+| `POST /collections/{c}/items:upsert` | `ogc.feature_upsert`  | `dataset, collection, feature jsonb`                                       | stable `uuid`; available when the collection resolves an upsert key      |
+| Atomic multi-feature write           | `ogc.transaction`     | `dataset, document jsonb`                                                  | `jsonb` — a fixed-shape transaction report                               |
 
 Endpoints are relative to a dataset mount, e.g.
 `/datasets/cadastre/ogc_api/collections/parcels/items`.
+The `ogc.transaction` row is a database-contract entrypoint today; it is not
+yet routed from an HTTP transaction endpoint in this repo.
 
 The `dataset` and `collection` arguments come from the description
 (`cadastre`, `parcels`) — the same names OGC puts in the URL. The dispatcher
 routes `ogc.feature_items('cadastre', 'parcels', …)` to a per-collection
-function `cadastre._parcels_items(…)` generated from the description. Change
-the storage layout, update the dispatcher; the API keeps calling the same
-functions. Collections with a resolved upsert key also receive a unique index
-and an atomic insert-or-replace function keyed by that field. The key comes
-from `outward_identifier`, or defaults to `lokalid` when present.
+function `cadastre._parcels_items(…)` generated from the description.
+`ogc.transaction('cadastre', …)` routes item actions the same way, to the
+generated `cadastre._<collection>_<op>` functions. Change the storage layout,
+update the dispatcher; callers keep using the same `ogc.*` surface.
+Collections with a resolved upsert key also receive a unique index and an
+atomic insert-or-replace function keyed by that field. The key comes from
+`outward_identifier`, or defaults to `lokalid` when present.
+
+Direct `ogc.feature_*` writes are for simple-feature collections. They consult
+per-dataset capability metadata and refuse `feature_model: topology`
+collections; `ogc.transaction` is the write path for those collections.
+Client-supplied feature ids are honored on transaction inserts, while
+`ogc.feature_create` strips them and generates ids server-side.
+
+**Transaction document shape**
+
+`ogc.transaction` currently accepts atomic documents of this form:
+
+```json
+{
+  "semantic": "atomic",
+  "transaction": [
+    {
+      "action": "insert",
+      "collection": "parcels",
+      "feature": {
+        "type": "Feature",
+        "id": "…",
+        "geometry": {"type": "MultiPolygon", "coordinates": [[[[10, 55], [10, 56], [11, 56], [11, 55], [10, 55]]]]},
+        "properties": {"label": "P-1"}
+      }
+    },
+    {
+      "action": "update",
+      "collection": "parcels",
+      "id": "…",
+      "feature": {"properties": {"label": "updated"}}
+    }
+  ]
+}
+```
+
+The verb set is closed in this PR: `insert`, `update`, `replace`, `delete`.
+`upsert` is not part of the transaction document yet.
+
+**Transaction report shape**
+
+`ogc.transaction` returns a fixed-shape report:
+
+```json
+{
+  "committed": false,
+  "phase": "items",
+  "reason": null,
+  "items": [
+    {
+      "index": 1,
+      "action": "update",
+      "collection": "parcels",
+      "id": null,
+      "status": "rejected",
+      "sqlstate": "P0001",
+      "reason": "invalid geometry"
+    }
+  ],
+  "structure": [],
+  "geometry": []
+}
+```
+
+`phase` is `items` in this PR. `reason` is a document-level failure message
+for cases such as bad `semantic` or a non-array `transaction`; it is `null`
+for item-level failures and successful transactions. Under atomic semantics, a
+failed transaction reports only the rejected item, because no earlier change is
+visible after the rollback.
+
+`structure` and `geometry` are always-present empty arrays today. Later PRs
+will fill them with verdicts, so callers must not branch on their presence.
+Every item key is always present too, including `id` when it is `null`.
 
 You can call them directly:
 
 ```sql
 select ogc.feature_items('cadastre', 'parcels', null, 10, 0, true);
 select ogc.feature_item('cadastre', 'parcels', '…uuid…');
+select ogc.transaction(
+    'cadastre',
+    '{
+      "semantic": "atomic",
+      "transaction": [
+        {
+          "action": "insert",
+          "collection": "parcels",
+          "feature": {
+            "type": "Feature",
+            "id": "…uuid…",
+            "geometry": {"type": "MultiPolygon", "coordinates": [[[[10,55],[10,56],[11,56],[11,55],[10,55]]]]},
+            "properties": {"label": "P-1"}
+          }
+        }
+      ]
+    }'::jsonb
+);
 ```
 
 ### Not built yet (designed for)

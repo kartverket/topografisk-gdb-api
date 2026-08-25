@@ -75,12 +75,19 @@ def test_dataset_maps_to_schema_and_collections_to_tables():
         assert coll.table.qualified == f"cadastre.{coll.collection_name}"
 
 
-def test_topology_collection_gets_a_table_but_only_read_ops():
+def test_topology_collection_plans_write_operations_too():
     plan = _cadastre_plan()
     blocks = next(c for c in plan.collections if c.collection_name == "blocks")
-    # It still has a table (reads need one), but no write functions.
+    # Topology collections still need public dispatch gating.
+    # Internal functions exists for use in transactions
     assert blocks.table.qualified == "cadastre.blocks"
-    assert set(blocks.functions) == set(READ_OPS)
+    assert blocks.feature_model == "topology"
+    assert set(blocks.functions) == set(READ_OPS) | {
+        "create",
+        "replace",
+        "update",
+        "delete",
+    }
 
 
 def test_standard_columns_and_geometry_present():

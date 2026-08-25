@@ -9,6 +9,8 @@ type+SRID, GiST on geometry, FKs). Richer constraints (CHECK, code-list
 enforcement, nullability on every attribute) are the deferred "validation in
 the DB" concern.
 """
+# ruff: noqa: S608 - This module generates SQL DDL from validated schema-plan
+# identifiers and literal seed values derived from dataset descriptions.
 
 from __future__ import annotations
 
@@ -25,6 +27,10 @@ from geocomponents.schema.plan import (
 # PostgreSQL's NAMEDATALEN default. Identifiers longer than this are silently
 # truncated by the server, so two distinct long names can collide.
 _PG_MAX_IDENT_LEN = 63
+
+
+def _quote_literal(value: str) -> str:
+    return value.replace("'", "''")
 
 
 def _column_ddl(col: ColumnPlan) -> str:
@@ -113,6 +119,42 @@ def _upsert_index_ddl(plan: CollectionPlan) -> str | None:
     )
 
 
+def _collection_capability_table_ddl(plan: SchemaPlan) -> str:
+    return (
+        f"create table if not exists {plan.schema_name}.collection_capability ("
+        "collection text primary key, feature_model text not null)"
+    )
+
+
+def _collection_capability_seed_ddl(plan: SchemaPlan) -> str:
+    values = ", ".join(
+        f"('{_quote_literal(coll.collection_name)}', '{_quote_literal(coll.feature_model)}')"
+        for coll in plan.collections
+    )
+    return (
+        f"insert into {plan.schema_name}.collection_capability "
+        "(collection, feature_model) values "
+        f"{values} on conflict (collection) do update set "
+        "feature_model = excluded.feature_model"
+    )
+
+
+def _schema_comment_ddl(plan: SchemaPlan) -> str:
+    comment = _quote_literal(
+        "Generated from a dataset description. Call through ogc.feature_* / ogc.transaction. "
+        "The _<collection>_<op> functions are internal and their names may change."
+    )
+    return f"comment on schema {plan.schema_name} is '{comment}'"
+
+
+def _collection_capability_comment_ddl(plan: SchemaPlan) -> str:
+    comment = _quote_literal(
+        "Per-collection feature_model catalogue for this dataset. "
+        "The ogc dispatch layer reads it to refuse direct writes to topology collections."
+    )
+    return f"comment on table {plan.schema_name}.collection_capability is '{comment}'"
+
+
 def table_statements(plan: SchemaPlan) -> list[str]:
     """One complete SQL command per list element (idempotent where possible).
 
@@ -126,9 +168,13 @@ def table_statements(plan: SchemaPlan) -> list[str]:
         # pgcrypto on PG <= 12. Cheap portability; no-op on modern servers.
         "create extension if not exists pgcrypto",
         f"create schema if not exists {plan.schema_name}",
+        _schema_comment_ddl(plan),
+        _collection_capability_table_ddl(plan),
+        _collection_capability_comment_ddl(plan),
     ]
     for coll in plan.collections:
         stmts.append(_table_ddl(coll.table))
+    stmts.append(_collection_capability_seed_ddl(plan))
     for coll in plan.collections:
         stmts.append(_geometry_index_ddl(coll))
         stmts.extend(_extra_index_ddl(coll.collection_name, coll.table))

@@ -137,15 +137,16 @@ flowchart LR
   DBF --> PG
 ```
 
-The important runtime contract is unchanged: the HTTP layer does not talk to physical dataset tables directly. It delegates reads and writes through the generated `ogc.feature_*` dispatch functions.
+The important runtime contract is unchanged: the HTTP layer does not talk to physical dataset tables directly. It delegates single-feature reads and writes through the generated `ogc.feature_*` dispatch functions, and atomic multi-feature writes through `ogc.transaction`.
 
-| HTTP surface | SQL dispatch |
-|--------------|--------------|
+| Surface | SQL dispatch |
+|---------|--------------|
 | `GET .../items` | `ogc.feature_items` |
 | `GET .../items/{id}` | `ogc.feature_item` |
 | `POST .../items` | `ogc.feature_create` |
 | `PUT` / `PATCH` / `DELETE` | `ogc.feature_replace` / `ogc.feature_update` / `ogc.feature_delete` |
 | `POST .../items:upsert` | `ogc.feature_upsert` |
+| Atomic multi-feature write | `ogc.transaction` |
 
 Current dataset descriptions in the repo:
 
@@ -426,7 +427,7 @@ Operational points:
 ## Architectural invariants
 
 1. **YAML descriptions drive schema and API surface**. The repo does not hand-maintain dataset-specific SQL tables or HTTP handlers.
-2. **`ogc.feature_*` is the backend contract boundary**. Generated functions isolate the API layer from physical dataset tables.
+2. **`ogc.feature_*` and `ogc.transaction` are the backend contract boundary**. Generated dispatch functions isolate the API and process layers from physical dataset tables.
 3. **`gcimport` is profile-driven and synchronous in the current codebase**. It validates first, then imports in collection batches or feature fallback through the OGC API, while emitting lifecycle events to Redis.
 4. **`gcmapview` owns visualization-only concerns** such as client reprojection, 2D/3D switching, terrain handling, and derived elevated geometry.
 5. **`gcjobs` owns durable import-tracking state in the current POC**. It accepts import requests immediately, persists event-derived state in PostgreSQL, and is the only backend the frontend needs for import start and status.
