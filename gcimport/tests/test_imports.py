@@ -20,6 +20,21 @@ PLATFORM_UUID = "11111111-1111-4111-8111-111111111111"
 TRACK_UUID = "22222222-2222-4222-8222-222222222222"
 
 
+def _batch_success_response(collection: str, *identifiers: str) -> httpx2.Response:
+    return httpx2.Response(
+        200,
+        json={
+            "collection": collection,
+            "total": len(identifiers),
+            "features": [{"id": identifier} for identifier in identifiers],
+        },
+    )
+
+
+def _batch_payload(request: httpx2.Request) -> dict[str, Any]:
+    return json.loads(request.content)
+
+
 def _properties(**overrides: Any) -> dict[str, Any]:
     values = {
         "lokalid": "feature-1",
@@ -503,18 +518,18 @@ def test_import_publishes_batch_and_completion_failures() -> None:
         "import.batch.failed",
         "import.completed.failed",
     ]
-    assert publisher.events[2]["reason"] == "upstream returned HTTP 500"
-    assert publisher.events[3]["reason"] == "upstream returned HTTP 500"
+    assert publisher.events[2]["reason"] == "upstream batch upsert returned HTTP 500"
+    assert publisher.events[3]["reason"] == "upstream batch upsert returned HTTP 500"
 
 
 def test_import_uses_caller_supplied_import_id() -> None:
     publisher = RecordingImportEventPublisher()
 
     def handler(request: httpx2.Request) -> httpx2.Response:
-        assert request.url.path.endswith(
-            "/collections/jernbaneplattformkant/items:upsert"
-        )
-        return httpx2.Response(200, json={"id": PLATFORM_UUID})
+        assert request.url.path.endswith("/processes/upsert-batch/execution")
+        payload = _batch_payload(request)
+        assert payload["inputs"]["collection"] == "jernbaneplattformkant"
+        return _batch_success_response("jernbaneplattformkant", PLATFORM_UUID)
 
     feature = _feature(properties=_properties(lokalid="feature-1"))
 
@@ -560,12 +575,10 @@ def test_imports_place_and_fallback_geometry() -> None:
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        identifier = (
-            TRACK_UUID
-            if request.url.path.endswith("/spormidt/items:upsert")
-            else PLATFORM_UUID
-        )
-        return httpx2.Response(200, json={"id": identifier})
+        payload = _batch_payload(request)
+        collection = payload["inputs"]["collection"]
+        identifier = TRACK_UUID if collection == "spormidt" else PLATFORM_UUID
+        return _batch_success_response(collection, identifier)
 
     first = _feature(feature_type="JERNBANEPLATTFORMKANT")
     first["geometry"] = {"type": "Point", "coordinates": [0, 0]}
@@ -595,15 +608,18 @@ def test_imports_place_and_fallback_geometry() -> None:
         ],
     }
     assert [request.url.path for request in requests] == [
-        "/datasets/fkb_bane/ogc_api/collections/jernbaneplattformkant/items:upsert",
-        "/datasets/fkb_bane/ogc_api/collections/spormidt/items:upsert",
+        "/datasets/fkb_bane/ogc_api/processes/upsert-batch/execution",
+        "/datasets/fkb_bane/ogc_api/processes/upsert-batch/execution",
     ]
     for request in requests:
-        assert request.headers["content-type"] == "application/geo+json"
-        payload = json.loads(request.content)
-        assert payload["type"] == "Feature"
-        assert payload["geometry"]["type"] == "MultiLineString"
-        assert payload["geometry"]["coordinates"][0][0] != [10.7, 59.9]
+        assert request.headers["content-type"] == "application/json"
+        payload = _batch_payload(request)
+        assert payload["inputs"]["features"][0]["type"] == "Feature"
+        assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiLineString"
+        assert payload["inputs"]["features"][0]["geometry"]["coordinates"][0][0] != [
+            10.7,
+            59.9,
+        ]
 
 
 def test_retry_returns_the_same_upstream_uuid() -> None:
@@ -612,7 +628,7 @@ def test_retry_returns_the_same_upstream_uuid() -> None:
     def handler(_request: httpx2.Request) -> httpx2.Response:
         nonlocal calls
         calls += 1
-        return httpx2.Response(200, json={"id": PLATFORM_UUID})
+        return _batch_success_response("jernbaneplattformkant", PLATFORM_UUID)
 
     with _test_client(httpx2.MockTransport(handler)) as client:
         first = _post(client, _document([_feature()]), profile="fkb_bane")
@@ -669,14 +685,12 @@ def test_imports_batch_same_collection_features() -> None:
     ]
 
 
-def test_imports_falls_back_when_batch_route_is_unavailable() -> None:
+def test_imports_fail_when_batch_route_is_unavailable() -> None:
     requests: list[httpx2.Request] = []
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        if request.url.path.endswith("/processes/upsert-batch/execution"):
-            return httpx2.Response(404)
-        return httpx2.Response(200, json={"id": PLATFORM_UUID})
+        return httpx2.Response(404)
 
     second = _feature(
         properties=_properties(
@@ -692,18 +706,19 @@ def test_imports_falls_back_when_batch_route_is_unavailable() -> None:
             profile="fkb_bane",
         )
 
-    assert response.status_code == 200
-    assert response.json() == {
-        "total": 2,
-        "features": [
-            {"collection": "jernbaneplattformkant", "id": PLATFORM_UUID},
-            {"collection": "jernbaneplattformkant", "id": PLATFORM_UUID},
-        ],
+    assert response.status_code == 502
+    assert response.json()["detail"] == {
+        "message": "FKB-Bane API batch upsert failed",
+        "collection": "jernbaneplattformkant",
+        "id": "feature-1",
+        "reason": (
+            "upstream batch upsert endpoint "
+            "/processes/upsert-batch/execution is unavailable "
+            "(HTTP 404); gcimport requires batch mode"
+        ),
     }
     assert [request.url.path for request in requests] == [
         "/datasets/fkb_bane/ogc_api/processes/upsert-batch/execution",
-        "/datasets/fkb_bane/ogc_api/collections/jernbaneplattformkant/items:upsert",
-        "/datasets/fkb_bane/ogc_api/collections/jernbaneplattformkant/items:upsert",
     ]
 
 
@@ -712,7 +727,7 @@ def test_imports_bane_linestring_place_for_compatibility() -> None:
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(200, json={"id": PLATFORM_UUID})
+        return _batch_success_response("jernbaneplattformkant", PLATFORM_UUID)
 
     feature = _feature()
     feature["place"] = {
@@ -724,9 +739,12 @@ def test_imports_bane_linestring_place_for_compatibility() -> None:
         response = _post(client, _document([feature]), profile="fkb_bane")
 
     assert response.status_code == 200
-    payload = json.loads(requests[0].content)
-    assert payload["geometry"]["type"] == "MultiLineString"
-    assert payload["geometry"]["coordinates"][0][0][:2] != [10.7, 59.9]
+    payload = _batch_payload(requests[0])
+    assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiLineString"
+    assert payload["inputs"]["features"][0]["geometry"]["coordinates"][0][0][:2] != [
+        10.7,
+        59.9,
+    ]
 
 
 def test_imports_fkb_bane_nested_upstream_properties() -> None:
@@ -734,7 +752,7 @@ def test_imports_fkb_bane_nested_upstream_properties() -> None:
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(200, json={"id": PLATFORM_UUID})
+        return _batch_success_response("jernbaneplattformkant", PLATFORM_UUID)
 
     feature = _feature(
         properties=_properties(
@@ -747,13 +765,14 @@ def test_imports_fkb_bane_nested_upstream_properties() -> None:
         response = _post(client, _document([feature]), profile="fkb_bane")
 
     assert response.status_code == 200
-    payload = json.loads(requests[0].content)
-    assert payload["properties"]["identifikasjon"] == {
+    payload = _batch_payload(requests[0])
+    feature_payload = payload["inputs"]["features"][0]
+    assert feature_payload["properties"]["identifikasjon"] == {
         "lokalid": "feature-1",
         "navnerom": "test",
         "versjonid": "2026-01-02T00:00:00Z",
     }
-    assert payload["properties"]["kvalitet"] == {
+    assert feature_payload["properties"]["kvalitet"] == {
         "datafangstmetode": "fot",
         "noyaktighet": 10,
     }
@@ -796,7 +815,7 @@ def test_imports_built_in_bygning_profile_with_multilinestring() -> None:
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(200, json={"id": PLATFORM_UUID})
+        return _batch_success_response("bygning", PLATFORM_UUID)
 
     upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
@@ -821,10 +840,11 @@ def test_imports_built_in_bygning_profile_with_multilinestring() -> None:
         "features": [{"collection": "bygning", "id": PLATFORM_UUID}],
     }
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/collections/bygning/items:upsert"
+        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
     ]
-    payload = json.loads(requests[0].content)
-    assert payload["geometry"]["type"] == "MultiLineString"
+    payload = _batch_payload(requests[0])
+    assert payload["inputs"]["collection"] == "bygning"
+    assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiLineString"
 
 
 def test_imports_built_in_bygning_omrade_profile_with_multipolygon() -> None:
@@ -832,7 +852,7 @@ def test_imports_built_in_bygning_omrade_profile_with_multipolygon() -> None:
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(200, json={"id": PLATFORM_UUID})
+        return _batch_success_response("bygning_omrade", PLATFORM_UUID)
 
     upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
@@ -857,10 +877,11 @@ def test_imports_built_in_bygning_omrade_profile_with_multipolygon() -> None:
         "features": [{"collection": "bygning_omrade", "id": PLATFORM_UUID}],
     }
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/collections/bygning_omrade/items:upsert"
+        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
     ]
-    payload = json.loads(requests[0].content)
-    assert payload["geometry"]["type"] == "MultiPolygon"
+    payload = _batch_payload(requests[0])
+    assert payload["inputs"]["collection"] == "bygning_omrade"
+    assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiPolygon"
 
 
 def test_imports_built_in_bygning_senterlinje_profile_with_multilinestring() -> None:
@@ -868,7 +889,7 @@ def test_imports_built_in_bygning_senterlinje_profile_with_multilinestring() -> 
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(200, json={"id": PLATFORM_UUID})
+        return _batch_success_response("bygning_senterlinje", PLATFORM_UUID)
 
     upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
@@ -893,10 +914,11 @@ def test_imports_built_in_bygning_senterlinje_profile_with_multilinestring() -> 
         "features": [{"collection": "bygning_senterlinje", "id": PLATFORM_UUID}],
     }
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/collections/bygning_senterlinje/items:upsert"
+        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
     ]
-    payload = json.loads(requests[0].content)
-    assert payload["geometry"]["type"] == "MultiLineString"
+    payload = _batch_payload(requests[0])
+    assert payload["inputs"]["collection"] == "bygning_senterlinje"
+    assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiLineString"
 
 
 def test_imports_built_in_bygning_position_profile_with_point() -> None:
@@ -904,7 +926,7 @@ def test_imports_built_in_bygning_position_profile_with_point() -> None:
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(200, json={"id": PLATFORM_UUID})
+        return _batch_success_response("bygning_posisjon", PLATFORM_UUID)
 
     upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
@@ -929,10 +951,11 @@ def test_imports_built_in_bygning_position_profile_with_point() -> None:
         "features": [{"collection": "bygning_posisjon", "id": PLATFORM_UUID}],
     }
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/collections/bygning_posisjon/items:upsert"
+        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
     ]
-    payload = json.loads(requests[0].content)
-    assert payload["geometry"]["type"] == "Point"
+    payload = _batch_payload(requests[0])
+    assert payload["inputs"]["collection"] == "bygning_posisjon"
+    assert payload["inputs"]["features"][0]["geometry"]["type"] == "Point"
 
 
 def test_rejects_missing_profile_query_parameter() -> None:
@@ -958,7 +981,7 @@ def test_request_profile_selects_bygning_target_dataset() -> None:
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(200, json={"id": PLATFORM_UUID})
+        return _batch_success_response("bygning", PLATFORM_UUID)
 
     upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
@@ -980,7 +1003,7 @@ def test_request_profile_selects_bygning_target_dataset() -> None:
 
     assert response.status_code == 200
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/collections/bygning/items:upsert"
+        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
     ]
 
 
@@ -992,7 +1015,7 @@ def test_request_profile_can_import_bygning_area_geojson_through_bygning_profile
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(200, json={"id": PLATFORM_UUID})
+        return _batch_success_response("bygning_omrade", PLATFORM_UUID)
 
     upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
@@ -1018,7 +1041,7 @@ def test_request_profile_can_import_bygning_area_geojson_through_bygning_profile
 
     assert response.status_code == 200
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/collections/bygning_omrade/items:upsert"
+        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
     ]
 
 
@@ -1029,7 +1052,7 @@ def test_request_profile_can_import_bygning_position_geojson_through_bygning_pro
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(200, json={"id": PLATFORM_UUID})
+        return _batch_success_response("bygning_posisjon", PLATFORM_UUID)
 
     upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
@@ -1051,7 +1074,7 @@ def test_request_profile_can_import_bygning_position_geojson_through_bygning_pro
 
     assert response.status_code == 200
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/collections/bygning_posisjon/items:upsert"
+        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
     ]
 
 
@@ -1062,7 +1085,7 @@ def test_request_profile_can_import_bygning_senterlinje_geojson_through_bygning_
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(200, json={"id": PLATFORM_UUID})
+        return _batch_success_response("bygning_senterlinje", PLATFORM_UUID)
 
     upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
@@ -1084,7 +1107,7 @@ def test_request_profile_can_import_bygning_senterlinje_geojson_through_bygning_
 
     assert response.status_code == 200
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/collections/bygning_senterlinje/items:upsert"
+        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
     ]
 
 
@@ -1093,7 +1116,9 @@ def test_request_profile_can_import_mixed_bygning_geojson() -> None:
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(200, json={"id": PLATFORM_UUID})
+        payload = _batch_payload(request)
+        collection = payload["inputs"]["collection"]
+        return _batch_success_response(collection, PLATFORM_UUID)
 
     upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
@@ -1122,8 +1147,8 @@ def test_request_profile_can_import_mixed_bygning_geojson() -> None:
 
     assert response.status_code == 200
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/collections/bygning/items:upsert",
-        "/datasets/bygning/ogc_api/collections/bygning_omrade/items:upsert",
+        "/datasets/bygning/ogc_api/processes/upsert-batch/execution",
+        "/datasets/bygning/ogc_api/processes/upsert-batch/execution",
     ]
 
 
@@ -1170,7 +1195,7 @@ def test_imports_bygning_geojson_without_falling_back_to_bane() -> None:
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(200, json={"id": PLATFORM_UUID})
+        return _batch_success_response("bygning", PLATFORM_UUID)
 
     upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
@@ -1187,10 +1212,10 @@ def test_imports_bygning_geojson_without_falling_back_to_bane() -> None:
 
     assert response.status_code == 200
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/collections/bygning/items:upsert"
+        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
     ]
-    payload = json.loads(requests[0].content)
-    assert payload["geometry"]["type"] == "MultiLineString"
+    payload = _batch_payload(requests[0])
+    assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiLineString"
 
 
 def test_imports_bygning_omrade_geojson_without_falling_back_to_bane() -> None:
@@ -1198,7 +1223,7 @@ def test_imports_bygning_omrade_geojson_without_falling_back_to_bane() -> None:
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(200, json={"id": PLATFORM_UUID})
+        return _batch_success_response("bygning_omrade", PLATFORM_UUID)
 
     upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
@@ -1215,10 +1240,10 @@ def test_imports_bygning_omrade_geojson_without_falling_back_to_bane() -> None:
 
     assert response.status_code == 200
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/collections/bygning_omrade/items:upsert"
+        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
     ]
-    payload = json.loads(requests[0].content)
-    assert payload["geometry"]["type"] == "MultiPolygon"
+    payload = _batch_payload(requests[0])
+    assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiPolygon"
 
 
 def test_bygning_profile_tracks_scanned_area_geojson_objtypes() -> None:
@@ -1234,7 +1259,7 @@ def test_merges_duplicate_bygning_segments_with_same_business_key() -> None:
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(200, json={"id": PLATFORM_UUID})
+        return _batch_success_response("bygning", PLATFORM_UUID)
 
     upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     app = create_app(
@@ -1260,9 +1285,9 @@ def test_merges_duplicate_bygning_segments_with_same_business_key() -> None:
         "features": [{"collection": "bygning", "id": PLATFORM_UUID}],
     }
     assert len(requests) == 1
-    payload = json.loads(requests[0].content)
-    assert payload["geometry"]["type"] == "MultiLineString"
-    assert len(payload["geometry"]["coordinates"]) == 2
+    payload = _batch_payload(requests[0])
+    assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiLineString"
+    assert len(payload["inputs"]["features"][0]["geometry"]["coordinates"]) == 2
 
 
 @pytest.mark.parametrize(
@@ -1392,16 +1417,16 @@ def test_reports_upstream_failure_as_bad_gateway() -> None:
 
     assert response.status_code == 502
     assert response.json()["detail"] == {
-        "message": "FKB-Bane API upsert failed",
+        "message": "FKB-Bane API batch upsert failed",
         "collection": "jernbaneplattformkant",
         "id": "feature-1",
-        "reason": "upstream returned HTTP 503",
+        "reason": "upstream batch upsert returned HTTP 503",
     }
 
 
 def test_rejects_successful_upstream_response_without_uuid() -> None:
     transport = httpx2.MockTransport(
-        lambda _request: httpx2.Response(200, json={"id": "not-a-uuid"})
+        lambda _request: _batch_success_response("jernbaneplattformkant", "not-a-uuid")
     )
 
     with _test_client(transport) as client:
@@ -1462,7 +1487,7 @@ def test_imports_classic_geojson_when_filename_ends_with_geojson() -> None:
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(200, json={"id": TRACK_UUID})
+        return _batch_success_response("spormidt", TRACK_UUID)
 
     with _test_client(httpx2.MockTransport(handler)) as client:
         response = client.post(
@@ -1481,16 +1506,16 @@ def test_imports_classic_geojson_when_filename_ends_with_geojson() -> None:
         "total": 1,
         "features": [{"collection": "spormidt", "id": TRACK_UUID}],
     }
-    payload = json.loads(requests[0].content)
-    assert payload["geometry"]["type"] == "MultiLineString"
-    assert payload["geometry"]["coordinates"][0][0][:2] == pytest.approx(
-        [279754.0614235144, 7041951.166005967]
-    )
+    payload = _batch_payload(requests[0])
+    assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiLineString"
+    assert payload["inputs"]["features"][0]["geometry"]["coordinates"][0][0][
+        :2
+    ] == pytest.approx([279754.0614235144, 7041951.166005967])
 
 
 def test_classic_geojson_extension_is_case_insensitive() -> None:
     def handler(_request: httpx2.Request) -> httpx2.Response:
-        return httpx2.Response(200, json={"id": TRACK_UUID})
+        return _batch_success_response("spormidt", TRACK_UUID)
 
     with _test_client(httpx2.MockTransport(handler)) as client:
         response = client.post(
@@ -1512,7 +1537,7 @@ def test_imports_classic_geojson_with_alias_property_names() -> None:
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(200, json={"id": TRACK_UUID})
+        return _batch_success_response("spormidt", TRACK_UUID)
 
     with _test_client(httpx2.MockTransport(handler)) as client:
         response = client.post(
@@ -1527,10 +1552,10 @@ def test_imports_classic_geojson_with_alias_property_names() -> None:
         )
 
     assert response.status_code == 200
-    payload = json.loads(requests[0].content)
-    assert payload["properties"]["identifikasjon_navnerom"] == (
-        "http://data.geonorge.no/SFKB/FKB-Bane/so"
-    )
+    payload = _batch_payload(requests[0])
+    assert payload["inputs"]["features"][0]["properties"][
+        "identifikasjon_navnerom"
+    ] == ("http://data.geonorge.no/SFKB/FKB-Bane/so")
 
 
 def test_rejects_invalid_classic_geojson_before_upstream_calls() -> None:

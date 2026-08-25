@@ -57,10 +57,6 @@ class UpstreamImportError(RuntimeError):
         self.reason = reason
 
 
-class _BatchRouteUnavailableError(RuntimeError):
-    """Raised when the upstream API does not expose batch upsert."""
-
-
 @dataclass(frozen=True)
 class PreparedFeature:
     """A validated GeoJSON feature and its upstream route."""
@@ -541,7 +537,6 @@ async def import_features(
         indexed_features.setdefault(feature.collection, []).append((index, feature))
 
     imported: list[dict[str, str] | None] = [None] * len(features)
-    batch_supported = True
     context = _ImportChunkContext(
         imported=imported,
         client=client,
@@ -551,11 +546,7 @@ async def import_features(
 
     for collection_features in indexed_features.values():
         for chunk in _chunked(collection_features, upsert_batch_size):
-            batch_supported = await _import_chunk(
-                chunk,
-                context=context,
-                batch_supported=batch_supported,
-            )
+            await _import_chunk(chunk, context=context)
 
     return {"total": len(features), "features": imported}
 
@@ -564,36 +555,13 @@ async def _import_chunk(
     chunk: list[tuple[int, PreparedFeature]],
     *,
     context: _ImportChunkContext,
-    batch_supported: bool,
-) -> bool:
-    if len(chunk) > 1 and batch_supported:
-        handled, batch_supported = await _try_import_chunk_batch(
-            chunk,
-            context=context,
-        )
-        if handled:
-            return batch_supported
-
-    await _import_chunk_singles(
-        chunk,
-        context=context,
-    )
-    return batch_supported
-
-
-async def _try_import_chunk_batch(
-    chunk: list[tuple[int, PreparedFeature]],
-    *,
-    context: _ImportChunkContext,
-) -> tuple[bool, bool]:
+) -> None:
     try:
         identifiers = await _import_feature_batch(
             chunk,
             client=context.client,
             api_url=context.api_url,
         )
-    except _BatchRouteUnavailableError:
-        return False, False
     except UpstreamImportError as err:
         if context.on_batch is not None:
             await context.on_batch(
@@ -623,45 +591,6 @@ async def _try_import_chunk_batch(
             "collection": feature.collection,
             "id": identifier,
         }
-    return True, True
-
-
-async def _import_chunk_singles(
-    chunk: list[tuple[int, PreparedFeature]],
-    *,
-    context: _ImportChunkContext,
-) -> None:
-    for index, feature in chunk:
-        try:
-            context.imported[index] = await _import_feature(
-                feature,
-                client=context.client,
-                api_url=context.api_url,
-            )
-        except UpstreamImportError as err:
-            if context.on_batch is not None:
-                await context.on_batch(
-                    {
-                        "status": "failed",
-                        "mode": "single",
-                        "collection": err.collection,
-                        "feature_id": err.feature_id,
-                        "batch_size": 1,
-                        "reason": err.reason,
-                    }
-                )
-            raise
-        if context.on_batch is not None:
-            await context.on_batch(
-                {
-                    "status": "succeeded",
-                    "mode": "single",
-                    "collection": feature.collection,
-                    "feature_id": feature.feature_id,
-                    "batch_size": 1,
-                    "feature_ids": [feature.feature_id],
-                }
-            )
 
 
 def _chunked(
@@ -695,16 +624,24 @@ async def _import_feature_batch(
         raise UpstreamImportError(
             collection=collection,
             feature_id=indexed_features[0][1].feature_id,
-            reason=f"request failed: {err}",
+            reason=f"batch request failed: {err}",
         ) from err
 
     if response.status_code in {404, 405, 415, 501}:
-        raise _BatchRouteUnavailableError()
+        raise UpstreamImportError(
+            collection=collection,
+            feature_id=indexed_features[0][1].feature_id,
+            reason=(
+                "upstream batch upsert endpoint "
+                f"/processes/upsert-batch/execution is unavailable "
+                f"(HTTP {response.status_code}); gcimport requires batch mode"
+            ),
+        )
     if not response.is_success:
         raise UpstreamImportError(
             collection=collection,
             feature_id=indexed_features[0][1].feature_id,
-            reason=f"upstream returned HTTP {response.status_code}",
+            reason=(f"upstream batch upsert returned HTTP {response.status_code}"),
         )
 
     try:
@@ -735,50 +672,6 @@ async def _import_feature_batch(
         )
         for (_, feature), item in zip(indexed_features, items, strict=True)
     ]
-
-
-async def _import_feature(
-    feature: PreparedFeature,
-    *,
-    client: httpx2.AsyncClient,
-    api_url: str,
-) -> dict[str, str]:
-    url = f"{api_url}/collections/{feature.collection}/items:upsert"
-    try:
-        response = await client.post(
-            url,
-            json=feature.geojson,
-            headers={"Content-Type": "application/geo+json"},
-        )
-    except httpx2.HTTPError as err:
-        raise UpstreamImportError(
-            collection=feature.collection,
-            feature_id=feature.feature_id,
-            reason=f"request failed: {err}",
-        ) from err
-    if not response.is_success:
-        raise UpstreamImportError(
-            collection=feature.collection,
-            feature_id=feature.feature_id,
-            reason=f"upstream returned HTTP {response.status_code}",
-        )
-    try:
-        response_body = response.json()
-    except (json.JSONDecodeError, UnicodeDecodeError) as err:
-        raise UpstreamImportError(
-            collection=feature.collection,
-            feature_id=feature.feature_id,
-            reason="successful upstream response did not contain valid JSON",
-        ) from err
-
-    return {
-        "collection": feature.collection,
-        "id": _parse_upstream_id(
-            collection=feature.collection,
-            feature_id=feature.feature_id,
-            response_body=response_body,
-        ),
-    }
 
 
 def _parse_upstream_id(

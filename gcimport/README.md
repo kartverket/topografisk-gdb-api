@@ -80,10 +80,11 @@ curl -F 'file=@bygning.geojson;type=application/geo+json' \
 ```
 
 The complete document is validated and transformed before the first upstream
-request. Features are then posted individually as `application/geo+json` to
-`{GEOCOMPONENTS_API_URL}/datasets/.../ogc_api/collections/{collection}/items:upsert`. Because each write is
-an upsert keyed by the feature identity, retrying an individual call is
-idempotent.
+request. Features are then posted in collection-grouped batches to
+`{GEOCOMPONENTS_API_URL}/datasets/.../ogc_api/processes/upsert-batch/execution`.
+gcimport requires that upstream batch process; it does not fall back to single-
+feature writes. Because each write is an upsert keyed by the feature identity,
+retrying an import call is idempotent.
 The response reports the stable UUID returned by the upstream dataset for every
 feature.
 
