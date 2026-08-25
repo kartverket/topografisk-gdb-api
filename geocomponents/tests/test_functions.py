@@ -18,11 +18,14 @@ from geocomponents.schema.functions import (
 from geocomponents.schema.plan import (
     OPERATIONS,
     READ_OPS,
+    UPSERT_OP,
+    WRITE_OPS,
     CollectionPlan,
     ColumnPlan,
     GeometryColumnPlan,
     SchemaPlan,
     TablePlan,
+    dispatch_function,
     internal_function,
 )
 
@@ -80,12 +83,20 @@ def test_dispatch_layer_is_dataset_agnostic_no_table_names_leak():
         assert leaked not in sql
 
 
-def test_every_direct_write_dispatcher_calls_the_guard_helper():
-    for stmt in dispatch_statements():
-        if "function ogc.feature_" not in stmt:
-            continue
-        if any(f"function ogc.feature_{read}(" in stmt for read in READ_OPS):
-            continue
+def test_direct_write_dispatchers_call_the_guard_helper():
+    statements = dispatch_statements()
+    for op in (*WRITE_OPS, UPSERT_OP):
+        stmt = next(
+            (
+                stmt
+                for stmt in statements
+                if stmt.startswith(
+                    f"create or replace function {dispatch_function(op)}("
+                )
+            ),
+            None,
+        )
+        assert stmt is not None, f"missing dispatcher for {dispatch_function(op)}"
         assert "perform ogc._assert_direct_write_allowed(dataset, collection);" in stmt
 
 

@@ -139,6 +139,22 @@ def _collection_capability_seed_ddl(plan: SchemaPlan) -> str:
     )
 
 
+def _schema_comment_ddl(plan: SchemaPlan) -> str:
+    comment = _quote_literal(
+        "Generated from a dataset description. Call through ogc.feature_* / ogc.transaction. "
+        "The _<collection>_<op> functions are internal and their names may change."
+    )
+    return f"comment on schema {plan.schema_name} is '{comment}'"
+
+
+def _collection_capability_comment_ddl(plan: SchemaPlan) -> str:
+    comment = _quote_literal(
+        "Per-collection feature_model catalogue for this dataset. "
+        "The ogc dispatch layer reads it to refuse direct writes to topology collections."
+    )
+    return f"comment on table {plan.schema_name}.collection_capability is '{comment}'"
+
+
 def table_statements(plan: SchemaPlan) -> list[str]:
     """One complete SQL command per list element (idempotent where possible).
 
@@ -152,7 +168,9 @@ def table_statements(plan: SchemaPlan) -> list[str]:
         # pgcrypto on PG <= 12. Cheap portability; no-op on modern servers.
         "create extension if not exists pgcrypto",
         f"create schema if not exists {plan.schema_name}",
+        _schema_comment_ddl(plan),
         _collection_capability_table_ddl(plan),
+        _collection_capability_comment_ddl(plan),
     ]
     for coll in plan.collections:
         stmts.append(_table_ddl(coll.table))

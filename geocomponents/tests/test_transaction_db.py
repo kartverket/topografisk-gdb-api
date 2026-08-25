@@ -55,3 +55,26 @@ def test_transaction_class_42_deployment_error_propagates_as_psycopg_error(conn)
             cur.execute(
                 f"alter function cadastre.{broken_name}(jsonb) rename to _parcels_create"
             )
+
+
+def test_every_ogc_function_has_a_sql_comment(conn):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            select
+                p.proname,
+                pg_get_function_identity_arguments(p.oid),
+                obj_description(p.oid, 'pg_proc')
+            from pg_proc p
+            join pg_namespace n on n.oid = p.pronamespace
+            where n.nspname = 'ogc'
+            order by p.proname, pg_get_function_identity_arguments(p.oid)
+            """
+        )
+        missing = [
+            f"{name}({args})"
+            for name, args, description in cur.fetchall()
+            if description is None
+        ]
+
+    assert missing == []

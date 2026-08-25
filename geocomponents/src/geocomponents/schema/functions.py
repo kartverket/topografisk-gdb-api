@@ -91,6 +91,9 @@ begin
 end;
 $disp$"""
 
+    def _comment_statement(signature: str, text: str) -> str:
+        return f"comment on function {s}.{signature} is $$" + text + "$$"
+
     return [
         f"create schema if not exists {s}",
         f"""\
@@ -308,6 +311,79 @@ $disp$""",
             result_type="uuid",
             using_sql="$1",
         ).replace("using $1", "using feature"),
+        _comment_statement(
+            "_collection_feature_model(text, text)",
+            "Return the feature_model declared for one dataset collection from <dataset>.collection_capability. "
+            "Precondition: dataset must resolve to a generated dataset schema. "
+            "Returns text, or NULL when the collection is unknown. "
+            "Raises class 42 if the dataset capability table is missing.",
+        ),
+        _comment_statement(
+            "_assert_direct_write_allowed(text, text)",
+            "Check whether direct ogc.feature_* writes are allowed for one collection. "
+            "Precondition: dataset must resolve to a generated dataset schema. "
+            "Returns void. "
+            "Raises P0001 for feature_model topology, where ogc.transaction is the write path. "
+            "Raises class 42 for an unknown dataset or broken deployment.",
+        ),
+        _comment_statement(
+            "feature_items(text, text, float8[], integer, integer, boolean)",
+            "Return a GeoJSON FeatureCollection for one dataset collection. "
+            "Precondition: dataset and collection must resolve to generated read functions. "
+            "Returns a jsonb FeatureCollection. "
+            "Raises if the generated read function is missing.",
+        ),
+        _comment_statement(
+            "feature_item(text, text, uuid)",
+            "Return one GeoJSON Feature for a dataset collection id. "
+            "Precondition: dataset and collection must resolve to generated read functions. "
+            "Returns a jsonb Feature, or NULL when the id is absent. "
+            "Raises if the generated read function is missing.",
+        ),
+        _comment_statement(
+            "feature_create(text, text, jsonb)",
+            "Create one feature through the generated per-collection writer. "
+            "Precondition: dataset and collection must resolve to a simple-feature collection with a generated create function. "
+            "Client-supplied feature ids are stripped here and the server generates the row id. "
+            "Returns the new uuid. "
+            "Raises P0001 for topology collections, where ogc.transaction is the write path, and class 42 for unknown dataset or broken deployment.",
+        ),
+        _comment_statement(
+            "feature_replace(text, text, uuid, jsonb)",
+            "Replace one feature through the generated per-collection writer. "
+            "Precondition: dataset and collection must resolve to a simple-feature collection with a generated replace function. "
+            "Returns true when a matching feature was replaced. "
+            "Raises P0001 for topology collections, where ogc.transaction is the write path, and class 42 for unknown dataset or broken deployment.",
+        ),
+        _comment_statement(
+            "feature_update(text, text, uuid, jsonb)",
+            "Patch one feature through the generated per-collection writer. "
+            "Precondition: dataset and collection must resolve to a simple-feature collection with a generated update function. "
+            "Returns true when a matching feature was updated. "
+            "Raises P0001 for topology collections, where ogc.transaction is the write path, and class 42 for unknown dataset or broken deployment.",
+        ),
+        _comment_statement(
+            "feature_delete(text, text, uuid)",
+            "Delete one feature through the generated per-collection writer. "
+            "Precondition: dataset and collection must resolve to a simple-feature collection with a generated delete function. "
+            "Returns true when a matching feature was deleted. "
+            "Raises P0001 for topology collections, where ogc.transaction is the write path, and class 42 for unknown dataset or broken deployment.",
+        ),
+        _comment_statement(
+            "transaction(text, jsonb)",
+            'Apply an atomic transaction document of the form {"semantic": "atomic", "transaction": [...]} where action is the closed set insert | update | replace | delete. '
+            "Returns a report whose shape is documented in geocomponents/README.md. "
+            "For a data problem it rolls back to a savepoint and returns committed:false carrying the rejected item or document-level reason; it does not raise. "
+            "Client-supplied feature ids are honored on insert here; ogc.feature_create strips them. "
+            "Raises only for an unknown dataset, or a class-42 error from an undefined function, table, or column, which signals a broken deployment rather than bad input.",
+        ),
+        _comment_statement(
+            "feature_upsert(text, text, jsonb)",
+            "Upsert one feature by the collection business key through the generated per-collection writer. "
+            "Precondition: dataset and collection must resolve to a collection with a generated upsert function. "
+            "Returns the stable uuid for the stored feature. "
+            "Raises P0001 for topology collections, where ogc.transaction is the write path, and class 42 for unknown dataset, missing upsert support, or broken deployment.",
+        ),
     ]
 
 
