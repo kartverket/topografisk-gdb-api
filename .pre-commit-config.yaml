@@ -7,7 +7,7 @@ exclude: |
     UML-schemas/.*|
     ogc-standards/.*|
     nibio/.*\.sql|
-    descriptions/.*|
+    tmp_descriptions/.*|
     gcmapview/.*
   )$
 
