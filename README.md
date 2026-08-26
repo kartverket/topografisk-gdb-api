@@ -1,5 +1,13 @@
 # topografisk-gdb-api
 
+## Intro
+
+This repository is a proof of concept for exposing topographic geodata through
+generated OGC APIs and supporting services.
+
+It is not production-ready code. Expect rough edges, incomplete hardening,
+limited operational safeguards, and interfaces that may change without notice.
+
 OGC APIs for topographic geodata, built on
 [geocomponents](geocomponents/README.md): datasets are described in YAML, and
 both the PostGIS schema and the per-dataset
