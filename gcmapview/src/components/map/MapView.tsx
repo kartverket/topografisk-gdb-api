@@ -50,7 +50,9 @@ import {
   logNativeRenderingState,
   MIN_BUILDING_ZOOM,
   MIN_VECTOR_ZOOM,
+  setVisibleFeatureCollectionSource,
   setNativeFeatureSources,
+  type VisibleFeatureCollectionKey,
   type VisibleFeatureCollections,
   updateElevatedFeatureSources,
   upsertGeoJsonSource,
@@ -492,6 +494,15 @@ export function MapView() {
     configureInitialMapInteraction(map);
 
     let visibleRequestId = 0;
+
+    function loadingStatus(
+      visibleFeatureCollections: VisibleFeatureCollections,
+      layerId: VisibleFeatureCollectionKey,
+      buildingZoomActive: boolean
+    ) {
+      return `Laster kartdata fortløpende… oppdaterte ${layerId}. Nå vises ${visibleFeatureCollections.parcels.features.length} parseller, ${visibleFeatureCollections.buildings.features.length} bygninger, ${visibleFeatureCollections.platformEdges.features.length} plattformkanter, ${visibleFeatureCollections.trackCentres.features.length} spormidt, ${visibleFeatureCollections.bygning.features.length} Bygning-linjefeaturer, ${visibleFeatureCollections.bygningOmrade.features.length} Bygning-områdefeaturer, ${visibleFeatureCollections.bygningSenterlinje.features.length} Bygning-senterlinjefeaturer og ${visibleFeatureCollections.bygningPosisjon.features.length} Bygning-posisjonsfeaturer.${buildingZoomActive ? '' : ` Bygningslag lastes fra zoom ${MIN_BUILDING_ZOOM}.`}`;
+    }
+
     async function reloadVisibleData() {
       if (pendingElevatedRefreshTimeoutRef.current !== undefined) {
         window.clearTimeout(pendingElevatedRefreshTimeoutRef.current);
@@ -519,8 +530,8 @@ export function MapView() {
       try {
         await useLayerVisibilityStore.getState().resolveAvailableLayerIds();
         const currentVisibility = currentFilteredLayerVisibility();
+        const buildingZoomActive = isBuildingZoom(map);
         const {
-          bbox,
           parcels,
           buildings,
           platformEdges,
@@ -529,7 +540,19 @@ export function MapView() {
           bygningOmrade,
           bygningSenterlinje,
           bygningPosisjon
-        } = await getVisibleFeatureCollections(map, currentVisibility);
+        } = await getVisibleFeatureCollections(map, currentVisibility, async (collections, layerId) => {
+          if (cancelled || requestId !== visibleRequestId) {
+            return;
+          }
+
+          latestVectorDataRef.current = collections;
+          const renderedCollections = filterVisibleFeatureCollectionsByProperty(
+            latestVectorDataRef.current,
+            activeFeatureFilterRef.current
+          );
+          await setVisibleFeatureCollectionSource(map, layerId, renderedCollections[layerId]);
+          setStatus(loadingStatus(collections, layerId, buildingZoomActive));
+        });
         if (cancelled || requestId !== visibleRequestId) {
           return;
         }
@@ -547,7 +570,7 @@ export function MapView() {
         await applyRenderedVisibleData(map, latestVectorDataRef.current, currentVisibility);
         setError(undefined);
         setStatus(
-          `Lastet ${parcels.features.length} parseller, ${buildings.features.length} bygninger, ${platformEdges.features.length} plattformkanter, ${trackCentres.features.length} spormidt, ${bygning.features.length} Bygning-linjefeaturer, ${bygningOmrade.features.length} Bygning-områdefeaturer, ${bygningSenterlinje.features.length} Bygning-senterlinjefeaturer og ${bygningPosisjon.features.length} Bygning-posisjonsfeaturer for bbox ${bbox.map(value => value.toFixed(5)).join(',')}.${activeFeatureFilterRef.current ? ` Viser bare ${activeFeatureFilterRef.current.propertyKey} «${activeFeatureFilterRef.current.value}».` : ''}${isBuildingZoom(map) ? '' : ` Bygningslag lastes fra zoom ${MIN_BUILDING_ZOOM}.`}`
+          `Lastet ${parcels.features.length} parseller, ${buildings.features.length} bygninger, ${platformEdges.features.length} plattformkanter, ${trackCentres.features.length} spormidt, ${bygning.features.length} Bygning-linjefeaturer, ${bygningOmrade.features.length} Bygning-områdefeaturer, ${bygningSenterlinje.features.length} Bygning-senterlinjefeaturer og ${bygningPosisjon.features.length} Bygning-posisjonsfeaturer. ${activeFeatureFilterRef.current ? ` Viser bare ${activeFeatureFilterRef.current.propertyKey} «${activeFeatureFilterRef.current.value}».` : ''}${buildingZoomActive ? '' : ` Bygningslag lastes fra zoom ${MIN_BUILDING_ZOOM}.`}`
         );
       } catch (cause) {
         if (!cancelled && requestId === visibleRequestId) {

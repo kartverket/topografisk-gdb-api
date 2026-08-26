@@ -1,23 +1,18 @@
 [project]
-name = "gcjobs"
+name = "gcapi"
 version = "0.1.0"
-description = "Jobs FastAPI service with Alembic-managed schema in the shared geocomponents database"
+description = "Thin reverse proxy for geocomponents and supporting services"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "alembic>=1.16",
     "fastapi>=0.141.1",
     "httpx2>=2.10.0",
-    "pyyaml>=6.0",
-    "psycopg[binary]>=3.3.4",
-    "redis>=5.2",
-    "sqlalchemy>=2.0.43",
     "typer>=0.27.0",
     "uvicorn>=0.52.0",
 ]
 
 [project.scripts]
-gcjobs = "gcjobs.cli:app"
+gcapi = "gcapi.cli:app"
 
 [dependency-groups]
 dev = [
@@ -30,7 +25,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/gcjobs"]
+packages = ["src/gcapi"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

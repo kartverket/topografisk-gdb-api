@@ -107,7 +107,7 @@ export const useLayerVisibilityStore = create<LayerVisibilityState>()((set, get)
         MAP_LAYER_IDS.filter(layerId => availableCollectionIds.has(MAP_LAYER_COLLECTION_IDS[layerId]))
       )
       .catch(cause => {
-        console.warn('[gcmapview] could not load dataset layer availability', cause);
+        console.warn('[gcmapview] could not load collection availability', cause);
         return MAP_LAYER_IDS;
       })
       .then(availableLayerIds => {

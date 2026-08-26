@@ -10,6 +10,7 @@ DB_SCHEMA = "gc_jobs"
 # Keep synchronized with gcimport.profiles.BUILTIN_PROFILES without creating a runtime dependency.
 SUPPORTED_IMPORT_PROFILES = frozenset({"fkb_bane", "bygning"})
 DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 _DB_PARTS = (
     ("DB_HOST", "host"),
@@ -66,6 +67,21 @@ def sqlalchemy_url() -> str:
 
 def alembic_dir() -> Path:
     return Path(__file__).resolve().parent / "alembic"
+
+
+def descriptions_dir() -> Path:
+    if configured := os.environ.get("GEOCOMPONENTS_DESCRIPTIONS"):
+        return Path(configured)
+
+    shared_repo_descriptions = _REPO_ROOT / "descriptions"
+    if shared_repo_descriptions.exists():
+        return shared_repo_descriptions
+
+    return Path("descriptions")
+
+
+def api_base_url() -> str:
+    return os.environ.get("GCJOBS_API_BASE_URL", "http://localhost:8000").rstrip("/")
 
 
 def redis_url() -> str:

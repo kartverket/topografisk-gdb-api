@@ -79,6 +79,19 @@ jobs:
         working-directory: gcimport
         run: uv run pytest
 
+  test-gcapi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+      - name: Sync dependencies
+        run: uv sync --project gcapi --frozen
+      - name: Run tests
+        working-directory: gcapi
+        run: uv run pytest
+
   test-gccore:
     runs-on: ubuntu-latest
     steps:
@@ -135,12 +148,27 @@ jobs:
       - name: Audit dependencies with pip-audit
         run: uvx pip-audit -r requirements.txt --disable-pip
 
+  audit-gcapi:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gcapi
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+      - name: Export runtime dependencies to requirements.txt
+        run: uv export --frozen --no-dev --no-emit-project --format requirements-txt -o requirements.txt
+      - name: Audit dependencies with pip-audit
+        run: uvx pip-audit -r requirements.txt --disable-pip
+
   # Builds each Docker image on every PR and every push, loads it into the local
   # Docker daemon (no registry credentials), and fails the run on HIGH/CRITICAL
   # OS or library CVEs. Populates the GHA build cache so `publish` can reuse
   # layers.
   build-and-scan:
-    needs: [pre-commit-lint, test, test-gcimport, test-gccore, test-gcjobs, audit, audit-gcimport]
+    needs: [pre-commit-lint, test, test-gcapi, test-gcimport, test-gccore, test-gcjobs, audit, audit-gcapi, audit-gcimport]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -151,6 +179,11 @@ jobs:
             local_tag: geocomponents:scan
             image_name: ${{ github.repository }}-geocomponents
             cache_scope: geocomponents
+          - service: gcapi
+            context: ./gcapi
+            local_tag: gcapi:scan
+            image_name: ${{ github.repository }}-gcapi
+            cache_scope: gcapi
           - service: gcimport
             context: ./gcimport
             local_tag: gcimport:scan
@@ -212,6 +245,10 @@ jobs:
             context: ./geocomponents
             image_name: ${{ github.repository }}-geocomponents
             cache_scope: geocomponents
+          - service: gcapi
+            context: ./gcapi
+            image_name: ${{ github.repository }}-gcapi
+            cache_scope: gcapi
           - service: gcimport
             context: ./gcimport
             image_name: ${{ github.repository }}-gcimport

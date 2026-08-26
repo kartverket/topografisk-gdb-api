@@ -1,15 +1,11 @@
-import { geocomponentsRuntimeApiUrl, resolveApiBaseUrl } from './runtimeConfig';
+import { gcapiRuntimeApiUrl, resolveApiBaseUrl } from './runtimeConfig';
 
-export const geocomponentsApiBaseUrl = resolveApiBaseUrl(
-  geocomponentsRuntimeApiUrl(),
-  import.meta.env.GEOCOMPONENTS_API_URL,
-  'GEOCOMPONENTS_API_URL',
-  'http://localhost:8000'
+export const gcapiApiBaseUrl = resolveApiBaseUrl(
+  gcapiRuntimeApiUrl(),
+  import.meta.env.GCAPI_API_URL,
+  'GCAPI_API_URL',
+  'http://localhost:8004'
 );
-
-const cadastreApiUrl = `${geocomponentsApiBaseUrl}/datasets/cadastre/ogc_api`;
-const fkbBaneApiUrl = `${geocomponentsApiBaseUrl}/datasets/fkb_bane/ogc_api`;
-const bygningApiUrl = `${geocomponentsApiBaseUrl}/datasets/bygning/ogc_api`;
 
 export type CollectionId =
   | 'parcels'
@@ -27,31 +23,35 @@ export type CollectionMetadata = {
   crs?: string[];
 };
 
-const collectionApiUrls: Record<CollectionId, string> = {
-  parcels: cadastreApiUrl,
-  buildings: cadastreApiUrl,
-  jernbaneplattformkant: fkbBaneApiUrl,
-  spormidt: fkbBaneApiUrl,
-  bygning: bygningApiUrl,
-  bygning_omrade: bygningApiUrl,
-  bygning_senterlinje: bygningApiUrl,
-  bygning_posisjon: bygningApiUrl
+type CollectionRoute = {
+  datasetId: string;
+  collectionId: string;
 };
 
-const collectionIds = Object.keys(collectionApiUrls) as CollectionId[];
-
-type DatasetIndexResponse = {
-  datasets?: Array<{
-    collections?: string[];
-  }>;
+const collectionRoutes: Record<CollectionId, CollectionRoute> = {
+  parcels: { datasetId: 'cadastre', collectionId: 'parcels' },
+  buildings: { datasetId: 'cadastre', collectionId: 'buildings' },
+  jernbaneplattformkant: { datasetId: 'fkb_bane', collectionId: 'jernbaneplattformkant' },
+  spormidt: { datasetId: 'fkb_bane', collectionId: 'spormidt' },
+  bygning: { datasetId: 'bygning', collectionId: 'bygning' },
+  bygning_omrade: { datasetId: 'bygning', collectionId: 'bygning_omrade' },
+  bygning_senterlinje: { datasetId: 'bygning', collectionId: 'bygning_senterlinje' },
+  bygning_posisjon: { datasetId: 'bygning', collectionId: 'bygning_posisjon' }
 };
+
+const collectionIds = Object.keys(collectionRoutes) as CollectionId[];
 
 function isCollectionId(value: string): value is CollectionId {
   return collectionIds.includes(value as CollectionId);
 }
 
+function datasetOgcApiBaseUrl(datasetId: string) {
+  return `${gcapiApiBaseUrl}/datasets/${datasetId}/ogc_api`;
+}
+
 function collectionBaseUrl(collectionId: CollectionId) {
-  return `${collectionApiUrls[collectionId]}/collections/${collectionId}`;
+  const route = collectionRoutes[collectionId];
+  return `${datasetOgcApiBaseUrl(route.datasetId)}/collections/${route.collectionId}`;
 }
 
 function collectionItemsUrl(collectionId: CollectionId) {
@@ -67,9 +67,9 @@ export function collectionItemUrl(collectionId: CollectionId, id: string | numbe
 }
 
 export const parcelsItemsUrl = collectionItemsUrl('parcels');
-export const parcelsCreateUrl = `${cadastreApiUrl}/collections/parcels/items`;
+export const parcelsCreateUrl = `${collectionBaseUrl('parcels')}/items`;
 export const buildingsItemsUrl = collectionItemsUrl('buildings');
-export const buildingsCreateUrl = `${cadastreApiUrl}/collections/buildings/items`;
+export const buildingsCreateUrl = `${collectionBaseUrl('buildings')}/items`;
 export const platformEdgesItemsUrl = collectionItemsUrl('jernbaneplattformkant');
 export const trackCentresItemsUrl = collectionItemsUrl('spormidt');
 export const bygningItemsUrl = collectionItemsUrl('bygning');
@@ -120,26 +120,45 @@ export function bygningPosisjonItemsInBboxUrl(bbox: OgcBbox) {
 }
 
 export function parcelItemUrl(id: string | number) {
-  return `${cadastreApiUrl}/collections/parcels/items/${id}`;
+  return `${collectionBaseUrl('parcels')}/items/${id}`;
 }
 
 export function buildingItemUrl(id: string | number) {
-  return `${cadastreApiUrl}/collections/buildings/items/${id}`;
+  return `${collectionBaseUrl('buildings')}/items/${id}`;
 }
 
 export async function getDatasetCollectionIds() {
-  const response = await fetch(`${geocomponentsApiBaseUrl}/datasets`);
+  const response = await fetch(`${gcapiApiBaseUrl}/datasets`);
   if (!response.ok) {
-    throw new Error(`Dataset index request failed with ${response.status}`);
+    throw new Error(`Datasets request failed with ${response.status}`);
   }
 
-  const body = (await response.json()) as DatasetIndexResponse;
+  const body = (await response.json()) as {
+    datasets?: Array<{
+      id?: unknown;
+      collections?: unknown;
+    }>;
+  };
   const availableCollectionIds = new Set<CollectionId>();
+  const routeToLocal = new Map<string, CollectionId>(
+    collectionIds.map(collectionId => {
+      const route = collectionRoutes[collectionId];
+      return [`${route.datasetId}.${route.collectionId}`, collectionId];
+    })
+  );
 
   for (const dataset of body.datasets ?? []) {
-    for (const collectionId of dataset.collections ?? []) {
-      if (isCollectionId(collectionId)) {
-        availableCollectionIds.add(collectionId);
+    const datasetId = typeof dataset.id === 'string' ? dataset.id : null;
+    if (datasetId === null || !Array.isArray(dataset.collections)) {
+      continue;
+    }
+    for (const collectionId of dataset.collections) {
+      if (typeof collectionId !== 'string') {
+        continue;
+      }
+      const localId = routeToLocal.get(`${datasetId}.${collectionId}`);
+      if (localId && isCollectionId(localId)) {
+        availableCollectionIds.add(localId);
       }
     }
   }

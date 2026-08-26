@@ -43,9 +43,27 @@ import {
 export const terrainSourceId = 'terrain-dem';
 const TERRAIN_EXAGGERATION = 1;
 const BANE_TERRAIN_CLEARANCE_M = 2;
+const ELEVATED_SOURCES_WORKER_SCHEDULE_DELAY_MS = 32;
 const emptyFeatureCollection: FeatureCollection = { type: 'FeatureCollection', features: [] };
 let activeElevatedSourcesWorker: Worker | undefined;
 let latestElevatedSourcesRequestId = 0;
+let pendingElevatedSourcesTimeout: number | undefined;
+
+type PendingElevatedSourcesRequest = {
+  requestId: number;
+  map: maplibregl.Map;
+  platformEdges: FeatureCollection;
+  trackCentres: FeatureCollection;
+  bygning: FeatureCollection;
+  bygningSenterlinje: FeatureCollection;
+  bygningOmrade: FeatureCollection;
+  visibility: Pick<
+    LayerVisibility,
+    'platformEdges' | 'trackCentres' | 'bygning' | 'bygningSenterlinje' | 'bygningOmrade'
+  >;
+  adjustHeights: boolean;
+  renderElevatedSources: boolean;
+};
 
 function terrainElevationAt(map: maplibregl.Map, longitude: number, latitude: number): number | undefined {
   const terrainElevation = map.queryTerrainElevation([longitude, latitude]);
@@ -397,20 +415,24 @@ export function upsertElevatedSources(
   latestElevatedSourcesRequestId += 1;
   const requestId = latestElevatedSourcesRequestId;
 
+  if (pendingElevatedSourcesTimeout !== undefined) {
+    window.clearTimeout(pendingElevatedSourcesTimeout);
+    pendingElevatedSourcesTimeout = undefined;
+  }
+
   if (activeElevatedSourcesWorker) {
     activeElevatedSourcesWorker.terminate();
     activeElevatedSourcesWorker = undefined;
   }
 
-  clearElevatedSourceData(map);
-
   if (!renderElevatedSources) {
+    clearElevatedSourceData(map);
     return;
   }
 
-  const terrainEnabled = Boolean(map.getTerrain()) && !adjustHeights;
-  const workerRequest: ElevatedSourcesWorkerRequest = {
+  const pendingRequest: PendingElevatedSourcesRequest = {
     requestId,
+    map,
     platformEdges,
     trackCentres,
     bygning,
@@ -418,42 +440,70 @@ export function upsertElevatedSources(
     bygningOmrade,
     visibility,
     adjustHeights,
-    terrainEnabled,
-    baneTerrainClearanceMeters: BANE_TERRAIN_CLEARANCE_M,
-    terrainSamples: terrainEnabled
-      ? collectTerrainSamples(map, platformEdges, trackCentres, bygning, bygningSenterlinje, bygningOmrade, visibility)
-      : {}
+    renderElevatedSources
   };
 
-  const worker = new Worker(new URL('../workers/elevatedSourcesWorker.ts', import.meta.url), { type: 'module' });
-  activeElevatedSourcesWorker = worker;
+  pendingElevatedSourcesTimeout = window.setTimeout(() => {
+    pendingElevatedSourcesTimeout = undefined;
+    if (pendingRequest.requestId !== latestElevatedSourcesRequestId || !pendingRequest.renderElevatedSources) {
+      return;
+    }
 
-  worker.onmessage = event => {
-    const response = event.data as ElevatedSourcesWorkerResponse;
-    if (response.requestId !== latestElevatedSourcesRequestId) {
+    const terrainEnabled = Boolean(pendingRequest.map.getTerrain()) && !pendingRequest.adjustHeights;
+    const workerRequest: ElevatedSourcesWorkerRequest = {
+      requestId: pendingRequest.requestId,
+      platformEdges: pendingRequest.platformEdges,
+      trackCentres: pendingRequest.trackCentres,
+      bygning: pendingRequest.bygning,
+      bygningSenterlinje: pendingRequest.bygningSenterlinje,
+      bygningOmrade: pendingRequest.bygningOmrade,
+      visibility: pendingRequest.visibility,
+      adjustHeights: pendingRequest.adjustHeights,
+      terrainEnabled,
+      baneTerrainClearanceMeters: BANE_TERRAIN_CLEARANCE_M,
+      terrainSamples: terrainEnabled
+        ? collectTerrainSamples(
+            pendingRequest.map,
+            pendingRequest.platformEdges,
+            pendingRequest.trackCentres,
+            pendingRequest.bygning,
+            pendingRequest.bygningSenterlinje,
+            pendingRequest.bygningOmrade,
+            pendingRequest.visibility
+          )
+        : {}
+    };
+
+    const worker = new Worker(new URL('../workers/elevatedSourcesWorker.ts', import.meta.url), { type: 'module' });
+    activeElevatedSourcesWorker = worker;
+
+    worker.onmessage = event => {
+      const response = event.data as ElevatedSourcesWorkerResponse;
+      if (response.requestId !== latestElevatedSourcesRequestId) {
+        worker.terminate();
+        if (activeElevatedSourcesWorker === worker) {
+          activeElevatedSourcesWorker = undefined;
+        }
+        return;
+      }
+
+      setElevatedSourceData(pendingRequest.map, response);
       worker.terminate();
       if (activeElevatedSourcesWorker === worker) {
         activeElevatedSourcesWorker = undefined;
       }
-      return;
-    }
+    };
 
-    setElevatedSourceData(map, response);
-    worker.terminate();
-    if (activeElevatedSourcesWorker === worker) {
-      activeElevatedSourcesWorker = undefined;
-    }
-  };
+    worker.onerror = error => {
+      console.error('[gcmapview] elevated sources worker failed', error);
+      worker.terminate();
+      if (activeElevatedSourcesWorker === worker) {
+        activeElevatedSourcesWorker = undefined;
+      }
+    };
 
-  worker.onerror = error => {
-    console.error('[gcmapview] elevated sources worker failed', error);
-    worker.terminate();
-    if (activeElevatedSourcesWorker === worker) {
-      activeElevatedSourcesWorker = undefined;
-    }
-  };
-
-  worker.postMessage(workerRequest);
+    worker.postMessage(workerRequest);
+  }, ELEVATED_SOURCES_WORKER_SCHEDULE_DELAY_MS);
 }
 
 /** Apply 2D/3D layer set, gated by user layer toggles. */
