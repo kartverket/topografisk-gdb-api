@@ -1,7 +1,7 @@
 [project]
 name = "gcapi"
 version = "0.1.0"
-description = "Canonical OGC API facade service for geocomponents and gcjobs"
+description = "Thin reverse proxy for geocomponents and supporting services"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

@@ -21,16 +21,16 @@ def test_descriptions_dir_reads_environment(monkeypatch, tmp_path) -> None:
     assert config.descriptions_dir() == tmp_path
 
 
-def test_public_base_url_defaults_to_localhost(monkeypatch) -> None:
-    monkeypatch.delenv("GCJOBS_BASE_URL", raising=False)
+def test_api_base_url_defaults_to_localhost(monkeypatch) -> None:
+    monkeypatch.delenv("GCJOBS_API_BASE_URL", raising=False)
 
-    assert config.public_base_url() == "http://localhost:8000"
+    assert config.api_base_url() == "http://localhost:8000"
 
 
-def test_public_base_url_reads_environment(monkeypatch) -> None:
-    monkeypatch.setenv("GCJOBS_BASE_URL", "https://jobs.example.no/")
+def test_api_base_url_reads_new_environment(monkeypatch) -> None:
+    monkeypatch.setenv("GCJOBS_API_BASE_URL", "https://gcapi.example.no/")
 
-    assert config.public_base_url() == "https://jobs.example.no"
+    assert config.api_base_url() == "https://gcapi.example.no"
 
 
 def test_redis_url_requires_environment(monkeypatch) -> None:

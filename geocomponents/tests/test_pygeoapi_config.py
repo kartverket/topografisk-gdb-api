@@ -1,7 +1,9 @@
+import importlib
 from pathlib import Path
 
 import psycopg.errors
 import pytest
+from pygeoapi.process.base import ProcessorExecuteError
 
 from geocomponents.api.db_function_provider import (
     ProviderValidationError,
@@ -15,6 +17,7 @@ from geocomponents.api.pygeoapi_provider import (
 )
 from geocomponents.descriptions.loader import load_resolved_datasets
 from geocomponents.descriptions.models import ResolvedField
+from geocomponents.processes.registry import PROCESS_REGISTRY
 
 DESCRIPTIONS = Path(__file__).resolve().parents[2] / "descriptions"
 PUBLIC_URL = "http://example.org/datasets/cadastre/ogc_api"
@@ -49,6 +52,23 @@ def test_fkb_bane_config_exposes_batch_upsert_process():
     )
 
 
+def test_fkb_bane_config_exposes_import_process_shell():
+    fkb_bane = next(
+        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "fkb_bane"
+    )
+    cfg = build_config(
+        fkb_bane,
+        "http://example.org/datasets/fkb_bane/ogc_api",
+        dsn="postgresql://x",
+    )
+
+    process = cfg["resources"]["import"]
+    assert process["type"] == "process"
+    assert process["processor"]["name"] == PROCESS_REGISTRY["import"]
+    assert process["processor"]["dataset"] == "fkb_bane"
+    assert process["processor"]["dataset_title"] == "FKB-Bane"
+
+
 def test_bygning_config_exposes_batch_upsert_process():
     bygning = next(
         d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bygning"
@@ -66,6 +86,37 @@ def test_bygning_config_exposes_batch_upsert_process():
         "bygning_posisjon",
         "bygning_senterlinje",
     ]
+
+
+def test_import_processor_matches_gcjobs_shell_metadata_and_is_not_executable():
+    module_name, _, class_name = PROCESS_REGISTRY["import"].rpartition(".")
+    import_module = importlib.import_module(module_name)
+    processor_class = getattr(import_module, class_name)
+    processor = processor_class(
+        {
+            "name": PROCESS_REGISTRY["import"],
+            "dataset_title": "FKB-Bane",
+        }
+    )
+
+    assert processor.metadata["id"] == "import"
+    assert processor.metadata["title"] == {"en": "Import FKB-Bane"}
+    assert processor.metadata["description"] == {
+        "en": "Asynchronously import a multipart upload into the FKB-Bane dataset."
+    }
+    assert processor.metadata["jobControlOptions"] == ["async-execute"]
+    assert processor.metadata["outputs"] == {
+        "jobID": {
+            "title": "Job ID",
+            "description": "Identifier of the accepted import job.",
+            "schema": {"type": "string"},
+        }
+    }
+    with pytest.raises(
+        ProcessorExecuteError,
+        match="gcapi routes import execution to gcjobs",
+    ):
+        processor.execute({})
 
 
 def test_processes_are_only_the_declared_ones():

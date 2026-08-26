@@ -58,11 +58,17 @@ def _required_url(env_name: str) -> str:
     return _normalize_url(raw_value, env_name)
 
 
+def _optional_url(env_name: str) -> str | None:
+    raw_value = os.environ.get(env_name)
+    if raw_value is None or not raw_value.strip():
+        return None
+    return _normalize_url(raw_value, env_name)
+
+
 @dataclass(frozen=True)
 class Settings:
-    public_url: str
     geocomponents_url: str
-    gcjobs_url: str
+    gcjobs_url: str | None = None
     request_timeout_seconds: float = DEFAULT_REQUEST_TIMEOUT_SECONDS
     connect_timeout_seconds: float = DEFAULT_CONNECT_TIMEOUT_SECONDS
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
@@ -70,9 +76,8 @@ class Settings:
     @classmethod
     def from_env(cls) -> Settings:
         return cls(
-            public_url=_required_url("GCAPI_PUBLIC_URL"),
             geocomponents_url=_required_url("GCAPI_GEOCOMPONENTS_URL"),
-            gcjobs_url=_required_url("GCAPI_GCJOBS_URL"),
+            gcjobs_url=_optional_url("GCAPI_GCJOBS_URL"),
             request_timeout_seconds=_parse_positive_float(
                 "GCAPI_REQUEST_TIMEOUT_SECONDS",
                 DEFAULT_REQUEST_TIMEOUT_SECONDS,

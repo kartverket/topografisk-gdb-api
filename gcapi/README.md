@@ -2,38 +2,31 @@
 
 `gcapi` is the canonical browser-facing OGC API facade for this repository.
 
-It discovers dataset collections and synchronous processes from `geocomponents`,
-adapts asynchronous import jobs from `gcjobs`, and rewrites links so browser
-clients only see one public API surface.
+It is a thin reverse proxy in front of `geocomponents` and `gcjobs`.
 
-The public root mirrors the `geocomponents` gateway structure:
+`gcapi` does not model dataset structure, synthesize OpenAPI, or rewrite
+upstream JSON/link payloads. It forwards the incoming request method, path,
+query string, headers, and body to the configured upstream and returns the
+upstream response as-is.
 
-- `GET /datasets`
-- `GET /datasets/{datasetId}/ogc_api/`
-- `GET /datasets/{datasetId}/ogc_api/collections`
-- `GET /datasets/{datasetId}/ogc_api/processes`
+Most requests go to `geocomponents`. Dataset-scoped import process requests
+matching `/datasets/{dataset}/ogc_api/processes/import...` and dataset job
+requests matching `/datasets/{dataset}/ogc_api/jobs...` are forwarded to
+`gcjobs` when `GCAPI_GCJOBS_URL` is configured.
 
-The public asynchronous import surface is dataset-scoped as well:
+The only local endpoint is:
 
-- `POST /datasets/{datasetId}/ogc_api/processes/{processID}/execution`
-- `GET /datasets/{datasetId}/ogc_api/jobs`
-- `GET /datasets/{datasetId}/ogc_api/jobs/{jobID}`
-- `GET /datasets/{datasetId}/ogc_api/jobs/{jobID}/results`
-
-Process-specific job views are expressed through the dataset-local job list using
-query parameters such as `processID`, `status`, `datetime`, `minDuration`, and
-`maxDuration`.
+- `GET /healthz`
 
 ## Local development
 
 Required environment variables:
 
-- `GCAPI_PUBLIC_URL`
 - `GCAPI_GEOCOMPONENTS_URL`
-- `GCAPI_GCJOBS_URL`
 
 Optional environment variables:
 
+- `GCAPI_GCJOBS_URL`
 - `GCAPI_REQUEST_TIMEOUT_SECONDS`
 - `GCAPI_CONNECT_TIMEOUT_SECONDS`
 - `GCAPI_MAX_UPLOAD_BYTES`

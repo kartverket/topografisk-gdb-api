@@ -44,7 +44,7 @@ CRS84 = "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
 class DatasetMount:
     dataset: DatasetDescription
     mount_path: str
-    public_url: str
+    api_url: str
 
 
 def _normalize_process_id(process_id: str) -> str:
@@ -75,7 +75,7 @@ def dataset_index(mounts: list[DatasetMount]) -> dict[str, Any]:
                         "rel": "service-desc",
                         "type": "application/json",
                         "title": f"OGC API for '{mount.dataset.name}'",
-                        "href": mount.public_url + "/",
+                        "href": mount.api_url + "/",
                     }
                 ],
             }
@@ -180,9 +180,24 @@ def _csv_values(raw_value: str | None) -> set[str]:
     return {part.strip() for part in raw_value.split(",") if part.strip()}
 
 
-def _mounted_url(request: Request, path: str) -> str:
+def _mounted_base_url(request: Request) -> str:
+    return str(request.app.state.api_url).rstrip("/")
+
+
+def _public_request_url(request: Request) -> str:
     root_path = str(request.scope.get("root_path", "")).rstrip("/")
-    return f"{str(request.base_url).rstrip('/')}{root_path}{path}"
+    path = str(request.scope.get("path", ""))
+    if root_path and path.startswith(root_path):
+        path = path[len(root_path) :] or "/"
+    query = request.url.query
+    url = f"{_mounted_base_url(request)}{path}"
+    if query:
+        return f"{url}?{query}"
+    return url
+
+
+def _mounted_url(request: Request, path: str) -> str:
+    return f"{_mounted_base_url(request)}{path}"
 
 
 def _job_links(request: Request, run: dict[str, Any]) -> list[dict[str, str]]:
@@ -405,7 +420,7 @@ def _process_resource(dataset: DatasetDescription) -> dict[str, Any]:
     }
 
 
-def _build_config(dataset: DatasetDescription, public_url: str) -> dict[str, Any]:
+def _build_config(dataset: DatasetDescription, api_url: str) -> dict[str, Any]:
     resources: dict[str, dict[str, Any]] = {}
     if dataset.import_enabled:
         resources[IMPORT_PROCESS_ID] = _process_resource(dataset)
@@ -413,7 +428,7 @@ def _build_config(dataset: DatasetDescription, public_url: str) -> dict[str, Any
     return {
         "server": {
             "bind": {"host": "0.0.0.0", "port": 8000},  # noqa: S104
-            "url": public_url,
+            "url": api_url,
             "mimetype": "application/json",
             "encoding": "utf-8",
             "language": "en-US",
@@ -431,13 +446,13 @@ def _build_config(dataset: DatasetDescription, public_url: str) -> dict[str, Any
                 "keywords": ["import", "jobs"],
                 "keywords_type": "theme",
                 "terms_of_service": "https://creativecommons.org/licenses/by/4.0/",
-                "url": public_url,
+                "url": api_url,
             },
             "license": {
                 "name": "CC-BY 4.0",
                 "url": "https://creativecommons.org/licenses/by/4.0/",
             },
-            "provider": {"name": "gcjobs", "url": public_url},
+            "provider": {"name": "gcjobs", "url": api_url},
             "contact": {
                 "name": "gcjobs",
                 "position": "",
@@ -449,7 +464,7 @@ def _build_config(dataset: DatasetDescription, public_url: str) -> dict[str, Any
                 "phone": "",
                 "fax": "",
                 "email": "noreply@example.com",
-                "url": public_url,
+                "url": api_url,
                 "hours": "",
                 "instructions": "",
                 "role": "pointOfContact",
@@ -472,12 +487,12 @@ async def _execute(api_: API, fn, request: Request, *args, skip_valid_check=Fals
 def _build_dataset_app(
     root_app: FastAPI,
     dataset: DatasetDescription,
-    public_url: str,
+    api_url: str,
 ) -> FastAPI:
-    cfg = _build_config(dataset, public_url.rstrip("/"))
+    cfg = _build_config(dataset, api_url.rstrip("/"))
     api_ = API(cfg, get_oas(cfg))
     dataset_app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
-    dataset_app.state.public_url = public_url.rstrip("/")
+    dataset_app.state.api_url = api_url.rstrip("/")
     dataset_app.state.root_app = root_app
     dataset_app.state.dataset = dataset
 
@@ -571,7 +586,7 @@ def _build_dataset_app(
             "jobs": filtered[:limit],
             "links": [
                 {
-                    "href": str(request.url),
+                    "href": _public_request_url(request),
                     "rel": "self",
                     "type": "application/json",
                     "title": "This document",
@@ -668,9 +683,9 @@ def create_app(
     mounts: list[DatasetMount] = []
     for dataset in datasets:
         path = mount_path(dataset.name)
-        public_url = f"{config.public_base_url()}{path}"
-        application.mount(path, _build_dataset_app(application, dataset, public_url))
-        mounts.append(DatasetMount(dataset, path, public_url))
+        api_url = f"{config.api_base_url()}{path}"
+        application.mount(path, _build_dataset_app(application, dataset, api_url))
+        mounts.append(DatasetMount(dataset, path, api_url))
 
     _register_routes(application, mounts)
 

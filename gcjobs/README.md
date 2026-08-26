@@ -8,7 +8,8 @@ shared PostgreSQL database used by `geocomponents`.
   `GEOCOMPONENTS_DESCRIPTIONS` when set
 - Shared Redis broker for the import-event stream: set `REDIS_URL`
 - Import worker target: set `GCJOBS_IMPORT_API_URL` to the gcimport base URL
-- Public OGC base URL: `GCJOBS_BASE_URL` defaults to `http://localhost:8000`
+- Public API base URL: `GCJOBS_API_BASE_URL` controls emitted dataset/job URLs
+  and defaults to `http://localhost:8000`
 - Upload limit: `GCJOBS_MAX_UPLOAD_BYTES` defaults to `104857600` (100 MiB)
 - Owned schema: `gc_jobs`
 - Migration entrypoint: `gcjobs migrate-db`
@@ -19,6 +20,7 @@ shared PostgreSQL database used by `geocomponents`.
 uv sync
 export REDIS_URL=redis://localhost:56379/0
 export GCJOBS_IMPORT_API_URL=http://localhost:8001
+export GCJOBS_API_BASE_URL=http://localhost:8004
 uv run gcjobs migrate-db
 uv run gcjobs serve --port 8003
 ```

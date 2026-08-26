@@ -90,6 +90,34 @@ type JobStatusResponse = {
   lastError?: unknown;
 };
 
+function gcapiDatasetJobUrl(profile: ImportProfile, suffix: string) {
+  const baseUrl = new URL(`${gcapiApiBaseUrl.replace(/\/$/, '')}/`);
+  const normalizedSuffix = suffix.replace(/^\//, '');
+  return new URL(`/datasets/${profile}/ogc_api/jobs/${normalizedSuffix}`, baseUrl).toString();
+}
+
+function normalizeImportJobLocation(
+  location: string | null,
+  profile: ImportProfile,
+  importId: string
+) {
+  const fallbackUrl = gcapiDatasetJobUrl(profile, encodeURIComponent(importId));
+  if (!location) {
+    return fallbackUrl;
+  }
+
+  try {
+    const resolved = new URL(location, `${gcapiApiBaseUrl.replace(/\/$/, '')}/`);
+    const prefix = `/datasets/${profile}/ogc_api/jobs/`;
+    if (!resolved.pathname.startsWith(prefix)) {
+      return fallbackUrl;
+    }
+    return new URL(`${resolved.pathname}${resolved.search}`, `${gcapiApiBaseUrl.replace(/\/$/, '')}/`).toString();
+  } catch {
+    return fallbackUrl;
+  }
+}
+
 function inferProfileFromToken(value: unknown): ImportProfile | null {
   if (typeof value !== 'string') return null;
   const token = value.trim().toLowerCase();
@@ -175,10 +203,11 @@ export async function startImport(file: File, profile: ImportProfile): Promise<I
     throw new Error(errorMessage(body, response.status));
   }
   const payload = body as JobStatusResponse;
+  const importId = typeof payload.jobID === 'string' ? payload.jobID : '';
   return {
-    import_id: typeof payload.jobID === 'string' ? payload.jobID : '',
+    import_id: importId,
     status: executionStatus(payload.status),
-    location: response.headers.get('Location'),
+    location: normalizeImportJobLocation(response.headers.get('Location'), profile, importId),
     profile
   };
 }
@@ -273,8 +302,7 @@ export async function getImportRun(
   resultLocation: string | null,
   profile: ImportProfile
 ): Promise<ImportRun> {
-  const fallbackUrl = `${gcapiApiBaseUrl}/datasets/${profile}/ogc_api/jobs/${encodeURIComponent(importId)}`;
-  const response = await fetch(resultLocation ?? fallbackUrl);
+  const response = await fetch(normalizeImportJobLocation(resultLocation, profile, importId));
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     throw new Error(errorMessage(body, response.status));

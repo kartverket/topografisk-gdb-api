@@ -80,8 +80,8 @@ def descriptions_dir() -> Path:
     return Path("descriptions")
 
 
-def public_base_url() -> str:
-    return os.environ.get("GCJOBS_BASE_URL", "http://localhost:8000").rstrip("/")
+def api_base_url() -> str:
+    return os.environ.get("GCJOBS_API_BASE_URL", "http://localhost:8000").rstrip("/")
 
 
 def redis_url() -> str:

@@ -437,6 +437,45 @@ def test_process_execution_returns_created_job_location(
     assert response.json()["processID"] == "import"
 
 
+def test_process_execution_uses_configured_api_base_url_for_job_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "gcjobs.app.config.gcimport_api_url", lambda: "http://gcimport:8000"
+    )
+    monkeypatch.setattr(
+        "gcjobs.app.config.api_base_url", lambda: "https://gcapi.example.no/edge"
+    )
+    monkeypatch.setattr("gcjobs.app.config.max_upload_bytes", lambda: 1024 * 1024)
+    monkeypatch.setattr(
+        "gcjobs.app.db.record_import_event",
+        lambda event, *, message_id=None: {"id": event["import_id"]},
+    )
+
+    def handler(_request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, json={"total": 1, "features": []})
+
+    proxy_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    app = create_app(
+        event_listener=StubImportEventListener([]),
+        import_client=proxy_client,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"{_dataset_api('fkb_bane')}/processes/import/execution",
+            files={"file": ("source.geojson", "{}", "application/geo+json")},
+        )
+
+    expected_job_url = f"https://gcapi.example.no/edge{_dataset_api('fkb_bane')}/jobs/{response.json()['jobID']}"
+    assert response.status_code == 201
+    assert response.headers["location"] == expected_job_url
+    assert response.json()["links"][0]["href"] == expected_job_url
+    assert response.json()["links"][1]["href"] == (
+        f"https://gcapi.example.no/edge{_dataset_api('fkb_bane')}/jobs"
+    )
+
+
 def test_jobs_endpoint_returns_filtered_mapped_jobs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -495,19 +534,19 @@ def test_jobs_endpoint_returns_filtered_mapped_jobs(
             "message": "Import completed",
             "links": [
                 {
-                    "href": f"http://testserver{_dataset_api('fkb_bane')}/jobs/job-1",
+                    "href": f"http://localhost:8000{_dataset_api('fkb_bane')}/jobs/job-1",
                     "rel": "self",
                     "type": "application/json",
                     "title": "This document",
                 },
                 {
-                    "href": f"http://testserver{_dataset_api('fkb_bane')}/jobs",
+                    "href": f"http://localhost:8000{_dataset_api('fkb_bane')}/jobs",
                     "rel": "up",
                     "type": "application/json",
                     "title": "Job list",
                 },
                 {
-                    "href": f"http://testserver{_dataset_api('fkb_bane')}/jobs/job-1/results",
+                    "href": f"http://localhost:8000{_dataset_api('fkb_bane')}/jobs/job-1/results",
                     "rel": "http://www.opengis.net/def/rel/ogc/1.0/results",
                     "type": "application/json",
                     "title": "Job results",
@@ -528,6 +567,44 @@ def test_jobs_endpoint_returns_filtered_mapped_jobs(
             "finished": "2026-08-24T10:01:00Z",
         }
     ]
+
+
+def test_datasets_endpoint_uses_configured_api_base_url_in_links(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "gcjobs.app.config.api_base_url", lambda: "https://gcapi.example.no/edge"
+    )
+    client = TestClient(create_app(event_listener=StubImportEventListener([])))
+
+    response = client.get("/datasets")
+
+    assert response.status_code == 200
+    assert response.json()["datasets"][0]["links"][0]["href"].startswith(
+        "https://gcapi.example.no/edge/datasets/"
+    )
+
+
+def test_jobs_endpoint_uses_configured_api_base_url_for_self_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "gcjobs.app.config.api_base_url", lambda: "https://gcapi.example.no/edge"
+    )
+    monkeypatch.setattr(
+        "gcjobs.app.db.list_import_runs",
+        lambda *, active_only, limit=50: [],
+    )
+    client = TestClient(create_app(event_listener=StubImportEventListener([])))
+
+    response = client.get(
+        f"{_dataset_api('fkb_bane')}/jobs?type=process&processID=import"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["links"][0]["href"] == (
+        "https://gcapi.example.no/edge/datasets/fkb_bane/ogc_api/jobs?type=process&processID=import"
+    )
 
 
 def test_job_results_returns_summary_for_successful_import(
