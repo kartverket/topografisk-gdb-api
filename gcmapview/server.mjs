@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 const distDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dist');
 const indexFile = path.join(distDir, 'index.html');
 const host = '0.0.0.0';
-const port = Number.parseInt(process.env.PORT ?? '80', 10);
+const port = Number.parseInt(process.env.PORT ?? '8080', 10);
 
 function requireEnv(name) {
   const value = process.env[name]?.trim();

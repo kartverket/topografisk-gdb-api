@@ -5,9 +5,8 @@ OGC APIs for topographic geodata, built on
 both the PostGIS schema and the per-dataset
 [OGC API — Features](https://ogcapi.ogc.org/features/) services are generated
 from those descriptions. `gcapi` is the canonical browser-facing facade: it
-discovers namespaced collections and synchronous processes from `geocomponents`,
-adapts asynchronous import jobs from `gcjobs`, and rewrites links so browser
-clients only see one public OGC surface.
+proxies the public OGC surface to `geocomponents` for features and synchronous
+processes, and to `gcjobs` for asynchronous import execution and job status.
 
 System overview (Mermaid): [`ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -130,8 +129,8 @@ To scope jobs to a specific process, use the standard `processID` query
 parameter on the dataset-local `/jobs`, for example:
 
 ```bash
-curl 'http://localhost:8004/datasets/fkb_bane/ogc_api/jobs?type=process&processID=import-fkb-bane'
-curl 'http://localhost:8004/datasets/bygning/ogc_api/jobs?type=process&processID=import-bygning&status=successful'
+curl 'http://localhost:8004/datasets/fkb_bane/ogc_api/jobs?type=process&processID=import'
+curl 'http://localhost:8004/datasets/bygning/ogc_api/jobs?type=process&processID=import&status=successful'
 ```
 
 For manual import testing against the canonical facade, use the gcapi-owned
@@ -139,9 +138,9 @@ dataset-scoped process execution endpoints:
 
 ```bash
 curl -F 'file=@bane.json;type=application/json' \
-  'http://localhost:8004/datasets/fkb_bane/ogc_api/processes/import-fkb-bane/execution'
+  'http://localhost:8004/datasets/fkb_bane/ogc_api/processes/import/execution'
 curl -F 'file=@bygning.geojson;type=application/geo+json' \
-  'http://localhost:8004/datasets/bygning/ogc_api/processes/import-bygning/execution'
+  'http://localhost:8004/datasets/bygning/ogc_api/processes/import/execution'
 ```
 
 The `201 Created` response includes a `Location` header pointing at the created

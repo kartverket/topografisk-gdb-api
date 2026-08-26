@@ -33,7 +33,7 @@ services:
       DB_USER: geocomponents
       DB_PASSWORD: geocomponents
       GEOCOMPONENTS_DESCRIPTIONS: /app/descriptions
-      GEOCOMPONENTS_BASE_URL: http://localhost:8000
+      GEOCOMPONENTS_BASE_URL: http://localhost:8004
     volumes:
       - ./src:/app/src:ro
       - type: bind
@@ -103,7 +103,7 @@ services:
       GCAPI_API_URL: http://localhost:8004
     read_only: true
     ports:
-      - "8080:80"
+      - "8080:8080"
     depends_on:
       gcapi:
         condition: service_healthy

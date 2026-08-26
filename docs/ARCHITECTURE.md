@@ -33,7 +33,7 @@ flowchart TB
   GCAPI -->|features + sync processes| API
   GCAPI -->|import execution + job status| JOBS
   JOBS -->|proxy /imports| IMP
-  IMP -->|items:upsert over HTTP| API
+  IMP -->|batch upsert process over HTTP| API
   IMP -->|append import events| REDIS
   REDIS -->|consumer group + persist| JOBS
   API -->|ogc.feature_* dispatch| DB
@@ -74,7 +74,7 @@ flowchart TB
     IMP["gcimport<br/>:8001 -> 8000"]
     CORE["gccore<br/>:8002 -> 8000"]
     JOBS["gcjobs<br/>:8003 -> 8000"]
-    FE["gcmapview<br/>container :8080 -> 80"]
+    FE["gcmapview<br/>container :8080 -> 8080"]
 
     DB --> MIG --> API
     API --> GCAPI
@@ -90,7 +90,7 @@ flowchart TB
   FEDEV -->|GCAPI_API_URL| GCAPI
   GCAPI -->|proxy dataset import execute + job paths| JOBS
   JOBS -->|proxy /imports| IMP
-  IMP -->|HTTP items:upsert| API
+  IMP -->|HTTP /processes/upsert-batch/execution| API
   IMP -->|append import events| REDIS
   REDIS -->|consumer group + persist| JOBS
   API -->|ogc.feature_*| DB
@@ -172,7 +172,7 @@ flowchart LR
   APP --> CONV["GeoJSON -> JSON-FG conversion<br/>when filename ends with .geojson"]
   CONV --> PREP["prepare_document()<br/>validate + normalize + CRS transform"]
   PREP --> PROF["ImportProfile routing"]
-  PROF --> UP["import_features()<br/>POST collection/items:upsert"]
+  PROF --> UP["import_features()<br/>POST /processes/upsert-batch/execution"]
   APP --> EVT["append import events<br/>started / parsed / batch / completed"]
   EVT --> REDIS["Redis Stream"]
   UP --> API["geocomponents OGC API"]
@@ -197,7 +197,7 @@ Behavior now:
 
 - `.geojson` uploads are converted to JSON-FG before validation.
 - JSON is validated before the first upstream request.
-- Features are grouped by collection and sent in configurable chunks to `.../processes/upsert-batch/execution`; if that process is unavailable, gcimport falls back to per-feature `.../collections/{collection}/items:upsert`.
+- Features are grouped by collection and sent in configurable chunks to `.../processes/upsert-batch/execution`; if that process is unavailable, gcimport fails the import.
 - Import lifecycle events are appended at parse start, parse completion, per-batch success/failure, and final success/failure.
 - Redis Streams are the single event transport from `gcimport` back to `gcjobs`.
 - The response reports the stable UUID returned by the upstream API for each imported feature.
@@ -312,11 +312,11 @@ sequenceDiagram
   I->>R: publish import.parsed
   R->>J: import.parsed
   J->>JDB: update run + append event
-  loop each collection batch or single-feature fallback
-    I->>G: POST /collections/{collection}/items:upsert
-    G->>DB: ogc.feature_upsert
-    DB-->>G: stable UUID
-    G-->>I: imported feature response
+  loop each collection batch
+    I->>G: POST /processes/upsert-batch/execution
+    G->>DB: ogc.transaction
+    DB-->>G: stable UUIDs
+    G-->>I: imported feature responses
   end
   I->>R: publish batch/completed events
   R->>J: batch/completed events
@@ -441,7 +441,7 @@ Operational points:
 
 1. **YAML descriptions drive schema and API surface**. The repo does not hand-maintain dataset-specific SQL tables or HTTP handlers.
 2. **`ogc.feature_*` and `ogc.transaction` are the backend contract boundary**. Generated dispatch functions isolate the API and process layers from physical dataset tables.
-3. **`gcimport` is profile-driven and synchronous in the current codebase**. It validates first, then imports in collection batches or feature fallback through the OGC API, while emitting lifecycle events to Redis.
+3. **`gcimport` is profile-driven and synchronous in the current codebase**. It validates first, then imports in collection batches through the OGC API batch process while emitting lifecycle events to Redis.
 4. **`gcmapview` owns visualization-only concerns** such as client reprojection, 2D/3D switching, terrain handling, and derived elevated geometry.
 5. **`gcjobs` owns durable import-tracking state in the current POC**. It accepts internal import requests from `gcapi` immediately and persists event-derived state in PostgreSQL.
 6. **`gcapi` is the only backend the browser should call** for feature access, process execution, job status, and job results. `gcjobs` should emit browser-facing job URLs through `GCJOBS_API_BASE_URL` so those links stay on the `gcapi` origin.
