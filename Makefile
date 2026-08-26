@@ -56,7 +56,7 @@ docker-trivy-scan:
 	set -e; \
 	for service in $(TRIVY_SERVICES); do \
 		echo "Building $$service:scan"; \
-		docker build -t "$$service:scan" "./$$service"; \
+		docker build --pull --no-cache -t "$$service:scan" "./$$service"; \
 		echo "Scanning $$service:scan with Trivy in Docker"; \
 		docker run --rm \
 			-v "$$socket_path:/var/run/docker.sock" \

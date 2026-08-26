@@ -216,6 +216,7 @@ jobs:
           context: ${{ matrix.context }}
           load: true
           tags: ${{ matrix.local_tag }}
+          no-cache-filters: runtime
           cache-from: type=gha,scope=${{ matrix.cache_scope }}
           cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
 
@@ -306,6 +307,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          no-cache-filters: runtime
           cache-from: type=gha,scope=${{ matrix.cache_scope }}
           cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
 
