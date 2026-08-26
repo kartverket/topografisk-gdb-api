@@ -173,12 +173,18 @@ services:
       DB_NAME: geocomponents
       DB_USER: geocomponents
       DB_PASSWORD: geocomponents
+      GEOCOMPONENTS_DESCRIPTIONS: /app/descriptions
       GCJOBS_IMPORT_API_URL: http://gcimport:8000
+      GCJOBS_BASE_URL: http://localhost:8003
       REDIS_URL: redis://redis:6379/0
     ports:
       - "8003:8000"
     volumes:
       - ../gcjobs/src:/app/src:ro
+      - type: bind
+        source: ${DESCRIPTIONS_DIR:-../descriptions}
+        target: /app/descriptions
+        read_only: true
     healthcheck:
       test:
         - CMD

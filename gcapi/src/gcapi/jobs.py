@@ -14,10 +14,7 @@ from gcapi.transport import proxy_request
 router = APIRouter(tags=["jobs"])
 
 PROCESS_JOB_TYPE = "process"
-IMPORT_PROCESS_IDS_BY_DATASET = {
-    "bygning": "import-bygning",
-    "fkb_bane": "import-fkb-bane",
-}
+IMPORT_PROCESS_ID = "import"
 
 
 def _settings(request: Request) -> Settings:
@@ -126,8 +123,12 @@ def _filter_jobs(  # noqa: PLR0913
     return filtered
 
 
-async def _gcjobs_jobs(request: Request, dataset_id: str) -> list[dict[str, Any]] | Any:
-    upstream_url = f"{_settings(request).gcjobs_url}/jobs"
+async def _gcjobs_jobs(
+    request: Request, dataset_id: str
+) -> list[dict[str, object]] | object:
+    upstream_url = (
+        f"{_settings(request).gcjobs_url}{dataset_api_path(dataset_id, '/jobs')}"
+    )
     try:
         response = await request.app.state.http_client.get(
             upstream_url, params={"limit": 10000}
@@ -160,6 +161,10 @@ async def _gcjobs_jobs(request: Request, dataset_id: str) -> list[dict[str, Any]
     ]
 
 
+def _is_problem_response(payload: object) -> bool:
+    return hasattr(payload, "status_code")
+
+
 @router.get("/datasets/{dataset_id}/ogc_api/jobs")
 async def jobs(  # noqa: PLR0913, PLR0917
     request: Request,
@@ -180,20 +185,14 @@ async def jobs(  # noqa: PLR0913, PLR0917
         )
 
     payload = await _gcjobs_jobs(request, dataset_id)
-    if hasattr(payload, "status_code"):
+    if _is_problem_response(payload):
         return payload
 
     type_filter = _csv_values(type_values)
     if type_filter and PROCESS_JOB_TYPE not in type_filter:
         mapped: list[dict[str, Any]] = []
     else:
-        import_process_id = IMPORT_PROCESS_IDS_BY_DATASET.get(dataset_id)
-        if import_process_id is None:
-            mapped = []
-        else:
-            mapped = [
-                job for job in payload if job.get("processID") == import_process_id
-            ]
+        mapped = [job for job in payload if job.get("processID") == IMPORT_PROCESS_ID]
     try:
         mapped = _filter_jobs(
             mapped,
@@ -235,7 +234,7 @@ async def job(request: Request, dataset_id: str, job_id: str):
     return await proxy_request(
         client=request.app.state.http_client,
         request=request,
-        upstream_url=f"{_settings(request).gcjobs_url}/jobs/{job_id}",
+        upstream_url=f"{_settings(request).gcjobs_url}{dataset_api_path(dataset_id, f'/jobs/{job_id}')}",
         settings=_settings(request),
         catalog=_catalog(request),
         max_upload_bytes=_settings(request).max_upload_bytes,
@@ -254,7 +253,10 @@ async def job_results(request: Request, dataset_id: str, job_id: str):
     return await proxy_request(
         client=request.app.state.http_client,
         request=request,
-        upstream_url=f"{_settings(request).gcjobs_url}/jobs/{job_id}/results",
+        upstream_url=(
+            f"{_settings(request).gcjobs_url}"
+            f"{dataset_api_path(dataset_id, f'/jobs/{job_id}/results')}"
+        ),
         settings=_settings(request),
         catalog=_catalog(request),
         max_upload_bytes=_settings(request).max_upload_bytes,

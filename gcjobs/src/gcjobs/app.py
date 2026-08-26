@@ -4,16 +4,28 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
 import httpx2
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
+import pygeoapi.api as core_api
+import pygeoapi.api.processes as processes_api
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pygeoapi.api import API, APIRequest, apply_gzip
+from pygeoapi.openapi import get_oas
+from starlette.responses import Response
 
 from gcjobs import config, db
+from gcjobs.datasets import (
+    DatasetDescription,
+    DescriptionError,
+    load_dataset_descriptions,
+)
+from gcjobs.import_process import IMPORT_PROCESS_ID
 from gcjobs.pubsub import ImportEventListener, RedisImportEventListener
 
 # Reuse uvicorn's configured error logger so import-event logs reach the console
@@ -21,29 +33,55 @@ from gcjobs.pubsub import ImportEventListener, RedisImportEventListener
 LOGGER = logging.getLogger("uvicorn.error").getChild("gcjobs.import_events")
 
 IMPORT_CLIENT_TIMEOUT = httpx2.Timeout(5.0, read=None)
-IMPORT_PROCESS_IDS = {
-    "import-bygning": "bygning",
-    "import-fkb-bane": "fkb_bane",
-}
-PROCESS_IDS_BY_PROFILE = {
-    profile_name: process_id for process_id, profile_name in IMPORT_PROCESS_IDS.items()
-}
 PROCESS_JOB_TYPE = "process"
 JOB_LIST_REL = "http://www.opengis.net/def/rel/ogc/1.0/job-list"
 RESULTS_REL = "http://www.opengis.net/def/rel/ogc/1.0/results"
-EXECUTE_REL = "http://www.opengis.net/def/rel/ogc/1.0/execute"
+PROCESSOR_PATH = "gcjobs.import_process.ImportProcessProcessor"
+CRS84 = "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
 
 
-def _supported_processes_detail() -> str:
-    supported = ", ".join(sorted(IMPORT_PROCESS_IDS))
-    return f"processID must be one of: {supported}"
+@dataclass(frozen=True)
+class DatasetMount:
+    dataset: DatasetDescription
+    mount_path: str
+    public_url: str
 
 
 def _normalize_process_id(process_id: str) -> str:
     normalized = process_id.strip().casefold()
-    if normalized not in IMPORT_PROCESS_IDS:
-        raise HTTPException(status_code=404, detail=_supported_processes_detail())
+    if normalized != IMPORT_PROCESS_ID:
+        raise LookupError(f"processID must be one of: {IMPORT_PROCESS_ID}")
     return normalized
+
+
+def mount_path(dataset_name: str) -> str:
+    return f"/datasets/{dataset_name}/ogc_api"
+
+
+def dataset_index(mounts: list[DatasetMount]) -> dict[str, Any]:
+    return {
+        "title": "gcjobs datasets",
+        "description": "Each dataset is served as its own OGC API for import jobs.",
+        "datasets": [
+            {
+                "id": mount.dataset.name,
+                "title": mount.dataset.title,
+                "description": mount.dataset.description,
+                "processes": [IMPORT_PROCESS_ID]
+                if mount.dataset.import_enabled
+                else [],
+                "links": [
+                    {
+                        "rel": "service-desc",
+                        "type": "application/json",
+                        "title": f"OGC API for '{mount.dataset.name}'",
+                        "href": mount.public_url + "/",
+                    }
+                ],
+            }
+            for mount in mounts
+        ],
+    }
 
 
 def _declared_content_length(headers: Any) -> int | None:
@@ -84,12 +122,15 @@ def _lifespan(
     @asynccontextmanager
     async def lifespan(app_instance: FastAPI) -> AsyncIterator[None]:
         listener = event_listener or RedisImportEventListener(config.redis_url())
+        app_instance.state.proxy_tasks.clear()
         task = asyncio.create_task(_consume_import_events(listener))
         if import_client is not None:
             app_instance.state.import_client = import_client
             try:
                 yield
             finally:
+                for proxy_task in tuple(app_instance.state.proxy_tasks):
+                    await _cancel_task(proxy_task)
                 await _cancel_task(task)
             return
 
@@ -103,6 +144,8 @@ def _lifespan(
             try:
                 yield
             finally:
+                for proxy_task in tuple(app_instance.state.proxy_tasks):
+                    await _cancel_task(proxy_task)
                 await _cancel_task(task)
 
     return lifespan
@@ -112,6 +155,11 @@ async def _cancel_task(task: asyncio.Task[None]) -> None:
     task.cancel()
     with suppress(asyncio.CancelledError):
         await task
+
+
+def _dataset_matches_run(run: dict[str, Any], dataset_name: str) -> bool:
+    profile = run.get("profile")
+    return isinstance(profile, str) and profile.casefold() == dataset_name.casefold()
 
 
 def _map_status(run: dict[str, Any]) -> str:
@@ -132,25 +180,22 @@ def _csv_values(raw_value: str | None) -> set[str]:
     return {part.strip() for part in raw_value.split(",") if part.strip()}
 
 
-def _job_url(request: Request, path: str) -> str:
-    return f"{str(request.base_url).rstrip('/')}{path}"
-
-
-def _process_url(request: Request, process_id: str) -> str:
-    return _job_url(request, f"/processes/{process_id}")
+def _mounted_url(request: Request, path: str) -> str:
+    root_path = str(request.scope.get("root_path", "")).rstrip("/")
+    return f"{str(request.base_url).rstrip('/')}{root_path}{path}"
 
 
 def _job_links(request: Request, run: dict[str, Any]) -> list[dict[str, str]]:
     job_id = str(run["id"])
     links = [
         {
-            "href": _job_url(request, f"/jobs/{job_id}"),
+            "href": _mounted_url(request, f"/jobs/{job_id}"),
             "rel": "self",
             "type": "application/json",
             "title": "This document",
         },
         {
-            "href": _job_url(request, "/jobs"),
+            "href": _mounted_url(request, "/jobs"),
             "rel": "up",
             "type": "application/json",
             "title": "Job list",
@@ -159,7 +204,7 @@ def _job_links(request: Request, run: dict[str, Any]) -> list[dict[str, str]]:
     if _map_status(run) == "successful":
         links.append(
             {
-                "href": _job_url(request, f"/jobs/{job_id}/results"),
+                "href": _mounted_url(request, f"/jobs/{job_id}/results"),
                 "rel": RESULTS_REL,
                 "type": "application/json",
                 "title": "Job results",
@@ -183,7 +228,6 @@ def _job_payload(request: Request, run: dict[str, Any]) -> dict[str, Any]:
     if isinstance(total_features, int) and total_features > 0:
         progress = max(0, min(100, round((processed_features / total_features) * 100)))
 
-    profile_name = run.get("profile")
     payload: dict[str, Any] = {
         "type": PROCESS_JOB_TYPE,
         "jobID": str(run["id"]),
@@ -198,9 +242,8 @@ def _job_payload(request: Request, run: dict[str, Any]) -> dict[str, Any]:
         "processedBatches": int(run.get("processed_batches") or 0),
         "succeededBatches": int(run.get("succeeded_batches") or 0),
         "failedBatches": int(run.get("failed_batches") or 0),
+        "processID": IMPORT_PROCESS_ID,
     }
-    if isinstance(profile_name, str) and profile_name in PROCESS_IDS_BY_PROFILE:
-        payload["processID"] = PROCESS_IDS_BY_PROFILE[profile_name]
     if progress is not None:
         payload["progress"] = progress
     created_at = _rfc3339_timestamp(run.get("started_at"))
@@ -236,13 +279,13 @@ def _accepted_job_payload(
         "message": "Import accepted",
         "links": [
             {
-                "href": _job_url(request, f"/jobs/{import_id}"),
+                "href": _mounted_url(request, f"/jobs/{import_id}"),
                 "rel": "self",
                 "type": "application/json",
                 "title": "This document",
             },
             {
-                "href": _job_url(request, "/jobs"),
+                "href": _mounted_url(request, "/jobs"),
                 "rel": "up",
                 "type": "application/json",
                 "title": "Job list",
@@ -251,27 +294,31 @@ def _accepted_job_payload(
     }
 
 
-def _process_payload(request: Request, process_id: str) -> dict[str, Any]:
+def _process_payload(request: Request, dataset: DatasetDescription) -> dict[str, Any]:
     return {
-        "id": process_id,
-        "title": f"Import {IMPORT_PROCESS_IDS[process_id]}",
-        "description": f"Asynchronously import data using the {IMPORT_PROCESS_IDS[process_id]} profile.",
+        "id": IMPORT_PROCESS_ID,
+        "title": f"Import {dataset.title}",
+        "description": f"Asynchronously import data into the {dataset.title} dataset.",
         "jobControlOptions": ["async-execute"],
         "links": [
             {
-                "href": _process_url(request, process_id),
+                "href": _mounted_url(request, f"/processes/{IMPORT_PROCESS_ID}"),
                 "rel": "self",
                 "type": "application/json",
                 "title": "This process",
             },
             {
-                "href": _job_url(request, f"/processes/{process_id}/execution"),
-                "rel": EXECUTE_REL,
+                "href": _mounted_url(
+                    request,
+                    f"/processes/{IMPORT_PROCESS_ID}/execution",
+                ),
+                "rel": "http://www.opengis.net/def/rel/ogc/1.0/execute",
                 "type": "multipart/form-data",
                 "title": "Execute process",
             },
             {
-                "href": _job_url(request, f"/jobs?type=process&processID={process_id}"),
+                "href": _mounted_url(request, "/jobs")
+                + f"?type=process&processID={IMPORT_PROCESS_ID}",
                 "rel": JOB_LIST_REL,
                 "type": "application/json",
                 "title": "Process jobs",
@@ -281,10 +328,9 @@ def _process_payload(request: Request, process_id: str) -> dict[str, Any]:
 
 
 async def _queue_import_request(
-    application: FastAPI,
-    background_tasks: BackgroundTasks,
     request: Request,
-    profile_name: str,
+    import_client: httpx2.AsyncClient,
+    dataset_name: str,
 ) -> str:
     payload = await _read_bounded_request_body(request, config.max_upload_bytes())
     import_id = str(uuid4())
@@ -295,18 +341,23 @@ async def _queue_import_request(
             "import_id": import_id,
             "event": "import.accepted",
             "phase": "accepted",
-            "profile": profile_name,
+            "profile": dataset_name,
         }
     )
 
-    background_tasks.add_task(
-        _proxy_import,
-        application.state.import_client,
-        import_id,
-        profile_name,
-        content_type,
-        payload,
+    proxy_task = asyncio.create_task(
+        _proxy_import(
+            import_client,
+            import_id,
+            dataset_name,
+            content_type,
+            payload,
+        )
     )
+    root_app = getattr(request.app.state, "root_app", request.app)
+    proxy_tasks = root_app.state.proxy_tasks
+    proxy_tasks.add(proxy_task)
+    proxy_task.add_done_callback(proxy_tasks.discard)
     return import_id
 
 
@@ -343,7 +394,221 @@ def _job_results_payload(run: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _register_routes(application: FastAPI) -> None:
+def _process_resource(dataset: DatasetDescription) -> dict[str, Any]:
+    return {
+        "type": "process",
+        "processor": {
+            "name": PROCESSOR_PATH,
+            "dataset": dataset.name,
+            "dataset_title": dataset.title,
+        },
+    }
+
+
+def _build_config(dataset: DatasetDescription, public_url: str) -> dict[str, Any]:
+    resources: dict[str, dict[str, Any]] = {}
+    if dataset.import_enabled:
+        resources[IMPORT_PROCESS_ID] = _process_resource(dataset)
+
+    return {
+        "server": {
+            "bind": {"host": "0.0.0.0", "port": 8000},  # noqa: S104
+            "url": public_url,
+            "mimetype": "application/json",
+            "encoding": "utf-8",
+            "language": "en-US",
+            "languages": ["en-US"],
+            "gzip": False,
+            "cors": True,
+            "pretty_print": True,
+            "limits": {"default_items": 10, "max_items": 10000},
+        },
+        "logging": {"level": "ERROR"},
+        "metadata": {
+            "identification": {
+                "title": dataset.title,
+                "description": dataset.description or dataset.title,
+                "keywords": ["import", "jobs"],
+                "keywords_type": "theme",
+                "terms_of_service": "https://creativecommons.org/licenses/by/4.0/",
+                "url": public_url,
+            },
+            "license": {
+                "name": "CC-BY 4.0",
+                "url": "https://creativecommons.org/licenses/by/4.0/",
+            },
+            "provider": {"name": "gcjobs", "url": public_url},
+            "contact": {
+                "name": "gcjobs",
+                "position": "",
+                "address": "",
+                "city": "",
+                "stateorprovince": "",
+                "postalcode": "",
+                "country": "",
+                "phone": "",
+                "fax": "",
+                "email": "noreply@example.com",
+                "url": public_url,
+                "hours": "",
+                "instructions": "",
+                "role": "pointOfContact",
+            },
+        },
+        "resources": resources,
+    }
+
+
+async def _execute(api_: API, fn, request: Request, *args, skip_valid_check=False):
+    api_request = await APIRequest.from_starlette(request, api_.locales)
+    if not skip_valid_check and not api_request.is_valid():
+        headers, status, content = api_.get_format_exception(api_request)
+    else:
+        headers, status, content = fn(api_, api_request, *args)
+        content = apply_gzip(headers, content)
+    return Response(content, status_code=status, headers=headers)
+
+
+def _build_dataset_app(
+    root_app: FastAPI,
+    dataset: DatasetDescription,
+    public_url: str,
+) -> FastAPI:
+    cfg = _build_config(dataset, public_url.rstrip("/"))
+    api_ = API(cfg, get_oas(cfg))
+    dataset_app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
+    dataset_app.state.public_url = public_url.rstrip("/")
+    dataset_app.state.root_app = root_app
+    dataset_app.state.dataset = dataset
+
+    @dataset_app.get("/")
+    async def landing(request: Request) -> Response:
+        return await _execute(api_, core_api.landing_page, request)
+
+    @dataset_app.get("/openapi")
+    async def openapi(request: Request) -> Response:
+        return await _execute(api_, core_api.openapi_, request)
+
+    @dataset_app.get("/conformance")
+    async def conformance(request: Request) -> Response:
+        return await _execute(api_, core_api.conformance, request)
+
+    @dataset_app.get("/collections")
+    @dataset_app.get("/collections/{collection_id}")
+    async def collections(
+        request: Request, collection_id: str | None = None
+    ) -> Response:
+        return await _execute(
+            api_, core_api.describe_collections, request, collection_id
+        )
+
+    @dataset_app.get("/processes", name="dataset_processes")
+    @dataset_app.get("/processes/{process_id}", name="dataset_process")
+    async def processes(request: Request, process_id: str | None = None) -> Response:
+        return await _execute(
+            api_, processes_api.describe_processes, request, process_id
+        )
+
+    @dataset_app.post(
+        "/processes/{process_id}/execution",
+        name="dataset_process_execution",
+    )
+    async def execute_process(request: Request, process_id: str) -> JSONResponse:
+        if not dataset.import_enabled:
+            return JSONResponse({"detail": "process not found"}, status_code=404)
+        try:
+            normalized_process_id = _normalize_process_id(process_id)
+        except LookupError as err:
+            return JSONResponse({"detail": str(err)}, status_code=404)
+
+        content_type = request.headers.get("content-type", "")
+        if not content_type.lower().startswith("multipart/form-data"):
+            return JSONResponse(
+                {"detail": "Import processes require multipart/form-data uploads"},
+                status_code=415,
+            )
+
+        import_id = await _queue_import_request(
+            request,
+            dataset_app.state.root_app.state.import_client,
+            dataset.name,
+        )
+        location = _mounted_url(request, f"/jobs/{import_id}")
+        return JSONResponse(
+            _accepted_job_payload(request, import_id, normalized_process_id),
+            status_code=201,
+            headers={"Location": location},
+        )
+
+    @dataset_app.get("/jobs", name="dataset_jobs")
+    def jobs(
+        request: Request,
+        limit: int = Query(default=10, ge=1, le=10000),
+        type_values: str | None = Query(default=None, alias="type"),
+        status: str | None = None,
+        process_id: str | None = Query(default=None, alias="processID"),
+    ) -> dict[str, Any]:
+        type_filter = _csv_values(type_values)
+        process_filter = _csv_values(process_id)
+        if process_filter and IMPORT_PROCESS_ID not in process_filter:
+            filtered: list[dict[str, Any]] = []
+        elif type_filter and PROCESS_JOB_TYPE not in type_filter:
+            filtered = []
+        else:
+            jobs_list = [
+                _job_payload(request, run)
+                for run in db.list_import_runs(active_only=False, limit=10000)
+                if _dataset_matches_run(run, dataset.name)
+            ]
+            filtered = _filter_jobs(
+                jobs_list,
+                type_values=type_filter,
+                process_ids=process_filter,
+                statuses=_csv_values(status),
+            )
+
+        return {
+            "jobs": filtered[:limit],
+            "links": [
+                {
+                    "href": str(request.url),
+                    "rel": "self",
+                    "type": "application/json",
+                    "title": "This document",
+                }
+            ],
+        }
+
+    @dataset_app.get("/jobs/{job_id}", name="dataset_job")
+    def job(request: Request, job_id: str) -> dict[str, Any]:
+        run = db.get_import_run(job_id)
+        if run is None or not _dataset_matches_run(run, dataset.name):
+            raise HTTPException(status_code=404, detail="job not found")
+        return _job_payload(request, run)
+
+    @dataset_app.get("/jobs/{job_id}/results", name="dataset_job_results")
+    def job_results(job_id: str) -> dict[str, Any]:
+        run = db.get_import_run(job_id)
+        if run is None or not _dataset_matches_run(run, dataset.name):
+            raise HTTPException(status_code=404, detail="job not found")
+
+        mapped_status = _map_status(run)
+        if mapped_status in {"accepted", "running"}:
+            raise HTTPException(status_code=404, detail="job results are not ready")
+        if mapped_status == "failed":
+            last_error = run.get("last_error")
+            detail = "job failed"
+            if isinstance(last_error, dict) and isinstance(
+                last_error.get("reason"), str
+            ):
+                detail = last_error["reason"]
+            raise HTTPException(status_code=422, detail=detail)
+        return _job_results_payload(run)
+
+    return dataset_app
+
+
+def _register_routes(application: FastAPI, mounts: list[DatasetMount]) -> None:
     @application.get("/")
     def root() -> dict[str, str]:
         return {"service": config.SERVICE_NAME, "schema": config.DB_SCHEMA}
@@ -366,113 +631,9 @@ def _register_routes(application: FastAPI) -> None:
             return JSONResponse(payload, status_code=503)
         return payload
 
-    @application.get("/processes")
-    def processes(request: Request) -> dict[str, Any]:
-        return {
-            "processes": [
-                _process_payload(request, process_id)
-                for process_id in sorted(IMPORT_PROCESS_IDS)
-            ],
-            "links": [
-                {
-                    "href": _job_url(request, "/processes"),
-                    "rel": "self",
-                    "type": "application/json",
-                    "title": "This document",
-                }
-            ],
-        }
-
-    @application.get("/processes/{process_id}")
-    def process(request: Request, process_id: str) -> dict[str, Any]:
-        return _process_payload(request, _normalize_process_id(process_id))
-
-    @application.post("/processes/{process_id}/execution")
-    async def execute_process(
-        background_tasks: BackgroundTasks,
-        request: Request,
-        process_id: str,
-    ) -> JSONResponse:
-        normalized_process_id = _normalize_process_id(process_id)
-        content_type = request.headers.get("content-type", "")
-        if not content_type.lower().startswith("multipart/form-data"):
-            raise HTTPException(
-                status_code=415,
-                detail="Import processes require multipart/form-data uploads",
-            )
-        profile_name = IMPORT_PROCESS_IDS[normalized_process_id]
-        import_id = await _queue_import_request(
-            application,
-            background_tasks,
-            request,
-            profile_name,
-        )
-        location = _job_url(request, f"/jobs/{import_id}")
-        return JSONResponse(
-            _accepted_job_payload(request, import_id, normalized_process_id),
-            status_code=201,
-            headers={"Location": location},
-        )
-
-    @application.get("/jobs")
-    def jobs(
-        request: Request,
-        limit: int = Query(default=10, ge=1, le=10000),
-        type_values: str | None = Query(default=None, alias="type"),
-        status: str | None = None,
-        process_id: str | None = Query(default=None, alias="processID"),
-    ) -> dict[str, Any]:
-        jobs_list = [
-            _job_payload(request, run)
-            for run in db.list_import_runs(active_only=False, limit=10000)
-        ]
-        type_filter = _csv_values(type_values)
-        if type_filter and PROCESS_JOB_TYPE not in type_filter:
-            filtered: list[dict[str, Any]] = []
-        else:
-            filtered = _filter_jobs(
-                jobs_list,
-                type_values=type_filter,
-                process_ids=_csv_values(process_id),
-                statuses=_csv_values(status),
-            )
-        return {
-            "jobs": filtered[:limit],
-            "links": [
-                {
-                    "href": str(request.url),
-                    "rel": "self",
-                    "type": "application/json",
-                    "title": "This document",
-                }
-            ],
-        }
-
-    @application.get("/jobs/{job_id}")
-    def job(request: Request, job_id: str) -> dict[str, Any]:
-        run = db.get_import_run(job_id)
-        if run is None:
-            raise HTTPException(status_code=404, detail="job not found")
-        return _job_payload(request, run)
-
-    @application.get("/jobs/{job_id}/results")
-    def job_results(job_id: str) -> dict[str, Any]:
-        run = db.get_import_run(job_id)
-        if run is None:
-            raise HTTPException(status_code=404, detail="job not found")
-
-        mapped_status = _map_status(run)
-        if mapped_status in {"accepted", "running"}:
-            raise HTTPException(status_code=404, detail="job results are not ready")
-        if mapped_status == "failed":
-            last_error = run.get("last_error")
-            detail = "job failed"
-            if isinstance(last_error, dict) and isinstance(
-                last_error.get("reason"), str
-            ):
-                detail = last_error["reason"]
-            raise HTTPException(status_code=422, detail=detail)
-        return _job_results_payload(run)
+    @application.get("/datasets")
+    def datasets() -> dict[str, Any]:
+        return dataset_index(mounts)
 
 
 def create_app(
@@ -480,6 +641,14 @@ def create_app(
     event_listener: ImportEventListener | None = None,
     import_client: httpx2.AsyncClient | None = None,
 ) -> FastAPI:
+    try:
+        datasets = load_dataset_descriptions(
+            config.descriptions_dir(),
+            supported_import_profiles=config.SUPPORTED_IMPORT_PROFILES,
+        )
+    except DescriptionError as err:
+        raise RuntimeError(f"invalid shared descriptions for gcjobs: {err}") from err
+
     application = FastAPI(
         title="gcjobs",
         version="0.1.0",
@@ -494,8 +663,16 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    application.state.proxy_tasks = set()
 
-    _register_routes(application)
+    mounts: list[DatasetMount] = []
+    for dataset in datasets:
+        path = mount_path(dataset.name)
+        public_url = f"{config.public_base_url()}{path}"
+        application.mount(path, _build_dataset_app(application, dataset, public_url))
+        mounts.append(DatasetMount(dataset, path, public_url))
+
+    _register_routes(application, mounts)
 
     return application
 

@@ -22,14 +22,8 @@ from gcapi.transport import (
 
 router = APIRouter(tags=["processes"])
 
-IMPORT_PROCESS_IDS = {
-    "import-fkb-bane": "fkb_bane",
-    "import-bygning": "bygning",
-}
-
-IMPORT_PROCESS_IDS_BY_DATASET = {
-    dataset_id: process_id for process_id, dataset_id in IMPORT_PROCESS_IDS.items()
-}
+IMPORT_PROCESS_ID = "import"
+IMPORT_DATASETS = frozenset({"bygning", "fkb_bane"})
 
 
 def _settings(request: Request) -> Settings:
@@ -53,11 +47,10 @@ def _dataset_exists(request: Request, dataset_id: str) -> bool:
 def _owned_import_description(
     request: Request, dataset_id: str, process_id: str
 ) -> dict[str, Any]:
-    title = "Import FKB-Bane" if process_id == "import-fkb-bane" else "Import Bygning"
-    dataset = "FKB-Bane" if process_id == "import-fkb-bane" else "Bygning"
+    dataset = "FKB-Bane" if dataset_id == "fkb_bane" else "Bygning"
     return {
         "id": process_id,
-        "title": title,
+        "title": f"Import {dataset}",
         "description": f"Upload a multipart JSON-FG or GeoJSON file for asynchronous {dataset} import.",
         "version": "1.0.0",
         "jobControlOptions": ["async-execute"],
@@ -182,10 +175,9 @@ def processes(request: Request, dataset_id: str, limit: int = 10):
         for route in _catalog(request).processes.values()
         if route.dataset_id == dataset_id
     ]
-    import_process_id = IMPORT_PROCESS_IDS_BY_DATASET.get(dataset_id)
-    if import_process_id is not None:
+    if dataset_id in IMPORT_DATASETS:
         process_payloads.append(
-            _owned_import_description(request, dataset_id, import_process_id)
+            _owned_import_description(request, dataset_id, IMPORT_PROCESS_ID)
         )
     return {
         "processes": process_payloads[: max(1, min(limit, 10000))],
@@ -210,7 +202,7 @@ def process(request: Request, dataset_id: str, process_id: str):
             title="Dataset not found",
             detail=f"Unknown dataset '{dataset_id}'",
         )
-    if IMPORT_PROCESS_IDS_BY_DATASET.get(dataset_id) == process_id:
+    if dataset_id in IMPORT_DATASETS and process_id == IMPORT_PROCESS_ID:
         return _owned_import_description(request, dataset_id, process_id)
     route = _process_route(request, dataset_id, process_id)
     if route is None:
@@ -234,7 +226,10 @@ async def _execute_import_process(request: Request, dataset_id: str, process_id:
     return await proxy_request(
         client=request.app.state.http_client,
         request=request,
-        upstream_url=f"{_settings(request).gcjobs_url}/processes/{process_id}/execution",
+        upstream_url=(
+            f"{_settings(request).gcjobs_url}"
+            f"{dataset_api_path(dataset_id, f'/processes/{process_id}/execution')}"
+        ),
         settings=_settings(request),
         catalog=_catalog(request),
         max_upload_bytes=_settings(request).max_upload_bytes,
@@ -250,7 +245,7 @@ async def execute_process(request: Request, dataset_id: str, process_id: str):
             title="Dataset not found",
             detail=f"Unknown dataset '{dataset_id}'",
         )
-    if IMPORT_PROCESS_IDS_BY_DATASET.get(dataset_id) == process_id:
+    if dataset_id in IMPORT_DATASETS and process_id == IMPORT_PROCESS_ID:
         return await _execute_import_process(request, dataset_id, process_id)
     route = _process_route(request, dataset_id, process_id)
     if route is None:

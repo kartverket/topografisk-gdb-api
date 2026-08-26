@@ -157,14 +157,18 @@ function errorMessage(body: unknown, status: number) {
   return `Import failed with HTTP ${status}`;
 }
 
+const IMPORT_PROCESS_ID = 'import';
+
 export async function startImport(file: File, profile: ImportProfile): Promise<ImportResult> {
   const form = new FormData();
   form.append('file', file);
-  const processId = profile === 'fkb_bane' ? 'import-fkb-bane' : 'import-bygning';
-  const response = await fetch(`${gcapiApiBaseUrl}/datasets/${profile}/ogc_api/processes/${processId}/execution`, {
-    method: 'POST',
-    body: form
-  });
+  const response = await fetch(
+    `${gcapiApiBaseUrl}/datasets/${profile}/ogc_api/processes/${IMPORT_PROCESS_ID}/execution`,
+    {
+      method: 'POST',
+      body: form
+    }
+  );
 
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {

@@ -88,6 +88,12 @@ def _rewrite_known_upstream_url(  # noqa: PLR0911
             return value
         suffix = value.removeprefix(f"{gcjobs_base}/processes")
         return f"{public_url(settings, f'{public_api_base_path}/processes')}{suffix}"
+    if gcjobs_rewritten := _rewrite_gcjobs_dataset_url(
+        value,
+        settings=settings,
+        catalog=catalog,
+    ):
+        return gcjobs_rewritten
 
     for route in catalog.collections.values():
         mapped = _rewrite_collection_url(value, route, settings)
@@ -121,6 +127,24 @@ def _rewrite_known_upstream_url(  # noqa: PLR0911
         if value in replacements:
             return replacements[value]
     return value
+
+
+def _rewrite_gcjobs_dataset_url(
+    value: str,
+    *,
+    settings: Settings,
+    catalog: CatalogSnapshot,
+) -> str | None:
+    gcjobs_base = settings.gcjobs_url.rstrip("/")
+    for dataset in catalog.datasets.values():
+        gcjobs_dataset_base = f"{gcjobs_base}{dataset_api_path(dataset.dataset_id)}"
+        public_dataset_base = public_url(settings, dataset_api_path(dataset.dataset_id))
+        for resource_name in ("jobs", "processes"):
+            upstream_resource = f"{gcjobs_dataset_base}/{resource_name}"
+            if value == upstream_resource or value.startswith(f"{upstream_resource}/"):
+                suffix = value.removeprefix(upstream_resource)
+                return f"{public_dataset_base}/{resource_name}{suffix}"
+    return None
 
 
 def _rewrite_collection_url(

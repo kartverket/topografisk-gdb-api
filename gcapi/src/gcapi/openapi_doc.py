@@ -4,10 +4,8 @@ from gcapi.catalog import CatalogSnapshot
 from gcapi.config import Settings
 from gcapi.rewrite import dataset_api_path, public_url
 
-IMPORT_PROCESS_IDS_BY_DATASET = {
-    "bygning": "import-bygning",
-    "fkb_bane": "import-fkb-bane",
-}
+IMPORT_PROCESS_ID = "import"
+IMPORT_DATASETS = frozenset({"bygning", "fkb_bane"})
 
 
 def build_openapi(
@@ -24,11 +22,7 @@ def build_openapi(
             for route in catalog.processes.values()
             if route.dataset_id == dataset_id
         }
-        | (
-            {IMPORT_PROCESS_IDS_BY_DATASET[dataset_id]}
-            if dataset_id in IMPORT_PROCESS_IDS_BY_DATASET
-            else set()
-        )
+        | ({IMPORT_PROCESS_ID} if dataset_id in IMPORT_DATASETS else set())
     )
     server_url = public_url(settings, dataset_api_path(dataset_id))
     return {

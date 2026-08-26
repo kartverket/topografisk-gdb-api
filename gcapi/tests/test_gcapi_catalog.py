@@ -305,24 +305,25 @@ def _build_transport(
             )
         if (
             method == "POST"
-            and url == "http://gcjobs.test/processes/import-fkb-bane/execution"
+            and url
+            == "http://gcjobs.test/datasets/fkb_bane/ogc_api/processes/import/execution"
         ):
             return _json_response(
                 {
                     "type": "process",
                     "jobID": "job-1",
-                    "processID": "import-fkb-bane",
+                    "processID": "import",
                     "status": "accepted",
                     "message": "Import accepted",
                     "links": [
                         {
-                            "href": "http://gcjobs.test/jobs/job-1",
+                            "href": "http://gcjobs.test/datasets/fkb_bane/ogc_api/jobs/job-1",
                             "rel": "self",
                             "type": "application/json",
                             "title": "This document",
                         },
                         {
-                            "href": "http://gcjobs.test/jobs",
+                            "href": "http://gcjobs.test/datasets/fkb_bane/ogc_api/jobs",
                             "rel": "up",
                             "type": "application/json",
                             "title": "Job list",
@@ -330,9 +331,14 @@ def _build_transport(
                     ],
                 },
                 status_code=201,
-                headers={"Location": "http://gcjobs.test/jobs/job-1"},
+                headers={
+                    "Location": "http://gcjobs.test/datasets/fkb_bane/ogc_api/jobs/job-1"
+                },
             )
-        if method == "GET" and url == "http://gcjobs.test/jobs?limit=10000":
+        if (
+            method == "GET"
+            and url == "http://gcjobs.test/datasets/fkb_bane/ogc_api/jobs?limit=10000"
+        ):
             return _json_response(
                 {
                     "jobs": [
@@ -341,16 +347,16 @@ def _build_transport(
                             "jobID": "job-1",
                             "status": "accepted",
                             "phase": "accepted",
-                            "processID": "import-fkb-bane",
+                            "processID": "import",
                             "links": [
                                 {
-                                    "href": "http://gcjobs.test/jobs/job-1",
+                                    "href": "http://gcjobs.test/datasets/fkb_bane/ogc_api/jobs/job-1",
                                     "rel": "self",
                                     "type": "application/json",
                                     "title": "This document",
                                 },
                                 {
-                                    "href": "http://gcjobs.test/jobs",
+                                    "href": "http://gcjobs.test/datasets/fkb_bane/ogc_api/jobs",
                                     "rel": "up",
                                     "type": "application/json",
                                     "title": "Job list",
@@ -367,27 +373,37 @@ def _build_transport(
                             "created": "2026-08-24T09:00:00Z",
                             "message": "Import accepted",
                         },
+                    ]
+                }
+            )
+        if (
+            method == "GET"
+            and url == "http://gcjobs.test/datasets/bygning/ogc_api/jobs?limit=10000"
+        ):
+            return _json_response(
+                {
+                    "jobs": [
                         {
                             "type": "process",
                             "jobID": "job-2",
                             "status": "successful",
                             "phase": "completed",
-                            "processID": "import-bygning",
+                            "processID": "import",
                             "links": [
                                 {
-                                    "href": "http://gcjobs.test/jobs/job-2",
+                                    "href": "http://gcjobs.test/datasets/bygning/ogc_api/jobs/job-2",
                                     "rel": "self",
                                     "type": "application/json",
                                     "title": "This document",
                                 },
                                 {
-                                    "href": "http://gcjobs.test/jobs",
+                                    "href": "http://gcjobs.test/datasets/bygning/ogc_api/jobs",
                                     "rel": "up",
                                     "type": "application/json",
                                     "title": "Job list",
                                 },
                                 {
-                                    "href": "http://gcjobs.test/jobs/job-2/results",
+                                    "href": "http://gcjobs.test/datasets/bygning/ogc_api/jobs/job-2/results",
                                     "rel": "http://www.opengis.net/def/rel/ogc/1.0/results",
                                     "type": "application/json",
                                     "title": "Job results",
@@ -410,29 +426,32 @@ def _build_transport(
                     ]
                 }
             )
-        if method == "GET" and url == "http://gcjobs.test/jobs/job-1":
+        if (
+            method == "GET"
+            and url == "http://gcjobs.test/datasets/fkb_bane/ogc_api/jobs/job-1"
+        ):
             return _json_response(
                 {
                     "type": "process",
                     "jobID": "job-1",
                     "status": "successful",
                     "phase": "completed",
-                    "processID": "import-fkb-bane",
+                    "processID": "import",
                     "links": [
                         {
-                            "href": "http://gcjobs.test/jobs/job-1",
+                            "href": "http://gcjobs.test/datasets/fkb_bane/ogc_api/jobs/job-1",
                             "rel": "self",
                             "type": "application/json",
                             "title": "This document",
                         },
                         {
-                            "href": "http://gcjobs.test/jobs",
+                            "href": "http://gcjobs.test/datasets/fkb_bane/ogc_api/jobs",
                             "rel": "up",
                             "type": "application/json",
                             "title": "Job list",
                         },
                         {
-                            "href": "http://gcjobs.test/jobs/job-1/results",
+                            "href": "http://gcjobs.test/datasets/fkb_bane/ogc_api/jobs/job-1/results",
                             "rel": "http://www.opengis.net/def/rel/ogc/1.0/results",
                             "type": "application/json",
                             "title": "Job results",
@@ -453,7 +472,10 @@ def _build_transport(
                     "progress": 100,
                 }
             )
-        if method == "GET" and url == "http://gcjobs.test/jobs/job-1/results":
+        if (
+            method == "GET"
+            and url == "http://gcjobs.test/datasets/fkb_bane/ogc_api/jobs/job-1/results"
+        ):
             return _json_response(
                 {
                     "summary": {
@@ -625,7 +647,7 @@ def test_gcapi_proxies_and_rewrites_collection_and_job_routes() -> None:
         assert "Dataset echoes: world" in executed.text
 
         accepted = client.post(
-            "/datasets/fkb_bane/ogc_api/processes/import-fkb-bane/execution",
+            "/datasets/fkb_bane/ogc_api/processes/import/execution",
             files={"file": ("data.geojson", b"{}", "application/geo+json")},
         )
         assert accepted.status_code == 201
@@ -637,13 +659,13 @@ def test_gcapi_proxies_and_rewrites_collection_and_job_routes() -> None:
 
         jobs = client.get("/datasets/fkb_bane/ogc_api/jobs")
         assert jobs.status_code == 200
-        assert jobs.json()["jobs"][0]["processID"] == "import-fkb-bane"
+        assert jobs.json()["jobs"][0]["processID"] == "import"
 
         filtered_jobs = client.get(
             "/datasets/bygning/ogc_api/jobs",
             params={
                 "type": "process",
-                "processID": "import-bygning",
+                "processID": "import",
                 "status": "successful",
                 "datetime": "2026-08-24T09:10:00Z/2026-08-24T09:30:00Z",
                 "minDuration": 300,
@@ -685,7 +707,7 @@ def test_gcapi_proxies_and_rewrites_collection_and_job_routes() -> None:
                 "processedBatches": 2,
                 "succeededBatches": 2,
                 "failedBatches": 0,
-                "processID": "import-bygning",
+                "processID": "import",
                 "created": "2026-08-24T09:15:00Z",
                 "started": "2026-08-24T09:15:00Z",
                 "finished": "2026-08-24T09:22:00Z",
@@ -694,7 +716,7 @@ def test_gcapi_proxies_and_rewrites_collection_and_job_routes() -> None:
             }
         ]
         assert filtered_jobs.json()["links"][0]["href"] == (
-            "http://testserver/datasets/bygning/ogc_api/jobs?type=process&processID=import-bygning&status=successful&datetime=2026-08-24T09%3A10%3A00Z%2F2026-08-24T09%3A30%3A00Z&minDuration=300&maxDuration=900"
+            "http://testserver/datasets/bygning/ogc_api/jobs?type=process&processID=import&status=successful&datetime=2026-08-24T09%3A10%3A00Z%2F2026-08-24T09%3A30%3A00Z&minDuration=300&maxDuration=900"
         )
 
         job = client.get("/datasets/fkb_bane/ogc_api/jobs/job-1")

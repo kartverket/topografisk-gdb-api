@@ -8,6 +8,31 @@ def test_alembic_directory_exists() -> None:
     assert config.alembic_dir().name == "alembic"
 
 
+def test_descriptions_dir_defaults_to_shared_repo_path(monkeypatch) -> None:
+    monkeypatch.delenv("GEOCOMPONENTS_DESCRIPTIONS", raising=False)
+
+    assert config.descriptions_dir().name == "descriptions"
+    assert config.descriptions_dir().exists()
+
+
+def test_descriptions_dir_reads_environment(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("GEOCOMPONENTS_DESCRIPTIONS", str(tmp_path))
+
+    assert config.descriptions_dir() == tmp_path
+
+
+def test_public_base_url_defaults_to_localhost(monkeypatch) -> None:
+    monkeypatch.delenv("GCJOBS_BASE_URL", raising=False)
+
+    assert config.public_base_url() == "http://localhost:8000"
+
+
+def test_public_base_url_reads_environment(monkeypatch) -> None:
+    monkeypatch.setenv("GCJOBS_BASE_URL", "https://jobs.example.no/")
+
+    assert config.public_base_url() == "https://jobs.example.no"
+
+
 def test_redis_url_requires_environment(monkeypatch) -> None:
     monkeypatch.delenv("REDIS_URL", raising=False)
 

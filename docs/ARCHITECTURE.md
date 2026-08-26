@@ -1,6 +1,6 @@
 # System architecture
 
-Current overview of **topografisk-gdb-api** as implemented in this workspace: YAML-described topographic datasets become PostGIS schemas and OGC API - Features services through `geocomponents`. `gcapi` is the canonical public boundary: it discovers namespaced collections and synchronous processes from `geocomponents`, adapts asynchronous import jobs from `gcjobs`, and rewrites links so browser clients only see one OGC API surface. Its asynchronous job resources follow OGC API - Processes Part 1 at root level: `/jobs`, `/jobs/{jobID}`, and `/jobs/{jobID}/results`, with process scoping expressed through `/jobs?processID=...`. `gcimport` validates and transforms uploaded FeatureCollections, upserts them through the generated OGC API, and appends import lifecycle events to a Redis Stream. `gcjobs` accepts import requests from `gcapi`, proxies them to `gcimport` in the background, consumes those lifecycle events through a Redis consumer group, persists them, and exposes lightweight import-status/history APIs to `gcapi`. `gccore` is a small FastAPI service with health checks and Alembic-managed tables in the shared `gc_core` schema. `gcmapview` remains a developer frontend for inspection, editing of the Cadastre example dataset, and import testing through `gcapi`.
+Current overview of **topografisk-gdb-api** as implemented in this workspace: YAML-described topographic datasets become PostGIS schemas and OGC API - Features services through `geocomponents`. `gcapi` is the canonical public boundary: it discovers namespaced collections and synchronous processes from `geocomponents`, adapts asynchronous import jobs from dataset-scoped `gcjobs` mounts, and rewrites links so browser clients only see one OGC API surface. Its asynchronous import job resources are exposed per dataset at `/datasets/{dataset}/ogc_api/jobs`, `/datasets/{dataset}/ogc_api/jobs/{jobID}`, and `/datasets/{dataset}/ogc_api/jobs/{jobID}/results`, with process scoping expressed through dataset-local `/jobs?processID=import`. `gcimport` validates and transforms uploaded FeatureCollections, upserts them through the generated OGC API, and appends import lifecycle events to a Redis Stream. `gcjobs` discovers datasets from the shared descriptions at startup, accepts import requests from `gcapi` through dataset-scoped OGC routes, proxies them to `gcimport` in the background, consumes those lifecycle events through a Redis consumer group, persists them, and exposes dataset-local import-status APIs back to `gcapi`. `gccore` is a small FastAPI service with health checks and Alembic-managed tables in the shared `gc_core` schema. `gcmapview` remains a developer frontend for inspection, editing of the Cadastre example dataset, and import testing through `gcapi`.
 
 The tracked runtime in this repo is now centered on HTTP, PostgreSQL/PostGIS, and Redis. For the current POC there is one event flow only: `gcimport` appends import events to a Redis Stream, `gcjobs` consumes and acknowledges them through a consumer group, and `gcjobs` PostgreSQL is the durable source of truth for import tracking.
 
@@ -185,8 +185,8 @@ Current built-in profiles:
 Request shape now:
 
 ```http
-POST /datasets/fkb_bane/ogc_api/processes/import-fkb-bane/execution
-POST /datasets/bygning/ogc_api/processes/import-bygning/execution
+POST /datasets/fkb_bane/ogc_api/processes/import/execution
+POST /datasets/bygning/ogc_api/processes/import/execution
 Content-Type: multipart/form-data
 ```
 
@@ -205,18 +205,18 @@ Behavior now:
 
 ## gcjobs component view
 
-`gcjobs` is intentionally small in the current POC. It owns public process execution and import tracking state for asynchronous imports. Its durable model is PostgreSQL in the `gc_jobs` schema, and it updates that model by consuming Redis Stream events through a consumer group while the frontend polls status over HTTP.
+`gcjobs` is intentionally small in the current POC. It owns dataset-scoped public process execution and import tracking state for asynchronous imports. Its durable model is PostgreSQL in the `gc_jobs` schema, and it updates that model by consuming Redis Stream events through a consumer group while the frontend polls status over HTTP.
 
 ```mermaid
 flowchart LR
-  START["POST /processes/{id}/execution"] --> ACCEPT["return 201 + Location: /jobs/{jobID}"]
+  START["POST /datasets/{dataset}/ogc_api/processes/import/execution"] --> ACCEPT["return 201 + Location: /datasets/{dataset}/ogc_api/jobs/{jobID}"]
   ACCEPT --> PROXY["background proxy to gcimport"]
   EV["Redis Stream event"] --> WRITE["record_import_event()"]
   WRITE --> RUN["gc_jobs.import_run"]
   WRITE --> LOG["gc_jobs.import_event"]
-  READ1["GET /jobs"] --> RUN
-  READ2["GET /jobs/{id}"] --> RUN
-  READ3["GET /jobs/{id}/results"] --> RUN
+  READ1["GET /datasets/{dataset}/ogc_api/jobs"] --> RUN
+  READ2["GET /datasets/{dataset}/ogc_api/jobs/{id}"] --> RUN
+  READ3["GET /datasets/{dataset}/ogc_api/jobs/{id}/results"] --> RUN
   PROXY --> GCIMPORT["gcimport /imports"]
   REDIS["Redis consumer group"] --> WRITE
 ```
@@ -225,8 +225,9 @@ Current responsibilities:
 
 - persist one summary row per import run in `gc_jobs.import_run`
 - append raw lifecycle events in `gc_jobs.import_event`
-- accept process execution requests immediately and return `201 Created` with a job resource location before import execution completes
-- expose OGC-style job read models at `/jobs`, `/jobs/{jobID}`, and `/jobs/{jobID}/results`
+- load dataset mounts from the shared descriptions directory at startup and fail fast if it is missing or empty
+- accept dataset-scoped process execution requests immediately and return `201 Created` with a dataset-local job resource location before import execution completes
+- expose OGC-style job read models at `/datasets/{dataset}/ogc_api/jobs`, `/datasets/{dataset}/ogc_api/jobs/{jobID}`, and `/datasets/{dataset}/ogc_api/jobs/{jobID}/results`
 - consume and acknowledge Redis Stream import events; Redis is transport, `gcjobs` PostgreSQL is the durable source of truth
 
 ---
@@ -293,10 +294,10 @@ sequenceDiagram
   participant DB as PostGIS
   participant JDB as gc_jobs schema
 
-  U->>A: POST /datasets/{dataset}/ogc_api/processes/import-*/execution
-  A->>J: POST /processes/import-*/execution
+  U->>A: POST /datasets/{dataset}/ogc_api/processes/import/execution
+  A->>J: POST /datasets/{dataset}/ogc_api/processes/import/execution
   J->>JDB: record import.accepted
-  J-->>A: 201 Created + Location: /jobs/{jobID}
+  J-->>A: 201 Created + Location: /datasets/{dataset}/ogc_api/jobs/{jobID}
   A-->>U: 201 Created + Location: /datasets/{dataset}/ogc_api/jobs/{jobID}
   J->>I: background proxy multipart request + X-Import-Id
   I->>R: publish import.started
@@ -319,7 +320,7 @@ sequenceDiagram
   R->>J: batch/completed events
   J->>JDB: update run + append event
   U->>A: GET /datasets/{dataset}/ogc_api/jobs/{id}
-  A->>J: GET /jobs/{id}
+  A->>J: GET /datasets/{dataset}/ogc_api/jobs/{id}
   J-->>A: statusInfo
   A-->>U: OGC statusInfo
 ```
@@ -337,10 +338,10 @@ sequenceDiagram
   participant R as Redis
   participant JDB as gc_jobs PostgreSQL
 
-  FE->>A: POST /datasets/{dataset}/ogc_api/processes/import-*/execution
-  A->>J: POST /processes/import-*/execution
+  FE->>A: POST /datasets/{dataset}/ogc_api/processes/import/execution
+  A->>J: POST /datasets/{dataset}/ogc_api/processes/import/execution
   J->>JDB: store import.accepted
-  J-->>A: 201 Created + Location: /jobs/{jobID}
+  J-->>A: 201 Created + Location: /datasets/{dataset}/ogc_api/jobs/{jobID}
   A-->>FE: 201 Created + Location: /datasets/{dataset}/ogc_api/jobs/{jobID}
   J->>I: background proxy request + X-Import-Id
   I-->>R: publish started
@@ -361,7 +362,7 @@ sequenceDiagram
   R-->>J: consume completed.succeeded|completed.failed
   J->>JDB: mark terminal state
   FE->>A: GET /datasets/{dataset}/ogc_api/jobs or /datasets/{dataset}/ogc_api/jobs/{id}
-  A->>J: GET /jobs or /jobs/{id}
+  A->>J: GET /datasets/{dataset}/ogc_api/jobs or /datasets/{dataset}/ogc_api/jobs/{id}
   J-->>A: current status / job list
   A-->>FE: statusInfo/jobList
 ```

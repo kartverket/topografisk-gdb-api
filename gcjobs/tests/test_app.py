@@ -10,6 +10,10 @@ from gcjobs.app import create_app
 from gcjobs.pubsub import StubImportEventListener
 
 
+def _dataset_api(dataset_name: str) -> str:
+    return f"/datasets/{dataset_name}/ogc_api"
+
+
 def test_root_reports_service_identity() -> None:
     client = TestClient(create_app(event_listener=StubImportEventListener([])))
 
@@ -19,11 +23,20 @@ def test_root_reports_service_identity() -> None:
     assert response.json() == {"service": "gcjobs", "schema": "gc_jobs"}
 
 
+def test_create_app_rejects_empty_descriptions_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setattr("gcjobs.app.config.descriptions_dir", lambda: tmp_path)
+
+    with pytest.raises(RuntimeError, match="no dataset descriptions found"):
+        create_app(event_listener=StubImportEventListener([]))
+
+
 def test_imports_preflight_allows_any_origin() -> None:
     client = TestClient(create_app(event_listener=StubImportEventListener([])))
 
     response = client.options(
-        "/processes/import-fkb-bane/execution",
+        f"{_dataset_api('fkb_bane')}/processes/import/execution",
         headers={
             "origin": "https://example.no",
             "access-control-request-method": "POST",
@@ -132,7 +145,7 @@ def test_process_execution_proxies_to_gcimport(
 
     with TestClient(app) as client:
         response = client.post(
-            "/processes/import-fkb-bane/execution",
+            f"{_dataset_api('fkb_bane')}/processes/import/execution",
             files={
                 "file": (
                     "source.geojson",
@@ -145,7 +158,7 @@ def test_process_execution_proxies_to_gcimport(
     assert response.status_code == 201
     assert response.json()["jobID"]
     assert response.json()["status"] == "accepted"
-    assert response.json()["processID"] == "import-fkb-bane"
+    assert response.json()["processID"] == "import"
     assert requests[0].url == "http://gcimport:8000/imports?profile=fkb_bane"
     assert requests[0].headers["x-import-id"] == response.json()["jobID"]
     assert recorded == [
@@ -182,15 +195,13 @@ def test_process_execution_rejects_unknown_process(
 
     with TestClient(app) as client:
         response = client.post(
-            "/processes/not_a_profile/execution",
+            f"{_dataset_api('fkb_bane')}/processes/not_a_process/execution",
             content=b"{}",
             headers={"content-type": "application/json"},
         )
 
     assert response.status_code == 404
-    assert response.json() == {
-        "detail": "processID must be one of: import-bygning, import-fkb-bane"
-    }
+    assert response.json() == {"detail": "processID must be one of: import"}
     assert recorded == []
     assert requests == []
 
@@ -213,7 +224,7 @@ def test_process_execution_rejects_non_multipart_payload(
 
     with TestClient(app) as client:
         response = client.post(
-            "/processes/import-bygning/execution",
+            f"{_dataset_api('bygning')}/processes/import/execution",
             content=b"{}",
             headers={"content-type": "application/json"},
         )
@@ -249,7 +260,7 @@ def test_process_execution_rejects_oversized_request_stream(
 
     with TestClient(app) as client:
         response = client.post(
-            "/processes/import-bygning/execution",
+            f"{_dataset_api('bygning')}/processes/import/execution",
             files={"file": ("source.geojson", b"12345", "application/geo+json")},
         )
 
@@ -300,7 +311,7 @@ def test_process_execution_records_forwarding_failure(
 
     with TestClient(app) as client:
         response = client.post(
-            "/processes/import-fkb-bane/execution",
+            f"{_dataset_api('fkb_bane')}/processes/import/execution",
             files={"file": ("source.geojson", "{}", "application/geo+json")},
         )
 
@@ -347,7 +358,7 @@ def test_process_execution_records_gcimport_http_failure(
 
     with TestClient(app) as client:
         response = client.post(
-            "/processes/import-fkb-bane/execution",
+            f"{_dataset_api('fkb_bane')}/processes/import/execution",
             files={"file": ("source.geojson", "{", "application/json")},
         )
 
@@ -363,17 +374,32 @@ def test_process_execution_records_gcimport_http_failure(
     assert "422" in recorded[1]["reason"]
 
 
-def test_processes_endpoint_lists_import_processes() -> None:
+def test_datasets_endpoint_lists_shared_descriptions() -> None:
     client = TestClient(create_app(event_listener=StubImportEventListener([])))
 
-    response = client.get("/processes")
+    response = client.get("/datasets")
 
     assert response.status_code == 200
-    body = response.json()
-    assert [process["id"] for process in body["processes"]] == [
-        "import-bygning",
-        "import-fkb-bane",
-    ]
+    dataset_ids = {dataset["id"] for dataset in response.json()["datasets"]}
+    assert {"bygning", "cadastre", "fkb_bane"} <= dataset_ids
+
+
+def test_processes_endpoint_is_dataset_scoped() -> None:
+    client = TestClient(create_app(event_listener=StubImportEventListener([])))
+
+    response = client.get(f"{_dataset_api('fkb_bane')}/processes")
+
+    assert response.status_code == 200
+    assert [process["id"] for process in response.json()["processes"]] == ["import"]
+
+
+def test_non_import_dataset_exposes_empty_process_list() -> None:
+    client = TestClient(create_app(event_listener=StubImportEventListener([])))
+
+    response = client.get(f"{_dataset_api('cadastre')}/processes")
+
+    assert response.status_code == 200
+    assert response.json()["processes"] == []
 
 
 def test_process_execution_returns_created_job_location(
@@ -399,14 +425,16 @@ def test_process_execution_returns_created_job_location(
 
     with TestClient(app) as client:
         response = client.post(
-            "/processes/import-fkb-bane/execution",
+            f"{_dataset_api('fkb_bane')}/processes/import/execution",
             files={"file": ("source.geojson", "{}", "application/geo+json")},
         )
 
     assert response.status_code == 201
-    assert response.headers["location"].endswith(f"/jobs/{response.json()['jobID']}")
+    assert response.headers["location"].endswith(
+        f"{_dataset_api('fkb_bane')}/jobs/{response.json()['jobID']}"
+    )
     assert response.json()["status"] == "accepted"
-    assert response.json()["processID"] == "import-fkb-bane"
+    assert response.json()["processID"] == "import"
 
 
 def test_jobs_endpoint_returns_filtered_mapped_jobs(
@@ -453,31 +481,33 @@ def test_jobs_endpoint_returns_filtered_mapped_jobs(
     )
     client = TestClient(create_app(event_listener=StubImportEventListener([])))
 
-    response = client.get("/jobs?type=process&processID=import-fkb-bane")
+    response = client.get(
+        f"{_dataset_api('fkb_bane')}/jobs?type=process&processID=import"
+    )
 
     assert response.status_code == 200
     assert response.json()["jobs"] == [
         {
             "type": "process",
             "jobID": "job-1",
-            "processID": "import-fkb-bane",
+            "processID": "import",
             "status": "successful",
             "message": "Import completed",
             "links": [
                 {
-                    "href": "http://testserver/jobs/job-1",
+                    "href": f"http://testserver{_dataset_api('fkb_bane')}/jobs/job-1",
                     "rel": "self",
                     "type": "application/json",
                     "title": "This document",
                 },
                 {
-                    "href": "http://testserver/jobs",
+                    "href": f"http://testserver{_dataset_api('fkb_bane')}/jobs",
                     "rel": "up",
                     "type": "application/json",
                     "title": "Job list",
                 },
                 {
-                    "href": "http://testserver/jobs/job-1/results",
+                    "href": f"http://testserver{_dataset_api('fkb_bane')}/jobs/job-1/results",
                     "rel": "http://www.opengis.net/def/rel/ogc/1.0/results",
                     "type": "application/json",
                     "title": "Job results",
@@ -507,6 +537,7 @@ def test_job_results_returns_summary_for_successful_import(
         "gcjobs.app.db.get_import_run",
         lambda _job_id: {
             "id": "job-1",
+            "profile": "fkb_bane",
             "status": "completed",
             "phase": "completed",
             "processed_features": 2,
@@ -521,7 +552,7 @@ def test_job_results_returns_summary_for_successful_import(
     )
     client = TestClient(create_app(event_listener=StubImportEventListener([])))
 
-    response = client.get("/jobs/job-1/results")
+    response = client.get(f"{_dataset_api('fkb_bane')}/jobs/job-1/results")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -564,7 +595,7 @@ def test_job_endpoint_serializes_datetime_timestamps(
     )
     client = TestClient(create_app(event_listener=StubImportEventListener([])))
 
-    response = client.get("/jobs/job-1")
+    response = client.get(f"{_dataset_api('fkb_bane')}/jobs/job-1")
 
     assert response.status_code == 200
     assert response.json()["created"] == "2026-08-24T10:00:00Z"
