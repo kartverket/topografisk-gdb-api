@@ -161,6 +161,14 @@ def test_has_z_collections_force_3d_on_ingest():
     assert "ST_Force3D(" not in cadastre_sql
 
 
+def test_write_functions_check_geometry_simplicity():
+    plan = _synthetic_plan(fields=(), geometry_type="LineString")
+    sql = "\n".join(function_statements(plan))
+    assert (
+        "ST_IsSimple(ST_SetSRID(ST_GeomFromGeoJSON(feature->'geometry'), 4326))" in sql
+    )
+
+
 # --------------------------------------------------------------------------
 # SQL-literal escaping (defense-in-depth against a name containing a quote)
 # --------------------------------------------------------------------------

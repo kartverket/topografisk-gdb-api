@@ -86,7 +86,7 @@ REJECTION_CASES = [
         RejectedItem(1, "insert", "parcels", True, "P0001"),
     ),
     RejectionCase(
-        "postgis-rejects-geojson-object",
+        "invalid-geometry-object",
         1,
         {
             "action": "insert",
@@ -97,7 +97,7 @@ REJECTION_CASES = [
                 properties={"label": "bad-geometry", "area_m2": 170.0},
             ),
         },
-        RejectedItem(1, "insert", "parcels", True, "XX000"),
+        RejectedItem(1, "insert", "parcels", True, "P0001"),
     ),
     RejectionCase(
         "delete-of-nonexistent-id",

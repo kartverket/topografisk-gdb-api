@@ -29,7 +29,7 @@ import pygeoapi.l10n as _l10n
 from pygeoapi.api import API, APIRequest, apply_gzip
 from pygeoapi.openapi import get_oas
 from pygeoapi.plugin import load_plugin
-from pygeoapi.provider.base import ProviderItemNotFoundError
+from pygeoapi.provider.base import ProviderInvalidDataError, ProviderItemNotFoundError
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -307,6 +307,15 @@ def _unsupported_media_type() -> Response:
     )
 
 
+def _invalid_data(exc: ProviderInvalidDataError) -> Response:
+    status = int(getattr(exc, "http_status_code", 400))
+    description = getattr(exc, "user_msg", None) or str(exc)
+    return JSONResponse(
+        {"code": "InvalidData", "description": description},
+        status_code=status,
+    )
+
+
 def _tailor_oas(oas: dict, dataset: ResolvedDataset) -> dict:
     """Trim the generated OpenAPI to what this service actually serves.
 
@@ -405,6 +414,20 @@ def _collection_schema(api_: API, cid) -> Response:
     return JSONResponse(doc, media_type="application/schema+json")
 
 
+def _resource(api_: API, cid):
+    return api_.config["resources"].get(cid)
+
+
+def _editable(api_: API, cid) -> bool:
+    res = _resource(api_, cid)
+    return bool(res and res["providers"][0].get("editable"))
+
+
+def _upsertable(api_: API, cid) -> bool:
+    res = _resource(api_, cid)
+    return bool(res and res["providers"][0].get("upsert_field"))
+
+
 def _strip_queryables_links(obj):
     """Remove dangling ``queryables`` hypermedia links (endpoint deferred).
 
@@ -429,18 +452,187 @@ def _strip_queryables_links(obj):
     return obj
 
 
+def _build_collection_items_handler(api_: API):
+    items_handlers = {
+        "OPTIONS": _build_items_options_handler(api_),
+        "GET": _build_list_items_handler(api_),
+        "HEAD": _build_list_items_handler(api_),
+        "POST": _build_post_items_handler(api_),
+    }
+
+    async def collection_items(request: Request):
+        cid = request.path_params["collection_id"]
+        return await items_handlers[request.method](request, cid)
+
+    return collection_items
+
+
+def _build_list_items_handler(api_: API):
+    async def _list_items(request: Request, cid):
+        if (
+            request.query_params.get("filter") is not None
+            or request.query_params.get("filter-lang") is not None
+        ):
+            return _filtering_unsupported()
+        return await _execute(
+            api_,
+            itemtypes_api.get_collection_items,
+            request,
+            cid,
+            skip_valid_check=True,
+        )
+
+    return _list_items
+
+
+def _build_items_options_handler(api_: API):
+    async def _options_items(_request: Request, cid):
+        write_verbs = ", POST" if _editable(api_, cid) else ""
+        return _options("GET, HEAD, OPTIONS" + write_verbs)
+
+    return _options_items
+
+
+def _build_post_items_handler(api_: API):
+    async def _post_items(request: Request, cid):
+        ct = request.headers.get("content-type", "")
+        if not ct.lower().startswith("application/geo+json"):
+            return _unsupported_media_type()
+        if not _editable(api_, cid):
+            return _not_editable()
+        return await _execute(
+            api_,
+            itemtypes_api.manage_collection_item,
+            request,
+            "create",
+            cid,
+            skip_valid_check=True,
+        )
+
+    return _post_items
+
+
+def _build_upsert_item_handler(api_: API):
+    async def upsert_item(request: Request):
+        cid = request.path_params["collection_id"]
+        if not _upsertable(api_, cid):
+            return _not_editable()
+        ct = request.headers.get("content-type", "")
+        if not ct.lower().startswith("application/geo+json"):
+            return _unsupported_media_type()
+        provider = load_plugin("provider", _resource(api_, cid)["providers"][0])
+        try:
+            identifier = provider.upsert(await request.body())
+        except ProviderInvalidDataError as exc:
+            return _invalid_data(exc)
+        return JSONResponse({"id": identifier})
+
+    return upsert_item
+
+
+def _build_collection_item_handler(api_: API):
+    item_handlers = {
+        "OPTIONS": _build_item_options_handler(api_),
+        "GET": _build_get_item_handler(api_),
+        "HEAD": _build_get_item_handler(api_),
+        "PUT": _build_put_item_handler(api_),
+        "PATCH": _build_patch_item_handler(api_),
+        "DELETE": _build_delete_item_handler(api_),
+    }
+
+    async def collection_item(request: Request):
+        cid = request.path_params["collection_id"]
+        iid = request.path_params["item_id"]
+        return await item_handlers[request.method](request, cid, iid)
+
+    return collection_item
+
+
+def _build_get_item_handler(api_: API):
+    async def _get_item(request: Request, cid, iid):
+        return await _execute(
+            api_, itemtypes_api.get_collection_item, request, cid, iid
+        )
+
+    return _get_item
+
+
+def _build_item_options_handler(api_: API):
+    async def _options_item(_request: Request, cid, _iid):
+        write_verbs = ", PUT, PATCH, DELETE" if _editable(api_, cid) else ""
+        return _options("GET, HEAD, OPTIONS" + write_verbs)
+
+    return _options_item
+
+
+def _build_put_item_handler(api_: API):
+    async def _put_item(request: Request, cid, iid):
+        if not _editable(api_, cid):
+            return _not_editable()
+        return await _execute(
+            api_,
+            itemtypes_api.manage_collection_item,
+            request,
+            "update",
+            cid,
+            iid,
+            skip_valid_check=True,
+        )
+
+    return _put_item
+
+
+def _build_delete_item_handler(api_: API):
+    async def _delete_item(request: Request, cid, iid):
+        if not _editable(api_, cid):
+            return _not_editable()
+        return await _execute(
+            api_,
+            itemtypes_api.manage_collection_item,
+            request,
+            "delete",
+            cid,
+            iid,
+            skip_valid_check=True,
+        )
+
+    return _delete_item
+
+
+def _build_patch_item_handler(api_: API):
+    async def _patch_item(request: Request, cid, iid):
+        if not _editable(api_, cid):
+            return _not_editable()
+        provider = load_plugin("provider", _resource(api_, cid)["providers"][0])
+        try:
+            provider.patch(iid, await request.body())
+        except ProviderInvalidDataError as exc:
+            return _invalid_data(exc)
+        except ProviderItemNotFoundError:
+            return JSONResponse(
+                {"code": "NotFound", "description": f"item {iid} not found"},
+                status_code=404,
+            )
+        return Response(status_code=204)
+
+    return _patch_item
+
+
+def _build_process_handlers(api_: API):
+    async def processes(request: Request):
+        pid = request.path_params.get("process_id")
+        return await _execute(api_, processes_api.describe_processes, request, pid)
+
+    async def execute_process(request: Request):
+        pid = request.path_params["process_id"]
+        return await _execute(
+            api_, processes_api.execute_process, request, pid, skip_valid_check=True
+        )
+
+    return processes, execute_process
+
+
 def _build_starlette_app(api_: API) -> Starlette:
-    def _resource(cid):
-        return api_.config["resources"].get(cid)
-
-    def _editable(cid) -> bool:
-        res = _resource(cid)
-        return bool(res and res["providers"][0].get("editable"))
-
-    def _upsertable(cid) -> bool:
-        res = _resource(cid)
-        return bool(res and res["providers"][0].get("upsert_field"))
-
     async def landing(request: Request):
         return await _execute(api_, core_api.landing_page, request)
 
@@ -461,145 +653,10 @@ def _build_starlette_app(api_: API) -> Starlette:
     async def schema(request: Request):
         return _collection_schema(api_, request.path_params["collection_id"])
 
-    # -- /items : one handler per verb, dispatched by a map (see routes) ----
-    async def _list_items(request: Request, cid):
-        # CQL filtering isn't in the DB dispatch yet; refuse rather than ignore.
-        if (
-            request.query_params.get("filter") is not None
-            or request.query_params.get("filter-lang") is not None
-        ):
-            return _filtering_unsupported()
-        return await _execute(
-            api_,
-            itemtypes_api.get_collection_items,
-            request,
-            cid,
-            skip_valid_check=True,
-        )
-
-    async def _options_items(_request: Request, cid):
-        # POST advertised only when editable.
-        write_verbs = ", POST" if _editable(cid) else ""
-        return _options("GET, HEAD, OPTIONS" + write_verbs)
-
-    async def _post_items(request: Request, cid):
-        # OGC Features Part 4 defines POST /items as *create* with a GeoJSON
-        # Feature body (application/geo+json). Part 3/5 (draft) overloads the
-        # same endpoint for query-by-POST with a CQL2 body (application/json).
-        # We only implement create, so reject anything but geo+json rather than
-        # misrouting a query body into create (or falling through to a
-        # GET-like list handler that would then choke parsing the body as CQL).
-        ct = request.headers.get("content-type", "")
-        if not ct.lower().startswith("application/geo+json"):
-            return _unsupported_media_type()
-        if not _editable(cid):
-            return _not_editable()
-        return await _execute(
-            api_,
-            itemtypes_api.manage_collection_item,
-            request,
-            "create",
-            cid,
-            skip_valid_check=True,
-        )
-
-    items_handlers = {
-        "OPTIONS": _options_items,
-        "GET": _list_items,
-        "HEAD": _list_items,
-        "POST": _post_items,
-    }
-
-    async def collection_items(request: Request):
-        cid = request.path_params["collection_id"]
-        return await items_handlers[request.method](request, cid)
-
-    async def upsert_item(request: Request):
-        cid = request.path_params["collection_id"]
-        if not _upsertable(cid):
-            return _not_editable()
-        ct = request.headers.get("content-type", "")
-        if not ct.lower().startswith("application/geo+json"):
-            return _unsupported_media_type()
-        provider = load_plugin("provider", _resource(cid)["providers"][0])
-        identifier = provider.upsert(await request.body())
-        return JSONResponse({"id": identifier})
-
-    # -- /items/{item_id} : one handler per verb, dispatched by a map -------
-    async def _get_item(request: Request, cid, iid):
-        return await _execute(
-            api_, itemtypes_api.get_collection_item, request, cid, iid
-        )
-
-    async def _options_item(_request: Request, cid, _iid):
-        # Writable verbs (PUT/PATCH/DELETE) advertised only when editable.
-        write_verbs = ", PUT, PATCH, DELETE" if _editable(cid) else ""
-        return _options("GET, HEAD, OPTIONS" + write_verbs)
-
-    async def _put_item(request: Request, cid, iid):
-        if not _editable(cid):
-            return _not_editable()
-        return await _execute(
-            api_,
-            itemtypes_api.manage_collection_item,
-            request,
-            "update",
-            cid,
-            iid,
-            skip_valid_check=True,
-        )
-
-    async def _delete_item(request: Request, cid, iid):
-        if not _editable(cid):
-            return _not_editable()
-        return await _execute(
-            api_,
-            itemtypes_api.manage_collection_item,
-            request,
-            "delete",
-            cid,
-            iid,
-            skip_valid_check=True,
-        )
-
-    async def _patch_item(request: Request, cid, iid):
-        if not _editable(cid):
-            return _not_editable()
-        # PATCH (partial update) isn't routed by pygeoapi's
-        # manage_collection_item, so we call the provider's patch() directly.
-        provider = load_plugin("provider", _resource(cid)["providers"][0])
-        try:
-            provider.patch(iid, await request.body())
-        except ProviderItemNotFoundError:
-            return JSONResponse(
-                {"code": "NotFound", "description": f"item {iid} not found"},
-                status_code=404,
-            )
-        return Response(status_code=204)
-
-    item_handlers = {
-        "OPTIONS": _options_item,
-        "GET": _get_item,
-        "HEAD": _get_item,
-        "PUT": _put_item,
-        "PATCH": _patch_item,
-        "DELETE": _delete_item,
-    }
-
-    async def collection_item(request: Request):
-        cid = request.path_params["collection_id"]
-        iid = request.path_params["item_id"]
-        return await item_handlers[request.method](request, cid, iid)
-
-    async def processes(request: Request):
-        pid = request.path_params.get("process_id")
-        return await _execute(api_, processes_api.describe_processes, request, pid)
-
-    async def execute_process(request: Request):
-        pid = request.path_params["process_id"]
-        return await _execute(
-            api_, processes_api.execute_process, request, pid, skip_valid_check=True
-        )
+    collection_items = _build_collection_items_handler(api_)
+    collection_item = _build_collection_item_handler(api_)
+    upsert_item = _build_upsert_item_handler(api_)
+    processes, execute_process = _build_process_handlers(api_)
 
     routes = [
         Route("/", landing),

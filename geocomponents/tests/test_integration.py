@@ -40,6 +40,11 @@ _INVALID_GEOM = {
     "type": "MultiPolygon",
     "coordinates": [[[[0, 0], [1, 1], [0, 1], [1, 0], [0, 0]]]],
 }
+# Self-crossing linework — ST_IsValid returns true, ST_IsSimple returns false.
+_NON_SIMPLE_MULTILINE = {
+    "type": "MultiLineString",
+    "coordinates": [[[0, 0, 0], [1, 1, 0], [0, 1, 0], [1, 0, 0]]],
+}
 
 BYGNING = {
     "type": "Feature",
@@ -450,6 +455,57 @@ def test_create_with_invalid_geometry_returns_422(db, datasets):
     r = _client(db, datasets).post(
         f"{API}/collections/parcels/items",
         content=orjson.dumps(feature).decode(),
+        headers={"content-type": "application/geo+json"},
+    )
+    assert r.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+def test_update_with_invalid_geometry_returns_422(db, datasets):
+    """A PATCH that supplies invalid geometry must surface as HTTP 422, not
+    a raw PostGIS error."""
+    client = _client(db, datasets)
+    created = client.post(
+        f"{API}/collections/parcels/items",
+        content=orjson.dumps(PARCEL).decode(),
+        headers={"content-type": "application/geo+json"},
+    )
+    assert created.status_code == HTTPStatus.CREATED
+    fid = created.headers["Location"].rstrip("/").split("/")[-1]
+
+    r = client.patch(
+        f"{API}/collections/parcels/items/{fid}",
+        content=orjson.dumps(
+            {
+                "geometry": _INVALID_GEOM,
+                "properties": {"label": "bad-update"},
+            }
+        ).decode(),
+        headers={"content-type": "application/geo+json"},
+    )
+    assert r.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+def test_update_with_non_simple_line_geometry_returns_422(db, datasets):
+    """A PATCH that supplies self-crossing linework must be rejected even
+    though PostGIS still considers it valid geometry."""
+    client = _client(db, datasets)
+    feature = dict(BYGNING_SENTERLINJE)
+    feature["properties"] = dict(BYGNING_SENTERLINJE["properties"])
+    feature["properties"]["lokalid"] = "building-centreline-non-simple"
+
+    created = client.post(
+        f"{BYGNING_API}/collections/bygning_senterlinje/items:upsert",
+        content=orjson.dumps(feature).decode(),
+        headers={"content-type": "application/geo+json"},
+    )
+    assert created.status_code == HTTPStatus.OK
+    fid = created.json()["id"]
+
+    r = client.patch(
+        f"{BYGNING_API}/collections/bygning_senterlinje/items/{fid}",
+        content=orjson.dumps(
+            {"type": "Feature", "geometry": _NON_SIMPLE_MULTILINE, "properties": {}}
+        ).decode(),
         headers={"content-type": "application/geo+json"},
     )
     assert r.status_code == HTTPStatus.UNPROCESSABLE_ENTITY

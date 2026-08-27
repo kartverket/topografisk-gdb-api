@@ -292,6 +292,25 @@ def test_update_with_null_geometry_is_rejected(datasets, conn):
     assert excinfo.value.sqlstate == "P0001"
 
 
+def test_update_with_invalid_geometry_payload_is_rejected(datasets, conn):
+    coll = _collection(datasets, "cadastre", "parcels")
+
+    with conn.cursor() as cur, pytest.raises(psycopg.errors.RaiseException) as excinfo:
+        fid = _create(cur, "cadastre", "parcels", _sample_feature(coll))
+        _update(
+            cur,
+            "cadastre",
+            "parcels",
+            fid,
+            {
+                "geometry": {"type": coll.geometry_type, "coordinates": "nonsense"},
+                "properties": {"label": "patched-invalid-geometry"},
+            },
+        )
+
+    assert excinfo.value.sqlstate == "P0001"
+
+
 # ===========================================================================
 # Fixed golden (the example dataset)
 # ===========================================================================

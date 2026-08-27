@@ -321,7 +321,7 @@ def test_transaction_mixed_verbs_failure_rolls_back_and_report_matches_state(
                 "action": "insert",
                 "collection": "parcels",
                 "id": setup.rejected_id,
-                "sqlstate": "XX000",
+                "sqlstate": "P0001",
             },
         )
 
@@ -444,7 +444,7 @@ def test_transaction_failure_rollback_stays_inside_savepoint_scope(
                 "action": "insert",
                 "collection": "parcels",
                 "id": report["items"][0]["id"],
-                "sqlstate": "XX000",
+                "sqlstate": "P0001",
             },
         )
         assert _item(cur, "cadastre", "parcels", witness_id) is not None
@@ -484,7 +484,7 @@ def test_transaction_failure_leaves_connection_usable_for_next_success(
                 "action": "insert",
                 "collection": "parcels",
                 "id": failed["items"][0]["id"],
-                "sqlstate": "XX000",
+                "sqlstate": "P0001",
             },
         )
 
