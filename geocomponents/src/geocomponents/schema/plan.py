@@ -57,6 +57,15 @@ def upsert_sql_expression(path: str) -> str:
 
 
 @dataclass(frozen=True)
+class AssociationRoleRow:
+    """One row in the per-dataset association_role catalogue."""
+
+    source_collection: str
+    property: str
+    target_collection: str
+
+
+@dataclass(frozen=True)
 class IndexPlan:
     """One index to emit after the table DDL."""
 
@@ -159,3 +168,4 @@ class SchemaPlan:
 
     schema_name: str
     collections: tuple[CollectionPlan, ...]
+    association_role_rows: tuple[AssociationRoleRow, ...] = ()

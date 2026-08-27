@@ -6,7 +6,7 @@ Mapping rules (the heart of "description owns the names"):
 * collection         -> table inside that schema
 * every collection   -> id (uuid PK) + geometry + created_at/updated_at columns
 * commons + own fields -> attribute columns
-* relationship       -> ``<name>_id`` uuid foreign key to the target table
+* relationship       -> rows in ``<ds>.association_role``
 * each collection    -> one function name per operation (``<table>_<op>``)
 """
 
@@ -17,6 +17,7 @@ from geocomponents.schema.plan import (
     READ_OPS,
     UPSERT_OP,
     WRITE_OPS,
+    AssociationRoleRow,
     CollectionPlan,
     ColumnPlan,
     ForeignKeyPlan,
@@ -142,12 +143,6 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
                 indexes.append(IndexPlan(f'"{fld.name}"'))
 
     foreign_keys: list[ForeignKeyPlan] = []
-    for rel in coll.relationships:
-        col_name = f"{rel.name}_id"
-        columns.append(ColumnPlan(col_name, "uuid", nullable=True))
-        foreign_keys.append(
-            ForeignKeyPlan(col_name, ref_table=f"{schema}.{rel.target}")
-        )
 
     geometry = GeometryColumnPlan(
         name=coll.geometry_field,
@@ -188,4 +183,13 @@ def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
                 upsert_path=coll.upsert_path,
             )
         )
-    return SchemaPlan(schema_name=schema, collections=tuple(collections))
+    role_rows = [
+        AssociationRoleRow(coll.name, rel.property, rel.target)
+        for coll in dataset.collections
+        for rel in coll.relationships
+    ]
+    return SchemaPlan(
+        schema_name=schema,
+        collections=tuple(collections),
+        association_role_rows=tuple(role_rows),
+    )

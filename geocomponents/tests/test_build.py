@@ -100,18 +100,15 @@ def test_standard_columns_and_geometry_present():
     assert parcels.table.geometry.srid == WGS84_SRID
 
 
-def test_relationship_becomes_fk_column():
+def test_relationship_becomes_association_role_row():
     plan = _cadastre_plan()
-    buildings = next(c for c in plan.collections if c.collection_name == "buildings")
-    assert "parcel_id" in {col.name for col in buildings.table.columns}
-    fks = {(fk.column, fk.ref_table) for fk in buildings.table.foreign_keys}
-    assert ("parcel_id", "cadastre.parcels") in fks
-
-
-def test_relationship_fk_ddl_is_rendered_with_stable_constraint_name():
-    ddl = "\n".join(postgis.table_statements(_cadastre_plan()))
-    assert "alter table cadastre.buildings" in ddl
-    assert 'add constraint "buildings_parcel_id_fkey"' in ddl
+    assert len(plan.association_role_rows) == 1
+    r = plan.association_role_rows[0]
+    assert (r.source_collection, r.property, r.target_collection) == (
+        "buildings",
+        "parcel",
+        "parcels",
+    )
 
 
 def test_internal_function_names_are_private_and_per_operation():

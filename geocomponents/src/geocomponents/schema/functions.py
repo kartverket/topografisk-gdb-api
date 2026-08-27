@@ -389,6 +389,7 @@ $disp$""",
 
 def apply_dispatch(conn: psycopg.Connection) -> None:
     """Create the ``ogc.feature_*`` dispatch functions the API calls into."""
+    conn.execute("drop schema if exists ogc cascade")
     for stmt in dispatch_statements():
         conn.execute(stmt)
     conn.commit()
