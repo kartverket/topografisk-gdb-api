@@ -10,10 +10,12 @@ import {
   buildingItemUrl,
   buildingsCreateUrl,
   buildingsItemsUrl,
+  collectionItemUrl,
   parcelItemUrl,
   parcelsItemsInBboxUrl,
   parcelsCreateUrl,
-  parcelsItemsUrl
+  parcelsItemsUrl,
+  type CollectionId
 } from '../../api/geocomponentsApi';
 import {
   applyMapDimensionMode,
@@ -60,6 +62,48 @@ import {
 } from './mapViewData';
 import { randomNonOverlappingBuildingAndParcel } from './mapViewRandomFeatures';
 import { useSelectedFeature } from './useSelectedFeature';
+
+const collectionVisibleFeatureKeys: Record<CollectionId, VisibleFeatureCollectionKey> = {
+  parcels: 'parcels',
+  buildings: 'buildings',
+  jernbaneplattformkant: 'platformEdges',
+  spormidt: 'trackCentres',
+  bygning: 'bygning',
+  bygning_omrade: 'bygningOmrade',
+  bygning_senterlinje: 'bygningSenterlinje',
+  bygning_posisjon: 'bygningPosisjon'
+};
+
+function featureMatchesId(
+  feature: { id?: string | number; properties?: Record<string, unknown> | null },
+  featureId: string | number
+) {
+  if (feature.id !== undefined) {
+    return String(feature.id) === String(featureId);
+  }
+
+  const propertyId = feature.properties?.id;
+  return typeof propertyId === 'string' || typeof propertyId === 'number'
+    ? String(propertyId) === String(featureId)
+    : false;
+}
+
+function removeFeatureFromVisibleCollections(
+  visibleFeatureCollections: VisibleFeatureCollections,
+  collectionId: CollectionId,
+  featureId: string | number
+): VisibleFeatureCollections {
+  const collectionKey = collectionVisibleFeatureKeys[collectionId];
+  const featureCollection = visibleFeatureCollections[collectionKey];
+
+  return {
+    ...visibleFeatureCollections,
+    [collectionKey]: {
+      ...featureCollection,
+      features: featureCollection.features.filter(feature => !featureMatchesId(feature, featureId))
+    }
+  };
+}
 
 /** Default initial view when no local favorite view has been saved. */
 const OTTA_CENTER: [number, number] = [9.54, 61.77];
@@ -197,6 +241,7 @@ export function MapView() {
   backgroundMapRef.current = backgroundMap;
   const [isCreating, setIsCreating] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
+  const [isDeletingFeature, setIsDeletingFeature] = useState(false);
   const [placeInspectorLeftOfLayers, setPlaceInspectorLeftOfLayers] = useState(false);
   const { selectedFeature, setHoveredPositionIndex, setSelectedFeature } = useSelectedFeature({ mapRef, is3d });
   const closeSelectedFeatureInspectorRef = useRef<() => void>(() => {});
@@ -432,6 +477,46 @@ export function MapView() {
     setSelectedFeature(undefined);
   }
   closeSelectedFeatureInspectorRef.current = closeSelectedFeatureInspector;
+
+  async function deleteSelectedFeature() {
+    const map = mapRef.current;
+    const featureToDelete = selectedFeature;
+
+    if (!map || !featureToDelete?.collectionId || featureToDelete.featureId === undefined || isDeletingFeature) {
+      return;
+    }
+
+    const featureLabel = featureToDelete.layerLabel.toLowerCase();
+    const confirmed = window.confirm(
+      `Slette ${featureLabel} ${String(featureToDelete.featureId)}? Dette kan ikke angres.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsDeletingFeature(true);
+    setError(undefined);
+    setStatus(`Sletter ${featureLabel} ${String(featureToDelete.featureId)}...`);
+
+    try {
+      await deleteFeature(collectionItemUrl(featureToDelete.collectionId, featureToDelete.featureId));
+      latestVectorDataRef.current = removeFeatureFromVisibleCollections(
+        latestVectorDataRef.current,
+        featureToDelete.collectionId,
+        featureToDelete.featureId
+      );
+      await applyRenderedVisibleData(map, latestVectorDataRef.current, currentFilteredLayerVisibility());
+      setSelectedFeature(undefined);
+      setHoveredPositionIndex(undefined);
+      setStatus(`Slettet ${featureLabel} ${String(featureToDelete.featureId)}.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Ukjent feil');
+      setStatus(`Kunne ikke slette ${featureLabel} ${String(featureToDelete.featureId)}.`);
+    } finally {
+      setIsDeletingFeature(false);
+    }
+  }
 
   async function applyRenderedVisibleData(
     map: maplibregl.Map,
@@ -946,6 +1031,12 @@ export function MapView() {
             activeFeatureFilter={activeFeatureFilter}
             onApplyFeatureFilter={applyFeatureFilter}
             onClearFeatureFilter={clearFeatureFilter}
+            onDeleteFeature={
+              selectedFeature.collectionId && selectedFeature.featureId !== undefined
+                ? deleteSelectedFeature
+                : undefined
+            }
+            isDeletingFeature={isDeletingFeature}
             onHoverPositionIndex={setHoveredPositionIndex}
             onClose={closeSelectedFeatureInspector}
           />

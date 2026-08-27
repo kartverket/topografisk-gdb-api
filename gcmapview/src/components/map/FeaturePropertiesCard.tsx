@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Filter, FilterX, X } from 'lucide-react';
+import { Filter, FilterX, Loader2, Trash2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -19,6 +19,8 @@ type FeaturePropertiesCardProps = {
   onApplyFeatureFilter?: (featureFilter: ActiveFeatureFilter) => void;
   onClearFeatureFilter?: () => void;
   onHoverPositionIndex?: (index: number | undefined) => void;
+  onDeleteFeature?: () => void;
+  isDeletingFeature?: boolean;
 };
 
 type ExpandableSectionHeaderProps = {
@@ -167,7 +169,9 @@ export function FeaturePropertiesCard({
   onClose,
   onApplyFeatureFilter,
   onClearFeatureFilter,
-  onHoverPositionIndex
+  onHoverPositionIndex,
+  onDeleteFeature,
+  isDeletingFeature = false
 }: FeaturePropertiesCardProps) {
   const isSourceLoading = Boolean(feature.positionsLoading);
   const entries = Object.entries(feature.properties).sort(([a], [b]) => a.localeCompare(b));
@@ -204,6 +208,25 @@ export function FeaturePropertiesCard({
       </CardHeader>
       <CardContent className="space-y-2 overflow-y-auto pt-2">
         <Separator />
+        {onDeleteFeature ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive"
+            className="w-full justify-center"
+            disabled={isDeletingFeature}
+            onClick={onDeleteFeature}>
+            {isDeletingFeature ? (
+              <Loader2
+                data-icon="inline-start"
+                className="animate-spin"
+              />
+            ) : (
+              <Trash2 data-icon="inline-start" />
+            )}
+            {isDeletingFeature ? 'Sletter objekt...' : 'Slett objekt'}
+          </Button>
+        ) : null}
         {feature.positions.length > 0 || isSourceLoading ? (
           <details className="group">
             <ExpandableSectionHeader
