@@ -27,6 +27,7 @@ import psycopg
 from geocomponents.schema.plan import (
     DISPATCH_SCHEMA,
     CollectionPlan,
+    CollectionRolePlan,
     ColumnPlan,
     SchemaPlan,
     TablePlan,
@@ -375,7 +376,14 @@ $disp$""",
             "Returns a report whose shape is documented in geocomponents/README.md. "
             "For a data problem it rolls back to a savepoint and returns committed:false carrying the rejected item or document-level reason; it does not raise. "
             "Client-supplied feature ids are honored on insert here; ogc.feature_create strips them. "
-            "Raises only for an unknown dataset, or a class-42 error from an undefined function, table, or column, which signals a broken deployment rather than bad input.",
+            "Raises only for an unknown dataset, or a class-42 error from an undefined function, table, or column, which signals a broken deployment rather than bad input. "
+            "Relationship-write contract for each declared link property: "
+            "insert writes one association row per element, target resolved by outward-identifier lookup and stored as its uuid. "
+            "update replaces only the rows for properties named in the document; absent declared properties keep their rows. "
+            "replace clears all declared property rows first, then re-writes those present in the document. "
+            "delete removes all rows where this feature is the source."
+            "A property key not declared in the description is silently ignored. "
+            "Invalid link inputs raise P0001: wrong featuretype, wrong identifier key, unknown target, duplicate target.",
         ),
         _comment_statement(
             "feature_upsert(text, text, jsonb)",
@@ -517,6 +525,142 @@ def _geom_checks(table: TablePlan, *, guarded_by_presence: bool) -> list[str]:
     return checks
 
 
+# ==========================================================================
+# Link (association) SQL helpers
+# ==========================================================================
+
+import re as _re  # noqa: E402 — kept local; only used by _safe_var_name below
+
+
+def _safe_var_name(prop: str) -> str:
+    """Return a valid plpgsql identifier suffix for a property name."""
+    return _re.sub(r"[^a-zA-Z0-9]", "_", prop)
+
+
+def _link_declare_vars(roles: tuple[CollectionRolePlan, ...]) -> str:
+    """DECLARE lines for per-property target-ID arrays."""
+    if not roles:
+        return ""
+    lines = ["  _elem jsonb;", "  _target_id uuid;"]
+    for role in roles:
+        vname = _safe_var_name(role.property)
+        lines.append(f"  _ids_{vname} uuid[] := array[]::uuid[];")
+    return "\n".join(lines) + "\n"
+
+
+def _link_validation_block(role: CollectionRolePlan) -> str:
+    """Presence-guarded validation + lookup block for one link property.
+
+    Validates shape, featuretype, identifier key, and target existence.
+    Collects target uuids into _ids_<prop>; raises P0001 for duplicates.
+    """
+    prop = _quote_key(role.property)
+    target = _quote_key(role.target_collection)
+    oi_leaf = _quote_key(role.oi_leaf)
+    vname = _safe_var_name(role.property)
+    return f"""\
+  if feature->'properties' ? '{prop}' then
+    if jsonb_typeof(feature->'properties'->'{prop}') <> 'array' then
+      raise exception 'property {prop}: expected array' using errcode = 'P0001';
+    end if;
+    for _elem in select value from jsonb_array_elements(
+        feature->'properties'->'{prop}') loop
+      if jsonb_typeof(_elem) <> 'object' then
+        raise exception 'property {prop}: element is not an object'
+          using errcode = 'P0001';
+      end if;
+      if (_elem->>'featuretype') is distinct from '{target}' then
+        raise exception 'property {prop}: featuretype % is not {target}',
+          coalesce(_elem->>'featuretype', 'null') using errcode = 'P0001';
+      end if;
+      if not (_elem ? '{oi_leaf}') then
+        raise exception 'property {prop}: expected identifier key {oi_leaf}'
+          using errcode = 'P0001';
+      end if;
+      select "id" into _target_id from {role.target_table}
+        where {role.oi_lookup_cond};
+      if not found then
+        raise exception 'property {prop}: missing_member % not found in {target}',
+          coalesce(_elem->>'{oi_leaf}', 'null') using errcode = 'P0001';
+      end if;
+      _ids_{vname} := array_append(_ids_{vname}, _target_id);
+    end loop;
+    if cardinality(_ids_{vname}) <>
+       (select count(distinct x)::int from unnest(_ids_{vname}) t(x)) then
+      raise exception 'property {prop}: duplicate target' using errcode = 'P0001';
+    end if;
+  end if;"""
+
+
+def _link_write_patch(role: CollectionRolePlan, source: str) -> str:
+    """PATCH write: delete + reinsert one property when it is named in the document."""
+    prop = _quote_key(role.property)
+    vname = _safe_var_name(role.property)
+    src = _quote_key(source)
+    return f"""\
+  if feature->'properties' ? '{prop}' then
+    delete from {role.target_table.rsplit(".", 1)[0]}.association
+      where source_collection = '{src}' and source_id = fid
+        and property = '{prop}';
+    insert into {role.target_table.rsplit(".", 1)[0]}.association
+        (source_collection, source_id, property, target_id)
+      select '{src}', fid, '{prop}', unnest(_ids_{vname});
+  end if;"""
+
+
+def _link_write_create(role: CollectionRolePlan, source: str) -> str:
+    """Write links after INSERT, referencing new_id."""
+    prop = _quote_key(role.property)
+    vname = _safe_var_name(role.property)
+    src = _quote_key(source)
+    return f"""\
+  if feature->'properties' ? '{prop}' then
+    insert into {role.target_table.rsplit(".", 1)[0]}.association
+        (source_collection, source_id, property, target_id)
+      select '{src}', new_id, '{prop}', unnest(_ids_{vname});
+  end if;"""
+
+
+def _link_clear_all(
+    roles: tuple[CollectionRolePlan, ...], source: str, schema: str
+) -> str:
+    """PUT clear: delete all declared link properties for this feature at once."""
+    props = ", ".join(f"'{_quote_key(r.property)}'" for r in roles)
+    src = _quote_key(source)
+    return (
+        f"  delete from {schema}.association\n"
+        f"    where source_collection = '{src}' and source_id = fid\n"
+        f"      and property in ({props});"
+    )
+
+
+def _link_write_put(role: CollectionRolePlan, source: str) -> str:
+    """PUT write: insert for one property after the bulk clear."""
+    prop = _quote_key(role.property)
+    vname = _safe_var_name(role.property)
+    src = _quote_key(source)
+    return f"""\
+  if feature->'properties' ? '{prop}' then
+    insert into {role.target_table.rsplit(".", 1)[0]}.association
+        (source_collection, source_id, property, target_id)
+      select '{src}', fid, '{prop}', unnest(_ids_{vname});
+  end if;"""
+
+
+def _link_upsert_guards(roles: tuple[CollectionRolePlan, ...]) -> str:
+    """Reject any declared link property present in an upsert document."""
+    checks = []
+    for role in roles:
+        prop = _quote_key(role.property)
+        checks.append(
+            f"  if feature->'properties' ? '{prop}' then\n"
+            f"    raise exception 'property {prop}: upsert does not support link"
+            f" properties; use ogc.transaction' using errcode = 'P0001';\n"
+            f"  end if;"
+        )
+    return "\n".join(checks) + ("\n" if checks else "")
+
+
 def _fn_item(plan: CollectionPlan) -> str:
     t = plan.table
     return f"""\
@@ -576,14 +720,25 @@ def _fn_create(plan: CollectionPlan) -> str:
         *_geom_checks(t, guarded_by_presence=False),
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""
+    roles = plan.roles
+    declare_extra = _link_declare_vars(roles)
+    declare = (
+        f"declare new_id uuid;\n{declare_extra}"
+        if declare_extra
+        else "declare new_id uuid;"
+    )
+    link_validate = "\n".join(_link_validation_block(r) for r in roles)
+    link_validate_block = (link_validate + "\n") if link_validate else ""
+    link_write = "\n".join(_link_write_create(r, plan.collection_name) for r in roles)
+    link_write_block = ("\n" + link_write) if link_write else ""
     return f"""\
 create or replace function {plan.functions["create"]}(feature jsonb)
 returns uuid language plpgsql as $func$
-declare new_id uuid;
+{declare}
 begin
-{guard_block}  insert into {t.qualified} ({cols})
+{guard_block}{link_validate_block}  insert into {t.qualified} ({cols})
   values ({vals})
-  returning "{t.id_column}" into new_id;
+  returning "{t.id_column}" into new_id;{link_write_block}
   return new_id;
 end;
 $func$"""
@@ -617,12 +772,13 @@ def _fn_upsert(plan: CollectionPlan) -> str:
         *_geom_checks(t, guarded_by_presence=False),
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""
+    upsert_guards = _link_upsert_guards(plan.roles)
     return f"""\
 create or replace function {plan.functions["upsert"]}(feature jsonb)
 returns uuid language plpgsql as $func$
 declare result_id uuid;
 begin
-{guard_block}  insert into {t.qualified} ({cols})
+{upsert_guards}{guard_block}  insert into {t.qualified} ({cols})
   values ({vals})
   on conflict ({conflict_columns}) do update set
       {set_clause}
@@ -634,6 +790,7 @@ $func$"""
 
 def _fn_replace(plan: CollectionPlan) -> str:
     t = plan.table
+    roles = plan.roles
     writable = _writable_columns(t)
     sw = _server_write_columns(t)
     sets = [f'"{t.geometry.name}" = {_geom_from_feature(t)}']
@@ -646,7 +803,30 @@ def _fn_replace(plan: CollectionPlan) -> str:
         *_geom_checks(t, guarded_by_presence=False),
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""
-    return f"""\
+    declare_extra = _link_declare_vars(roles)
+    declare_block = ("declare\n" + declare_extra) if declare_extra else ""
+    link_validate = "\n".join(_link_validation_block(r) for r in roles)
+    link_validate_block = (link_validate + "\n") if link_validate else ""
+    link_clear = (
+        (_link_clear_all(roles, plan.collection_name, t.schema) + "\n") if roles else ""
+    )
+    link_inserts = "\n".join(_link_write_put(r, plan.collection_name) for r in roles)
+    link_inserts_block = (link_inserts + "\n") if link_inserts else ""
+    return (
+        f"""\
+create or replace function {plan.functions["replace"]}(fid uuid, feature jsonb)
+returns boolean language plpgsql as $func$
+{declare_block}
+begin
+{guard_block}{link_validate_block}  update {t.qualified} set
+      {set_clause}
+  where "{t.id_column}" = fid;
+  if not found then return false; end if;
+{link_clear}{link_inserts_block}  return true;
+end;
+$func$"""
+        if roles
+        else f"""\
 create or replace function {plan.functions["replace"]}(fid uuid, feature jsonb)
 returns boolean language plpgsql as $func$
 begin
@@ -656,11 +836,13 @@ begin
   return found;
 end;
 $func$"""
+    )
 
 
 def _fn_update(plan: CollectionPlan) -> str:
     """Partial update: only keys present in the incoming feature change."""
     t = plan.table
+    roles = plan.roles
     writable = _writable_columns(t)
     sw = _server_write_columns(t)
     sets = [
@@ -681,7 +863,27 @@ def _fn_update(plan: CollectionPlan) -> str:
         *_geom_checks(t, guarded_by_presence=True),
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""
-    return f"""\
+    declare_extra = _link_declare_vars(roles)
+    declare_block = ("declare\n" + declare_extra) if declare_extra else ""
+    link_validate = "\n".join(_link_validation_block(r) for r in roles)
+    link_validate_block = (link_validate + "\n") if link_validate else ""
+    link_patch = "\n".join(_link_write_patch(r, plan.collection_name) for r in roles)
+    link_patch_block = (link_patch + "\n") if link_patch else ""
+    return (
+        f"""\
+create or replace function {plan.functions["update"]}(fid uuid, feature jsonb)
+returns boolean language plpgsql as $func$
+{declare_block}
+begin
+{guard_block}{link_validate_block}  update {t.qualified} set
+      {set_clause}
+  where "{t.id_column}" = fid;
+  if not found then return false; end if;
+{link_patch_block}  return true;
+end;
+$func$"""
+        if roles
+        else f"""\
 create or replace function {plan.functions["update"]}(fid uuid, feature jsonb)
 returns boolean language plpgsql as $func$
 begin
@@ -691,15 +893,25 @@ begin
   return found;
 end;
 $func$"""
+    )
 
 
 def _fn_delete(plan: CollectionPlan) -> str:
     t = plan.table
+    src = _quote_key(plan.collection_name)
+    link_delete = (
+        (
+            f"  delete from {t.schema}.association\n"
+            f"    where source_collection = '{src}' and source_id = fid;\n"
+        )
+        if plan.roles
+        else ""
+    )
     return f"""\
 create or replace function {plan.functions["delete"]}(fid uuid)
 returns boolean language plpgsql as $func$
 begin
-  delete from {t.qualified} where "{t.id_column}" = fid;
+{link_delete}  delete from {t.qualified} where "{t.id_column}" = fid;
   return found;
 end;
 $func$"""

@@ -66,6 +66,17 @@ class AssociationRoleRow:
 
 
 @dataclass(frozen=True)
+class CollectionRolePlan:
+    """Everything the write-function generator needs for one link property."""
+
+    property: str  # verbatim UML role name, e.g. 'boundedByOuter'
+    target_collection: str  # bare collection name, e.g. 'border1'
+    target_table: str  # schema-qualified, e.g. 'topology.border1'
+    oi_leaf: str  # expected identifier key in the wire element, e.g. 'lokalid' or 'id'
+    oi_lookup_cond: str  # SQL WHERE predicate: <oi_expr> = <wire_value_expr>
+
+
+@dataclass(frozen=True)
 class IndexPlan:
     """One index to emit after the table DDL."""
 
@@ -152,6 +163,7 @@ class CollectionPlan:
     functions: dict[str, str]  # operation -> internal function name (private)
     upsert_field: str | None = None
     upsert_path: str | None = None
+    roles: tuple[CollectionRolePlan, ...] = ()
 
     @property
     def id_field(self) -> str:

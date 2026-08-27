@@ -12,13 +12,18 @@ Mapping rules (the heart of "description owns the names"):
 
 from __future__ import annotations
 
-from geocomponents.descriptions.models import ResolvedCollection, ResolvedDataset
+from geocomponents.descriptions.models import (
+    ResolvedCollection,
+    ResolvedDataset,
+    ResolvedRelationship,
+)
 from geocomponents.schema.plan import (
     READ_OPS,
     UPSERT_OP,
     WRITE_OPS,
     AssociationRoleRow,
     CollectionPlan,
+    CollectionRolePlan,
     ColumnPlan,
     ForeignKeyPlan,
     GeometryColumnPlan,
@@ -26,6 +31,7 @@ from geocomponents.schema.plan import (
     SchemaPlan,
     TablePlan,
     internal_function,
+    upsert_sql_expression,
 )
 
 # Token → SQL expression for top-level scalar server_managed fields.
@@ -161,6 +167,28 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
     )
 
 
+def _build_role(
+    rel: ResolvedRelationship,
+    schema: str,
+    target_coll: ResolvedCollection,
+) -> CollectionRolePlan:
+    oi_path = target_coll.outward_identifier_path
+    if oi_path is None:
+        oi_leaf = "id"
+        oi_lookup_cond = "\"id\" = (_elem->>'id')::uuid"
+    else:
+        oi_leaf = oi_path.rsplit(".", 1)[-1]
+        oi_expr = upsert_sql_expression(oi_path)
+        oi_lookup_cond = f"{oi_expr} = _elem->>'{oi_leaf}'"
+    return CollectionRolePlan(
+        property=rel.property,
+        target_collection=rel.target,
+        target_table=f"{schema}.{rel.target}",
+        oi_leaf=oi_leaf,
+        oi_lookup_cond=oi_lookup_cond,
+    )
+
+
 def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
     """Turn a resolved dataset into a ``SchemaPlan`` -- the tables, columns,
     geometries, foreign keys, and function names it needs.
@@ -173,6 +201,11 @@ def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
         if coll.supports_upsert:
             ops += (UPSERT_OP,)
         functions = {op: internal_function(schema, coll.name, op) for op in ops}
+        coll_by_name = {c.name: c for c in dataset.collections}
+        roles = tuple(
+            _build_role(rel, schema, coll_by_name[rel.target])
+            for rel in coll.relationships
+        )
         collections.append(
             CollectionPlan(
                 collection_name=coll.name,
@@ -181,6 +214,7 @@ def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
                 functions=functions,
                 upsert_field=coll.upsert_field,
                 upsert_path=coll.upsert_path,
+                roles=roles,
             )
         )
     role_rows = [
