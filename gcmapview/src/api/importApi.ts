@@ -96,11 +96,7 @@ function gcapiDatasetJobUrl(profile: ImportProfile, suffix: string) {
   return new URL(`/datasets/${profile}/ogc_api/jobs/${normalizedSuffix}`, baseUrl).toString();
 }
 
-function normalizeImportJobLocation(
-  location: string | null,
-  profile: ImportProfile,
-  importId: string
-) {
+function normalizeImportJobLocation(location: string | null, profile: ImportProfile, importId: string) {
   const fallbackUrl = gcapiDatasetJobUrl(profile, encodeURIComponent(importId));
   if (!location) {
     return fallbackUrl;

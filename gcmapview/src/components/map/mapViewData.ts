@@ -593,6 +593,29 @@ export async function createFeature(url: string, feature: unknown) {
   return undefined;
 }
 
+export async function replaceFeature(url: string, feature: unknown) {
+  const response = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      'content-type': 'application/geo+json'
+    },
+    body: JSON.stringify(feature)
+  });
+
+  if (!response.ok) {
+    throw new Error(`Replace failed with ${response.status}`);
+  }
+}
+
+export async function getFeature(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Request failed with ${response.status}`);
+  }
+
+  return sanitizeMissingHeightFeature((await response.json()) as Feature);
+}
+
 export async function deleteFeature(url: string) {
   const response = await fetch(url, { method: 'DELETE' });
   if (!response.ok && response.status !== 404) {
