@@ -1,48 +1,11 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject, type RefObject } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import { collectionItemUrl, collectionMetadataUrl, type CollectionId } from '../../api/geocomponentsApi';
-import { FLOOR_HEIGHT_M } from '../../map/map3d';
 import { type InspectedFeature } from '../../map/featureInspect';
-import type { Coordinates, Feature, Position } from '../../map/geojson';
+import type { Feature } from '../../map/geojson';
+import { projectInspectedFeaturePositionPoint } from './featurePositionProjection';
+import { getFeature } from './mapViewData';
 import { sourcePositions } from './mapViewGeometry';
-
-const MISSING_HEIGHT_Z = -99_999;
-
-type HoverOverlayTransform = {
-  coordinatePoint?: (
-    coord: maplibregl.MercatorCoordinate,
-    elevation?: number,
-    pixelMatrix?: unknown
-  ) => maplibregl.Point;
-  _pixelMatrix3D?: unknown;
-};
-
-function sanitizeMissingHeightPosition(position: Position): Position {
-  return position[2] === MISSING_HEIGHT_Z ? ([position[0], position[1]] as Position) : position;
-}
-
-function sanitizeMissingHeightCoordinates(coordinates: Coordinates): Coordinates {
-  if (typeof coordinates[0] === 'number') {
-    return sanitizeMissingHeightPosition(coordinates as Position);
-  }
-
-  return (coordinates as Coordinates[]).map(child => sanitizeMissingHeightCoordinates(child));
-}
-
-function sanitizeMissingHeightFeature(feature: Feature): Feature {
-  const geometry = feature.geometry;
-  if (!geometry?.coordinates) {
-    return feature;
-  }
-
-  return {
-    ...feature,
-    geometry: {
-      ...geometry,
-      coordinates: sanitizeMissingHeightCoordinates(geometry.coordinates)
-    }
-  };
-}
 
 function featureSelectionKey(feature: Pick<InspectedFeature, 'collectionId' | 'featureId' | 'layerId'>) {
   return `${feature.collectionId ?? 'unknown'}:${String(feature.featureId ?? 'missing')}:${feature.layerId}`;
@@ -62,86 +25,41 @@ function displayCoordinateSystemName(crs: string) {
   return crs;
 }
 
-function numericFeatureProperty(properties: Record<string, unknown>, propertyName: string): number | undefined {
-  const value = properties[propertyName];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
 function publicFeatureProperties(feature: Feature): Record<string, unknown> {
   return Object.fromEntries(Object.entries(feature.properties ?? {}).filter(([key]) => !key.startsWith('__gcmapview')));
-}
-
-function adjustedHoverAltitude(height: number | undefined, zOffset = 0): number {
-  if (typeof height !== 'number' || !Number.isFinite(height) || height <= 0) {
-    return 0;
-  }
-
-  return Math.max(0, height - zOffset);
-}
-
-function hoveredPositionAltitudeMeters(feature: InspectedFeature, positionIndex: number, is3d: boolean): number {
-  if (!is3d) {
-    return 0;
-  }
-
-  const zOffset = numericFeatureProperty(feature.properties, 'zOffset') ?? 0;
-  const displayedZ = feature.positions[positionIndex]?.[2];
-  const mapZ = feature.mapPositions[positionIndex]?.[2];
-  const floors = numericFeatureProperty(feature.properties, 'floors');
-  const calculatedHeight =
-    numericFeatureProperty(feature.properties, 'elevation') ??
-    numericFeatureProperty(feature.properties, 'height') ??
-    (typeof floors === 'number' && floors > 0 ? floors * FLOOR_HEIGHT_M : undefined) ??
-    numericFeatureProperty(feature.properties, 'base');
-
-  return (
-    adjustedHoverAltitude(
-      typeof displayedZ === 'number' && Number.isFinite(displayedZ) ? displayedZ : undefined,
-      zOffset
-    ) ||
-    adjustedHoverAltitude(typeof mapZ === 'number' && Number.isFinite(mapZ) ? mapZ : undefined, zOffset) ||
-    adjustedHoverAltitude(calculatedHeight, zOffset)
-  );
-}
-
-function projectHoverOverlayPoint(
-  map: maplibregl.Map,
-  lngLat: maplibregl.LngLat,
-  altitudeMeters: number
-): maplibregl.Point {
-  if (altitudeMeters <= 0) {
-    return map.project(lngLat);
-  }
-
-  const transform = (map as unknown as { _camera?: { transform?: HoverOverlayTransform } })._camera?.transform;
-  const pixelMatrix3D = transform?._pixelMatrix3D;
-
-  if (!transform?.coordinatePoint || !pixelMatrix3D) {
-    return map.project(lngLat);
-  }
-
-  return transform.coordinatePoint(maplibregl.MercatorCoordinate.fromLngLat(lngLat), altitudeMeters, pixelMatrix3D);
-}
-
-async function getFeature(url: string) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Request failed with ${response.status}`);
-  }
-
-  return sanitizeMissingHeightFeature((await response.json()) as Feature);
 }
 
 type UseSelectedFeatureOptions = {
   mapRef: RefObject<maplibregl.Map | null>;
   is3d: boolean;
+  adjustElevatedHeights: boolean;
+  currentSelectedPositionZOffset: () => number;
+  editedPositionIndicesRef: MutableRefObject<number[]>;
+  hoveredPositionIndex: number | undefined;
+  setHoveredPositionIndex: (index: number | undefined) => void;
+  showSelectedPositionDots: boolean;
 };
 
-export function useSelectedFeature({ mapRef, is3d }: UseSelectedFeatureOptions) {
+export function useSelectedFeature({
+  mapRef,
+  is3d,
+  adjustElevatedHeights,
+  currentSelectedPositionZOffset,
+  editedPositionIndicesRef,
+  hoveredPositionIndex,
+  setHoveredPositionIndex,
+  showSelectedPositionDots
+}: UseSelectedFeatureOptions) {
   const [selectedFeature, setSelectedFeature] = useState<InspectedFeature>();
-  const [hoveredPositionIndex, setHoveredPositionIndex] = useState<number>();
   const collectionStorageCrsRef = useRef(new Map<CollectionId, string>());
-  const hoveredPositionOverlayRef = useRef<HTMLDivElement | undefined>(undefined);
+  const selectedPositionsOverlayRef = useRef<HTMLDivElement | undefined>(undefined);
+  const selectedPositionDotRefs = useRef<HTMLDivElement[]>([]);
+
+  function removeSelectedPositionsOverlay() {
+    selectedPositionsOverlayRef.current?.remove();
+    selectedPositionsOverlayRef.current = undefined;
+    selectedPositionDotRefs.current = [];
+  }
 
   useEffect(() => {
     if (
@@ -192,6 +110,8 @@ export function useSelectedFeature({ mapRef, is3d }: UseSelectedFeatureOptions) 
           current && featureSelectionKey(current) === selectionKey
             ? {
                 ...current,
+                sourceFeature: storedFeature,
+                storageCrs,
                 properties: publicFeatureProperties(storedFeature),
                 positions: sourcePositions(storedFeature),
                 positionsCoordinateSystem: displayCoordinateSystemName(storageCrs),
@@ -218,43 +138,82 @@ export function useSelectedFeature({ mapRef, is3d }: UseSelectedFeatureOptions) 
 
   useEffect(() => {
     setHoveredPositionIndex(undefined);
-  }, [selectedFeature?.collectionId, selectedFeature?.featureId, selectedFeature?.layerId]);
+  }, [selectedFeature?.collectionId, selectedFeature?.featureId, selectedFeature?.layerId, setHoveredPositionIndex]);
 
   useEffect(() => {
     const map = mapRef.current;
-    const hoveredIndex = hoveredPositionIndex;
-    const hoveredPosition = hoveredIndex === undefined ? undefined : selectedFeature?.mapPositions[hoveredIndex];
+    const mapPositions = selectedFeature?.mapPositions ?? [];
 
-    if (!map || hoveredIndex === undefined || !selectedFeature || !hoveredPosition) {
-      hoveredPositionOverlayRef.current?.remove();
-      hoveredPositionOverlayRef.current = undefined;
+    if (!map || !selectedFeature || mapPositions.length === 0 || !showSelectedPositionDots) {
+      removeSelectedPositionsOverlay();
       return;
     }
 
-    const lngLat = maplibregl.LngLat.convert([hoveredPosition[0], hoveredPosition[1]]);
-    const altitudeMeters = hoveredPositionAltitudeMeters(selectedFeature, hoveredIndex, is3d);
-
-    let overlay = hoveredPositionOverlayRef.current;
+    let overlay = selectedPositionsOverlayRef.current;
     if (!overlay) {
       overlay = document.createElement('div');
-      overlay.className = 'h-3 w-3 rounded-full border-2 border-white bg-amber-500 shadow-[0_0_0_2px_rgb(0_0_0/0.35)]';
+      overlay.className = 'pointer-events-none absolute inset-0';
       overlay.style.pointerEvents = 'none';
       overlay.style.position = 'absolute';
       overlay.style.top = '0';
       overlay.style.left = '0';
+      overlay.style.width = '100%';
+      overlay.style.height = '100%';
       map.getCanvasContainer().appendChild(overlay);
-      hoveredPositionOverlayRef.current = overlay;
+      selectedPositionsOverlayRef.current = overlay;
     }
 
-    const updateOverlayPosition = () => {
-      const point = projectHoverOverlayPoint(map, lngLat, altitudeMeters);
-      if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
-        overlay.style.display = 'none';
-        return;
-      }
+    while (selectedPositionDotRefs.current.length > mapPositions.length) {
+      selectedPositionDotRefs.current.pop()?.remove();
+    }
 
-      overlay.style.display = '';
-      overlay.style.transform = `translate(-50%, -50%) translate(${point.x}px, ${point.y}px)`;
+    while (selectedPositionDotRefs.current.length < mapPositions.length) {
+      const dot = document.createElement('div');
+      dot.style.pointerEvents = 'none';
+      dot.style.position = 'absolute';
+      dot.style.top = '0';
+      dot.style.left = '0';
+      overlay.appendChild(dot);
+      selectedPositionDotRefs.current.push(dot);
+    }
+
+    const editedPositionIndices = new Set(editedPositionIndicesRef.current);
+
+    const updateDotStyles = () => {
+      selectedPositionDotRefs.current.forEach((dot, index) => {
+        const isHighlighted = editedPositionIndices.has(index) || hoveredPositionIndex === index;
+        dot.className = isHighlighted
+          ? 'h-3 w-3 rounded-full border-2 border-white bg-yellow-400 shadow-[0_0_0_2px_rgb(0_0_0/0.35)]'
+          : 'h-2 w-2 rounded-full border border-white bg-sky-500 shadow-[0_0_0_1px_rgb(15_23_42/0.35)]';
+      });
+    };
+
+    const updateOverlayPosition = () => {
+      updateDotStyles();
+      selectedPositionDotRefs.current.forEach((dot, index) => {
+        const position = mapPositions[index];
+        if (!position) {
+          dot.style.display = 'none';
+          return;
+        }
+
+        const point = projectInspectedFeaturePositionPoint(
+          map,
+          selectedFeature,
+          index,
+          position,
+          is3d,
+          adjustElevatedHeights,
+          currentSelectedPositionZOffset
+        );
+        if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+          dot.style.display = 'none';
+          return;
+        }
+
+        dot.style.display = '';
+        dot.style.transform = `translate(-50%, -50%) translate(${point.x}px, ${point.y}px)`;
+      });
     };
 
     updateOverlayPosition();
@@ -263,19 +222,26 @@ export function useSelectedFeature({ mapRef, is3d }: UseSelectedFeatureOptions) 
     return () => {
       map.off('render', updateOverlayPosition);
     };
-  }, [hoveredPositionIndex, is3d, mapRef, selectedFeature]);
+  }, [
+    adjustElevatedHeights,
+    currentSelectedPositionZOffset,
+    editedPositionIndicesRef,
+    hoveredPositionIndex,
+    is3d,
+    mapRef,
+    selectedFeature,
+    showSelectedPositionDots
+  ]);
 
   useEffect(
     () => () => {
-      hoveredPositionOverlayRef.current?.remove();
-      hoveredPositionOverlayRef.current = undefined;
+      removeSelectedPositionsOverlay();
     },
     []
   );
 
   return {
     selectedFeature,
-    setHoveredPositionIndex,
     setSelectedFeature
   };
 }

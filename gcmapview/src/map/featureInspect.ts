@@ -109,6 +109,8 @@ export type InspectedFeature = {
   layerLabel: string;
   collectionId?: CollectionId;
   featureId?: string | number;
+  sourceFeature?: Feature;
+  storageCrs?: string;
   properties: Record<string, unknown>;
   positions: Position[];
   mapPositions: Position[];
@@ -256,6 +258,7 @@ export function inspectFeaturesAtPoint(map: maplibregl.Map, point: maplibregl.Po
     layerLabel: LAYER_LABELS[feature.layer.id] ?? feature.layer.id,
     collectionId,
     featureId,
+    sourceFeature: originalFeature,
     properties: shouldLoadSourceData ? {} : fallbackProperties,
     positions: shouldLoadSourceData ? [] : mapPositions,
     mapPositions,
