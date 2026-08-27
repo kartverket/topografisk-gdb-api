@@ -21,7 +21,6 @@ from geocomponents.schema.plan import (
     ColumnPlan,
     SchemaPlan,
     TablePlan,
-    upsert_sql_expression,
 )
 
 # PostgreSQL's NAMEDATALEN default. Identifiers longer than this are silently
@@ -109,14 +108,8 @@ def _geometry_index_ddl(plan: CollectionPlan) -> str:
 
 
 def _upsert_index_ddl(plan: CollectionPlan) -> str | None:
-    if plan.upsert_field is None:
-        return None
-    conflict_path = plan.upsert_path or plan.upsert_field
-    columns = upsert_sql_expression(conflict_path)
-    return (
-        f'create unique index if not exists "{plan.collection_name}_upsert_key_idx" '
-        f"on {plan.table.qualified} ({columns}) nulls not distinct"
-    )
+    # The outward identifier is now the row id; the primary key already indexes it.
+    return None
 
 
 def _collection_capability_table_ddl(plan: SchemaPlan) -> str:

@@ -14,6 +14,7 @@ from pathlib import Path
 import psycopg
 import pytest
 import yaml
+from conftest import _schema_conn
 
 from geocomponents.descriptions.loader import resolve_dataset
 from geocomponents.descriptions.models import Commons, DatasetDef
@@ -36,21 +37,8 @@ def _load_topology_plan():
 @pytest.fixture(scope="module")
 def topology_conn(db):
     """Apply the topology fixture schema; yield an autocommit connection."""
-    plan = _load_topology_plan()
-    setup = psycopg.connect(db, autocommit=False)
-    try:
-        with setup.transaction():
-            setup.execute(f"drop schema if exists {plan.schema_name} cascade")
-        postgis.apply_tables(setup, plan)
-    finally:
-        setup.close()
-
-    conn = psycopg.connect(db, autocommit=True)
-    try:
+    with _schema_conn(db, _load_topology_plan(), with_functions=False) as conn:
         yield conn
-    finally:
-        conn.execute(f"drop schema if exists {plan.schema_name} cascade")
-        conn.close()
 
 
 # --------------------------------------------------------------------------

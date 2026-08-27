@@ -1,0 +1,31 @@
+name: test_oid
+title: outward_identifier (OI) Contract Test
+description: Fixture for outward-identifier-is-the-id contract tests.
+processes:
+  - upsert-batch
+
+collections:
+  - name: with_oi
+    title: With OI
+    description: ''
+    geometry:
+      type: LineString
+      srid: 4326
+    outward_identifier: identification.testoi
+    fields:
+      - name: identification
+        type: object
+        required: true
+        fields:
+          - name: testoi
+            type: string
+
+  - name: no_oi
+    title: No OI
+    description: ''
+    geometry:
+      type: LineString
+      srid: 4326
+    fields:
+      - name: label
+        type: string

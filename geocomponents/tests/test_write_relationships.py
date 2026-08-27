@@ -16,6 +16,7 @@ from pathlib import Path
 import psycopg
 import pytest
 import yaml
+from conftest import _schema_conn
 
 from geocomponents.descriptions.loader import resolve_dataset
 from geocomponents.descriptions.models import Commons, DatasetDef
@@ -23,6 +24,13 @@ from geocomponents.schema import functions, postgis
 from geocomponents.schema.build import build_schema_plan
 
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "topology_fixture.yaml"
+
+# Pre-defined UUID constants for border features; outward identifier must be a uuid.
+_B1A_ID = str(uuid.UUID(int=0xB1A))
+_B1B_ID = str(uuid.UUID(int=0xB1B))
+_B2_ID = str(uuid.UUID(int=0xB20))
+_B1_DISPOSABLE_ID = str(uuid.UUID(int=0xD15))
+_NO_SUCH_ID = str(uuid.UUID(int=0x999))  # valid UUID that matches no border
 
 # Minimal valid geometries for the fixture collections (all SRID 4326, 2D).
 _LINE_GEOM = {"type": "LineString", "coordinates": [[0, 0], [1, 0]]}
@@ -45,22 +53,8 @@ def _load_plan():
 @pytest.fixture(scope="module")
 def topology_conn(db):
     """Apply topology schema (tables and functions); yield an autocommit connection."""
-    plan = _load_plan()
-    setup = psycopg.connect(db, autocommit=False)
-    try:
-        with setup.transaction():
-            setup.execute(f"drop schema if exists {plan.schema_name} cascade")
-        postgis.apply_tables(setup, plan)
-        functions.apply_functions(setup, plan)
-    finally:
-        setup.close()
-
-    conn = psycopg.connect(db, autocommit=True)
-    try:
+    with _schema_conn(db, _load_plan()) as conn:
         yield conn
-    finally:
-        conn.execute(f"drop schema if exists {plan.schema_name} cascade")
-        conn.close()
 
 
 @pytest.fixture(scope="module")
@@ -75,21 +69,21 @@ def borders(topology_conn):
     """
     _txn(
         topology_conn,
-        _insert("border1", _LINE_GEOM, {"identifikasjon": {"lokalid": "B1-OUTER"}}),
+        _insert("border1", _LINE_GEOM, {"identifikasjon": {"lokalid": _B1A_ID}}),
     )
     _txn(
         topology_conn,
-        _insert("border1", _LINE_GEOM, {"identifikasjon": {"lokalid": "B1-INNER"}}),
+        _insert("border1", _LINE_GEOM, {"identifikasjon": {"lokalid": _B1B_ID}}),
     )
     _txn(
         topology_conn,
-        _insert("border2", _LINE_GEOM, {"identifikasjon": {"lokalid": "B2-SHARED"}}),
+        _insert("border2", _LINE_GEOM, {"identifikasjon": {"lokalid": _B2_ID}}),
     )
     b3 = _txn(topology_conn, _insert("border3", _LINE_GEOM, {}))
     return {
-        "b1a_lokalid": "B1-OUTER",
-        "b1b_lokalid": "B1-INNER",
-        "b2_lokalid": "B2-SHARED",
+        "b1a_lokalid": _B1A_ID,
+        "b1b_lokalid": _B1B_ID,
+        "b2_lokalid": _B2_ID,
         "b3_id": b3["items"][0]["id"],
     }
 
@@ -241,7 +235,7 @@ def test_wrong_identifier_key_is_rejected(topology_conn, borders):
 def test_unknown_target_identifier_is_rejected(topology_conn, borders):
     """An identifier that no target row holds → P0001 (missing_member).
 
-    'NO-SUCH-ID' is not stored in border1.identifikasjon.lokalid.
+    _NO_SUCH_ID is a valid UUID that no border1 row holds.
     The item fails and no rows are written.
     """
     report = _txn(
@@ -250,7 +244,7 @@ def test_unknown_target_identifier_is_rejected(topology_conn, borders):
             "surface",
             _POLYGON_GEOM,
             {
-                "boundedByOuter": [{"featuretype": "border1", "lokalid": "NO-SUCH-ID"}],
+                "boundedByOuter": [{"featuretype": "border1", "lokalid": _NO_SUCH_ID}],
             },
         ),
     )
@@ -285,8 +279,7 @@ def test_duplicate_target_is_rejected(topology_conn, borders):
 def test_create_with_two_links_writes_two_rows(topology_conn, borders):
     """Two elements under one link property → two association rows, each a uuid.
 
-    'B1-OUTER' and 'B1-INNER' are text lokalid values, not uuids.
-    Finding two rows proves a lookup was done rather than a uuid cast.
+    Finding two rows proves the lookup resolved the OI values to target row ids.
     Temporary: slice C retires this test once ogc.feature_item returns links.
     """
     report = _txn(
@@ -468,7 +461,7 @@ def test_delete_target_leaves_inbound_rows_intact(topology_conn, borders):
     disposable_report = _txn(
         topology_conn,
         _insert(
-            "border1", _LINE_GEOM, {"identifikasjon": {"lokalid": "B1-DISPOSABLE"}}
+            "border1", _LINE_GEOM, {"identifikasjon": {"lokalid": _B1_DISPOSABLE_ID}}
         ),
     )
     disposable_id = disposable_report["items"][0]["id"]
@@ -480,7 +473,7 @@ def test_delete_target_leaves_inbound_rows_intact(topology_conn, borders):
             _POLYGON_GEOM,
             {
                 "boundedByOuter": [
-                    {"featuretype": "border1", "lokalid": "B1-DISPOSABLE"}
+                    {"featuretype": "border1", "lokalid": _B1_DISPOSABLE_ID}
                 ],
             },
         ),
@@ -510,16 +503,14 @@ def test_unlinking_does_not_modify_target_feature(topology_conn, borders):
     surface_id = create_report["items"][0]["id"]
 
     before = topology_conn.execute(
-        "select updated_at from topology.border1 "
-        "where (\"identifikasjon\" #>> '{lokalid}') = %s",
+        'select updated_at from topology.border1 where "id" = %s::uuid',
         (borders["b1a_lokalid"],),
     ).fetchone()[0]
 
     _txn(topology_conn, _update("surface", surface_id, {"boundedByOuter": []}))
 
     after = topology_conn.execute(
-        "select updated_at from topology.border1 "
-        "where (\"identifikasjon\" #>> '{lokalid}') = %s",
+        'select updated_at from topology.border1 where "id" = %s::uuid',
         (borders["b1a_lokalid"],),
     ).fetchone()[0]
 

@@ -9,6 +9,7 @@ unreachable — so ``uv run pytest`` still runs the DB-free tests without Docker
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from pathlib import Path
 
 import psycopg
@@ -31,6 +32,26 @@ _COMPOSE_DSN = (
 
 def _test_dsn() -> str:
     return database_dsn() if "DB_HOST" in os.environ else _COMPOSE_DSN
+
+
+@contextmanager
+def _schema_conn(db: str, plan, *, with_functions: bool = True):
+    """Drop schema, apply plan, yield an autocommit connection; drop schema on exit."""
+    setup = psycopg.connect(db, autocommit=False)
+    try:
+        with setup.transaction():
+            setup.execute(f"drop schema if exists {plan.schema_name} cascade")
+        postgis.apply_tables(setup, plan)
+        if with_functions:
+            functions.apply_functions(setup, plan)
+    finally:
+        setup.close()
+    conn = psycopg.connect(db, autocommit=True)
+    try:
+        yield conn
+    finally:
+        conn.execute(f"drop schema if exists {plan.schema_name} cascade")
+        conn.close()
 
 
 @pytest.fixture(scope="session")

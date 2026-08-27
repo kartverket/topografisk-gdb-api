@@ -6,12 +6,13 @@ HTTP CRUD roundtrip. If any seam is broken, this single readable test fails.
 
 from __future__ import annotations
 
+import uuid
 from http import HTTPStatus
 
 import orjson
-import psycopg
 import pyproj
 import pytest
+from conftest import _schema_conn
 from starlette.testclient import TestClient
 
 from geocomponents.api.pygeoapi_provider import PygeoapiProvider
@@ -21,8 +22,6 @@ from geocomponents.descriptions.models import (
     ResolvedField,
 )
 from geocomponents.gateway.mounter import build_gateway
-from geocomponents.schema import functions as _schema_fns
-from geocomponents.schema import postgis as _postgis
 from geocomponents.schema.build import build_schema_plan
 
 API = "/datasets/cadastre/ogc_api"
@@ -42,6 +41,7 @@ _INVALID_GEOM = {
 }
 
 BYGNING = {
+    "id": str(uuid.UUID(int=0xBB1)),
     "type": "Feature",
     "geometry": {
         "type": "MultiLineString",
@@ -67,6 +67,7 @@ BYGNING = {
 }
 
 BYGNING_OMRADE = {
+    "id": str(uuid.UUID(int=0xBB2)),
     "type": "Feature",
     "geometry": {
         "type": "MultiPolygon",
@@ -93,6 +94,7 @@ BYGNING_OMRADE = {
 }
 
 BYGNING_SENTERLINJE = {
+    "id": str(uuid.UUID(int=0xBB3)),
     "type": "Feature",
     "geometry": {
         "type": "MultiLineString",
@@ -115,6 +117,7 @@ BYGNING_SENTERLINJE = {
 }
 
 BYGNING_POSISJON = {
+    "id": str(uuid.UUID(int=0xBB4)),
     "type": "Feature",
     "geometry": {
         "type": "Point",
@@ -179,21 +182,14 @@ _IDENT_GEOM = {"type": "LineString", "coordinates": [[10, 55], [11, 56]]}
 
 @pytest.fixture(scope="module")
 def ident_client(db):
-    conn = psycopg.connect(db)
-    conn.autocommit = True
-    conn.execute("drop schema if exists test_ident cascade")
-    conn.autocommit = False
-    plan = build_schema_plan(_IDENT_DATASET)
-    _postgis.apply_tables(conn, plan)
-    _schema_fns.apply_functions(conn, plan)
-    conn.close()
-    return TestClient(
-        build_gateway(
-            [_IDENT_DATASET],
-            PygeoapiProvider(dsn=db),
-            base_url="http://localhost:8000",
+    with _schema_conn(db, build_schema_plan(_IDENT_DATASET)):
+        yield TestClient(
+            build_gateway(
+                [_IDENT_DATASET],
+                PygeoapiProvider(dsn=db),
+                base_url="http://localhost:8000",
+            )
         )
-    )
 
 
 def test_description_to_api_crud_roundtrip(db, datasets):
@@ -294,6 +290,7 @@ def test_bygning_batch_upsert_process_roundtrip(db, datasets):
     client = _client(db, datasets)
 
     second = dict(BYGNING)
+    second["id"] = str(uuid.UUID(int=0xBB5))  # distinct id so two rows are created
     second["properties"] = dict(BYGNING["properties"])
     second["properties"]["lokalid"] = "building-integration-2"
 
@@ -460,16 +457,17 @@ def test_create_with_invalid_geometry_returns_422(db, datasets):
 # --------------------------------------------------------------------------
 
 
-def test_outward_identifier_replaces_client_supplied_lokalid_and_versjonid(
+def test_client_uuid_lokalid_becomes_row_id_and_versjonid_is_server_managed(
     ident_client,
 ):
-    """Client-supplied lokalid and versjonid are stripped on write"""
+    """The client's UUID lokalid becomes the row id; versjonid is server-managed."""
+    lok = str(uuid.uuid4())
     feature = {
         "type": "Feature",
         "geometry": _IDENT_GEOM,
         "properties": {
             "identifikasjon": {
-                "lokalid": "client-supplied-uuid",
+                "lokalid": lok,
                 "navnerom": "http://example.com",
                 "versjonid": "client-supplied-version",
             }
@@ -483,9 +481,11 @@ def test_outward_identifier_replaces_client_supplied_lokalid_and_versjonid(
     assert r.status_code == HTTPStatus.CREATED
     fid = r.headers["Location"].rstrip("/").split("/")[-1]
 
+    assert fid == lok  # row id equals the client's lokalid
+
     got = ident_client.get(f"{_IDENT_API}/collections/line/items/{fid}?f=json").json()
     ident = got["properties"]["identifikasjon"]
-    assert ident["lokalid"] == fid  # row UUID, not client value
+    assert ident["lokalid"] == lok  # projected from row id
     assert ident["versjonid"] != "client-supplied-version"  # server timestamp
 
 
