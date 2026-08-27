@@ -31,7 +31,6 @@ from geocomponents.schema.plan import (
     SchemaPlan,
     TablePlan,
     internal_function,
-    upsert_sql_expression,
 )
 
 # Token → SQL expression for top-level scalar server_managed fields.
@@ -65,7 +64,6 @@ def _standard_columns() -> list[ColumnPlan]:
 def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: PLR0912
     columns: list[ColumnPlan] = _standard_columns()
     indexes: list[IndexPlan] = []
-    upsert_path = coll.upsert_path
 
     for fld in coll.fields:
         if fld.sql_type == "jsonb":
@@ -81,8 +79,6 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
                 if len(parts) == 2 and parts[0] == fld.name:  # noqa: PLR2004
                     sub_key = parts[1]
                     if rule == "outward_identifier":
-                        if path == upsert_path:
-                            continue
                         strip_keys.append(sub_key)
                         id_inject_key = sub_key
                     elif rule == "timestamp_iso":
@@ -96,10 +92,9 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
                 oi_parts = coll.outward_identifier_path.split(".", 1)
                 if len(oi_parts) == 2 and oi_parts[0] == fld.name:  # noqa: PLR2004
                     sub_key = oi_parts[1]
-                    if coll.outward_identifier_path != upsert_path:
-                        if sub_key not in strip_keys:
-                            strip_keys.append(sub_key)
-                        id_inject_key = sub_key
+                    if sub_key not in strip_keys:
+                        strip_keys.append(sub_key)
+                    id_inject_key = sub_key
 
             # Functional indexes for directly indexable sub-fields.
             # SafeIdentifier guarantees no single quotes in key names.
@@ -173,13 +168,9 @@ def _build_role(
     target_coll: ResolvedCollection,
 ) -> CollectionRolePlan:
     oi_path = target_coll.outward_identifier_path
-    if oi_path is None:
-        oi_leaf = "id"
-        oi_lookup_cond = "\"id\" = (_elem->>'id')::uuid"
-    else:
-        oi_leaf = oi_path.rsplit(".", 1)[-1]
-        oi_expr = upsert_sql_expression(oi_path)
-        oi_lookup_cond = f"{oi_expr} = _elem->>'{oi_leaf}'"
+    oi_leaf = oi_path.rsplit(".", 1)[-1] if oi_path else "id"
+    # Wire value is now always the uuid (OI = id); look up by primary key.
+    oi_lookup_cond = f"\"id\" = (_elem->>'{oi_leaf}')::uuid"
     return CollectionRolePlan(
         property=rel.property,
         target_collection=rel.target,

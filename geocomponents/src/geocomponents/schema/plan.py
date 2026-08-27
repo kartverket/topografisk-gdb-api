@@ -47,15 +47,6 @@ def internal_function(schema: str, collection: str, operation: str) -> str:
     return f"{schema}._{collection}_{operation}"
 
 
-def upsert_sql_expression(path: str) -> str:
-    """Render one upsert key path as a SQL conflict/index expression."""
-    parts = path.split(".")
-    if len(parts) == 1:
-        return f'"{parts[0]}"'
-    head, *tail = parts
-    return f"(\"{head}\" #>> '{{{','.join(tail)}}}')"
-
-
 @dataclass(frozen=True)
 class AssociationRoleRow:
     """One row in the per-dataset association_role catalogue."""

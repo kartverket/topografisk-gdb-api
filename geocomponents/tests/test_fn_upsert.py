@@ -1,11 +1,6 @@
-"""xfail tests pinning the known defects in _fn_upsert as of 2026-08-27.
+"""Tests upsert works as expected
 
-Each test asserts the *intended* behaviour so it fails against the current
-codebase.  When a defect is eventually fixed its test will xpass; strict=True
-converts that to a pytest error — the signal to remove the xfail and promote
-the test to a regular assertion.
-
-See handovers/xfail_outward_identifier.md for the full context.
+Should be gathered with other tests in the future
 """
 
 from __future__ import annotations
@@ -96,23 +91,11 @@ def _feature(lokalid: str | None = None) -> dict:
     return {"type": "Feature", "geometry": _GEOM, "properties": props}
 
 
-# --------------------------------------------------------------------------
-# Defect 1: upsert without the outward-identifier sub-key is not rejected
-# --------------------------------------------------------------------------
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "upsert requires identifikasjon.lokalid as its conflict key "
-        "(unique index, NULLS NOT DISTINCT); a feature without it is accepted today — "
-        "the first absent-key insert occupies the one NULL slot, making the "
-        "collection silently unaddressable for any subsequent upsert without lokalid"
-    ),
-)
 def test_upsert_without_outward_identifier_sub_key_is_rejected(oi_client, conn):
     """Upsert requires identifikasjon.lokalid; omitting it must be rejected.
 
-    The upsert conflict index is on identifikasjon.lokalid (NULLS NOT DISTINCT),
-    so a feature without lokalid cannot be identified or de-duplicated.
+    The outward identifier IS the row id.  Without it, upsert has no stable
+    identity to match on and cannot be idempotent, so P0001 is raised.
     """
     with pytest.raises(psycopg.Error) as exc, conn.cursor() as cur:
         cur.execute(
@@ -122,28 +105,20 @@ def test_upsert_without_outward_identifier_sub_key_is_rejected(oi_client, conn):
     assert exc.value.sqlstate == "P0001"
 
 
-# --------------------------------------------------------------------------
-# Defect 2: a feature upserted by its outward identifier is not reachable by it
-# --------------------------------------------------------------------------
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "ogc.feature_item signature is (dataset text, collection text, fid uuid); "
-        "fetching by outward identifier value fails with 22P02 — "
-        "invalid input syntax for type uuid"
-    ),
-)
-def test_feature_upserted_by_outward_identifier_is_reachable_by_it(oi_client, conn):
-    """A feature upserted by its outward identifier must be reachable by it.
+# The outward identifier is now a UUID (it IS the row id).
+_BANE_UUID = "ba0eba0e-ba0e-4ba0-8ba0-ba0eba0eba0e"
 
-    The upsert stores BANE-XF as the business key; fetching by BANE-XF via
-    the HTTP dispatch layer must return 200 OK.  Today it fails with 22P02
-    because ogc.feature_item accepts only a UUID.
+
+def test_feature_upserted_by_outward_identifier_is_reachable_by_it(oi_client, conn):
+    """A feature upserted by its outward identifier is reachable by that value.
+
+    The outward identifier is the row id (a UUID).  ogc.feature_item takes
+    a UUID, so fetching by the OI value returns 200 OK.
     """
     with conn.cursor() as cur:
         cur.execute(
             "select ogc.feature_upsert(%s, %s, %s)",
-            ("test_oi", "spormidt", orjson.dumps(_feature("BANE-XF")).decode()),
+            ("test_oi", "spormidt", orjson.dumps(_feature(_BANE_UUID)).decode()),
         )
-    r = oi_client.get(f"{_API}/collections/spormidt/items/BANE-XF?f=json")
+    r = oi_client.get(f"{_API}/collections/spormidt/items/{_BANE_UUID}?f=json")
     assert r.status_code == HTTPStatus.OK

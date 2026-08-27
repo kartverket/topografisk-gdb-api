@@ -31,7 +31,6 @@ from geocomponents.schema.plan import (
     ColumnPlan,
     SchemaPlan,
     TablePlan,
-    upsert_sql_expression,
 )
 
 # Audit columns are server-managed; never written from incoming features.
@@ -147,7 +146,7 @@ $disp$""",
             args_sql="feature jsonb",
             result_type="uuid",
             using_sql="$1",
-        ).replace("using $1", "using feature - 'id'"),
+        ).replace("using $1", "using feature"),
         _write_dispatch_statement(
             "replace",
             args_sql="fid uuid, feature jsonb",
@@ -345,7 +344,6 @@ $disp$""",
             "feature_create(text, text, jsonb)",
             "Create one feature through the generated per-collection writer. "
             "Precondition: dataset and collection must resolve to a simple-feature collection with a generated create function. "
-            "Client-supplied feature ids are stripped here and the server generates the row id. "
             "Returns the new uuid. "
             "Raises P0001 for topology collections, where ogc.transaction is the write path, and class 42 for unknown dataset or broken deployment.",
         ),
@@ -701,8 +699,14 @@ returns jsonb language sql stable as $func$
 $func$"""
 
 
+def _oi_column(table: TablePlan) -> ColumnPlan | None:
+    """Return the JSONB column carrying the outward-identifier sub-key, or None."""
+    return next((c for c in table.property_columns if c.id_inject_key), None)
+
+
 def _fn_create(plan: CollectionPlan) -> str:
     t = plan.table
+    oi = _oi_column(t)
     writable = _writable_columns(t)
     sw = _server_write_columns(t)
     cols = ", ".join(
@@ -710,8 +714,27 @@ def _fn_create(plan: CollectionPlan) -> str:
         + [f'"{c.name}"' for c in writable]
         + [f'"{c.name}"' for c in sw]
     )
+    if oi:
+        col_key = _quote_key(oi.name)
+        sub_key = _quote_key(oi.id_inject_key)
+        oi_declare = (
+            f"  _oi_raw text := feature->'properties'->'{col_key}'->>'{sub_key}';\n"
+        )
+        oi_resolve = (
+            "  if (feature->>'id') is not null and _oi_raw is not null\n"
+            "     and (feature->>'id') <> _oi_raw then\n"
+            "    raise exception 'feature.id and outward identifier disagree: %, %',\n"
+            "      feature->>'id', _oi_raw using errcode = 'P0001';\n"
+            "  end if;\n"
+            "  new_id := coalesce((feature->>'id')::uuid, _oi_raw::uuid, gen_random_uuid());\n"
+        )
+        id_val = "new_id"
+    else:
+        oi_declare = ""
+        oi_resolve = ""
+        id_val = "coalesce((feature->>'id')::uuid, gen_random_uuid())"
     vals = ", ".join(
-        ["coalesce((feature->>'id')::uuid, gen_random_uuid())", _geom_from_feature(t)]
+        [id_val, _geom_from_feature(t)]
         + [_prop_read(c) for c in writable]
         + [c.server_write_expr for c in sw]
     )
@@ -723,8 +746,8 @@ def _fn_create(plan: CollectionPlan) -> str:
     roles = plan.roles
     declare_extra = _link_declare_vars(roles)
     declare = (
-        f"declare new_id uuid;\n{declare_extra}"
-        if declare_extra
+        f"declare new_id uuid;\n{oi_declare}{declare_extra}"
+        if (oi_declare or declare_extra)
         else "declare new_id uuid;"
     )
     link_validate = "\n".join(_link_validation_block(r) for r in roles)
@@ -736,7 +759,7 @@ create or replace function {plan.functions["create"]}(feature jsonb)
 returns uuid language plpgsql as $func$
 {declare}
 begin
-{guard_block}{link_validate_block}  insert into {t.qualified} ({cols})
+{guard_block}{link_validate_block}{oi_resolve}  insert into {t.qualified} ({cols})
   values ({vals})
   returning "{t.id_column}" into new_id;{link_write_block}
   return new_id;
@@ -746,22 +769,41 @@ $func$"""
 
 def _fn_upsert(plan: CollectionPlan) -> str:
     t = plan.table
+    oi = _oi_column(t)
     writable = _writable_columns(t)
     sw = _server_write_columns(t)
-    conflict_path = plan.upsert_path or plan.upsert_field
-    if conflict_path is None:
-        raise ValueError(f"collection '{plan.collection_name}' has no upsert field")
     cols = ", ".join(
-        [f'"{t.geometry.name}"']
+        [f'"{t.id_column}"', f'"{t.geometry.name}"']
         + [f'"{c.name}"' for c in writable]
         + [f'"{c.name}"' for c in sw]
     )
+    if oi:
+        col_key = _quote_key(oi.name)
+        sub_key = _quote_key(oi.id_inject_key)
+        oi_declare = (
+            f"  _oi_raw text := feature->'properties'->'{col_key}'->>'{sub_key}';\n"
+        )
+        oi_resolve = (
+            "  if _oi_raw is null and (feature->>'id') is null then\n"
+            "    raise exception 'upsert requires an identifier' using errcode = 'P0001';\n"
+            "  end if;\n"
+            "  if (feature->>'id') is not null and _oi_raw is not null\n"
+            "     and (feature->>'id') <> _oi_raw then\n"
+            "    raise exception 'feature.id and outward identifier disagree: %, %',\n"
+            "      feature->>'id', _oi_raw using errcode = 'P0001';\n"
+            "  end if;\n"
+            "  result_id := coalesce((feature->>'id')::uuid, _oi_raw::uuid);\n"
+        )
+        id_val = "result_id"
+    else:
+        oi_declare = ""
+        oi_resolve = ""
+        id_val = "coalesce((feature->>'id')::uuid, gen_random_uuid())"
     vals = ", ".join(
-        [_geom_from_feature(t)]
+        [id_val, _geom_from_feature(t)]
         + [_prop_read(c) for c in writable]
         + [c.server_write_expr for c in sw]
     )
-    conflict_columns = upsert_sql_expression(conflict_path)
     sets = [f'"{t.geometry.name}" = excluded."{t.geometry.name}"']
     sets += [f'"{c.name}" = excluded."{c.name}"' for c in writable]
     sets += [f'"{c.name}" = {c.server_write_expr}' for c in sw]
@@ -773,14 +815,19 @@ def _fn_upsert(plan: CollectionPlan) -> str:
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""
     upsert_guards = _link_upsert_guards(plan.roles)
+    declare = (
+        f"declare result_id uuid;\n{oi_declare}"
+        if oi_declare
+        else "declare result_id uuid;"
+    )
     return f"""\
 create or replace function {plan.functions["upsert"]}(feature jsonb)
 returns uuid language plpgsql as $func$
-declare result_id uuid;
+{declare}
 begin
-{upsert_guards}{guard_block}  insert into {t.qualified} ({cols})
+{upsert_guards}{guard_block}{oi_resolve}  insert into {t.qualified} ({cols})
   values ({vals})
-  on conflict ({conflict_columns}) do update set
+  on conflict ("{t.id_column}") do update set
       {set_clause}
   returning "{t.id_column}" into result_id;
   return result_id;
@@ -790,6 +837,7 @@ $func$"""
 
 def _fn_replace(plan: CollectionPlan) -> str:
     t = plan.table
+    oi = _oi_column(t)
     roles = plan.roles
     writable = _writable_columns(t)
     sw = _server_write_columns(t)
@@ -803,6 +851,17 @@ def _fn_replace(plan: CollectionPlan) -> str:
         *_geom_checks(t, guarded_by_presence=False),
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""
+    if oi:
+        col_key = _quote_key(oi.name)
+        sub_key = _quote_key(oi.id_inject_key)
+        oi_guard = (
+            f"  if (feature->'properties'->'{col_key}'->>'{sub_key}') is not null\n"
+            f"     and (feature->'properties'->'{col_key}'->>'{sub_key}') <> fid::text then\n"
+            f"    raise exception 'outward identifier does not match' using errcode = 'P0001';\n"
+            f"  end if;\n"
+        )
+    else:
+        oi_guard = ""
     declare_extra = _link_declare_vars(roles)
     declare_block = ("declare\n" + declare_extra) if declare_extra else ""
     link_validate = "\n".join(_link_validation_block(r) for r in roles)
@@ -818,7 +877,7 @@ create or replace function {plan.functions["replace"]}(fid uuid, feature jsonb)
 returns boolean language plpgsql as $func$
 {declare_block}
 begin
-{guard_block}{link_validate_block}  update {t.qualified} set
+{guard_block}{oi_guard}{link_validate_block}  update {t.qualified} set
       {set_clause}
   where "{t.id_column}" = fid;
   if not found then return false; end if;
@@ -830,7 +889,7 @@ $func$"""
 create or replace function {plan.functions["replace"]}(fid uuid, feature jsonb)
 returns boolean language plpgsql as $func$
 begin
-{guard_block}  update {t.qualified} set
+{guard_block}{oi_guard}  update {t.qualified} set
       {set_clause}
   where "{t.id_column}" = fid;
   return found;
@@ -842,6 +901,7 @@ $func$"""
 def _fn_update(plan: CollectionPlan) -> str:
     """Partial update: only keys present in the incoming feature change."""
     t = plan.table
+    oi = _oi_column(t)
     roles = plan.roles
     writable = _writable_columns(t)
     sw = _server_write_columns(t)
@@ -863,6 +923,17 @@ def _fn_update(plan: CollectionPlan) -> str:
         *_geom_checks(t, guarded_by_presence=True),
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""
+    if oi:
+        col_key = _quote_key(oi.name)
+        sub_key = _quote_key(oi.id_inject_key)
+        oi_guard = (
+            f"  if (feature->'properties'->'{col_key}'->>'{sub_key}') is not null\n"
+            f"     and (feature->'properties'->'{col_key}'->>'{sub_key}') <> fid::text then\n"
+            f"    raise exception 'outward identifier does not match' using errcode = 'P0001';\n"
+            f"  end if;\n"
+        )
+    else:
+        oi_guard = ""
     declare_extra = _link_declare_vars(roles)
     declare_block = ("declare\n" + declare_extra) if declare_extra else ""
     link_validate = "\n".join(_link_validation_block(r) for r in roles)
@@ -875,7 +946,7 @@ create or replace function {plan.functions["update"]}(fid uuid, feature jsonb)
 returns boolean language plpgsql as $func$
 {declare_block}
 begin
-{guard_block}{link_validate_block}  update {t.qualified} set
+{guard_block}{oi_guard}{link_validate_block}  update {t.qualified} set
       {set_clause}
   where "{t.id_column}" = fid;
   if not found then return false; end if;
@@ -887,7 +958,7 @@ $func$"""
 create or replace function {plan.functions["update"]}(fid uuid, feature jsonb)
 returns boolean language plpgsql as $func$
 begin
-{guard_block}  update {t.qualified} set
+{guard_block}{oi_guard}  update {t.qualified} set
       {set_clause}
   where "{t.id_column}" = fid;
   return found;
