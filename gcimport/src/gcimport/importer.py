@@ -611,7 +611,8 @@ async def _import_feature_batch(
         "inputs": {
             "collection": collection,
             "features": [feature.geojson for _, feature in indexed_features],
-        }
+        },
+        "response": "raw",
     }
 
     try:

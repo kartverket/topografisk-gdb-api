@@ -189,7 +189,10 @@ def test_bygning_geometry_and_business_key_are_built_correctly():
     assert coll.upsert_path == "lokalid"
     ddl = "\n".join(postgis.table_statements(plan))
     assert '"geometry" geometry(MultiLineStringZ, 5972)' in ddl
-    assert "upsert_key_idx" not in ddl
+    assert (
+        'create unique index if not exists "bygning_upsert_key_idx" '
+        'on bygning.bygning ("lokalid") nulls not distinct'
+    ) in ddl
 
 
 def test_bygning_omrade_geometry_and_business_key_are_built_correctly():
@@ -201,7 +204,10 @@ def test_bygning_omrade_geometry_and_business_key_are_built_correctly():
     assert coll.upsert_path == "lokalid"
     ddl = "\n".join(postgis.table_statements(plan))
     assert '"geometry" geometry(MultiPolygonZ, 5972)' in ddl
-    assert "upsert_key_idx" not in ddl
+    assert (
+        'create unique index if not exists "bygning_omrade_upsert_key_idx" '
+        'on bygning.bygning_omrade ("lokalid") nulls not distinct'
+    ) in ddl
 
 
 def test_bygning_senterlinje_geometry_and_business_key_are_built_correctly():
@@ -215,7 +221,10 @@ def test_bygning_senterlinje_geometry_and_business_key_are_built_correctly():
     assert coll.upsert_path == "lokalid"
     ddl = "\n".join(postgis.table_statements(plan))
     assert '"geometry" geometry(MultiLineStringZ, 5972)' in ddl
-    assert "upsert_key_idx" not in ddl
+    assert (
+        'create unique index if not exists "bygning_senterlinje_upsert_key_idx" '
+        'on bygning.bygning_senterlinje ("lokalid") nulls not distinct'
+    ) in ddl
 
 
 def test_bygning_posisjon_geometry_and_business_key_are_built_correctly():
@@ -227,7 +236,10 @@ def test_bygning_posisjon_geometry_and_business_key_are_built_correctly():
     assert coll.upsert_path == "lokalid"
     ddl = "\n".join(postgis.table_statements(plan))
     assert '"geometry" geometry(PointZ, 5972)' in ddl
-    assert "upsert_key_idx" not in ddl
+    assert (
+        'create unique index if not exists "bygning_posisjon_upsert_key_idx" '
+        'on bygning.bygning_posisjon ("lokalid") nulls not distinct'
+    ) in ddl
 
 
 # --------------------------------------------------------------------------

@@ -555,6 +555,37 @@ export function layerVisibilityChanged(previous: LayerVisibility, current: Layer
   );
 }
 
+async function responseError(response: Response, fallback: string) {
+  const statusSuffix = `${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
+  const defaultMessage = `${fallback} with ${statusSuffix}`;
+  const body = (await response.text()).trim();
+
+  if (!body) {
+    return new Error(defaultMessage);
+  }
+
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (typeof parsed === 'string' && parsed.trim()) {
+      return new Error(parsed.trim());
+    }
+
+    if (parsed && typeof parsed === 'object') {
+      const parsedRecord = parsed as Record<string, unknown>;
+      for (const key of ['description', 'detail', 'message', 'title'] as const) {
+        const value = parsedRecord[key];
+        if (typeof value === 'string' && value.trim()) {
+          return new Error(value.trim());
+        }
+      }
+    }
+  } catch {
+    return new Error(body);
+  }
+
+  return new Error(defaultMessage);
+}
+
 export async function createFeature(url: string, feature: unknown) {
   const response = await fetch(url, {
     method: 'POST',
@@ -565,7 +596,7 @@ export async function createFeature(url: string, feature: unknown) {
   });
 
   if (!response.ok) {
-    throw new Error(`Create failed with ${response.status}`);
+    throw await responseError(response, 'Create failed');
   }
 
   const locationId = idFromLocation(response.headers.get('location'));
@@ -603,14 +634,14 @@ export async function replaceFeature(url: string, feature: unknown) {
   });
 
   if (!response.ok) {
-    throw new Error(`Replace failed with ${response.status}`);
+    throw await responseError(response, 'Replace failed');
   }
 }
 
 export async function getFeature(url: string) {
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Request failed with ${response.status}`);
+    throw await responseError(response, 'Request failed');
   }
 
   return sanitizeMissingHeightFeature((await response.json()) as Feature);
@@ -619,7 +650,7 @@ export async function getFeature(url: string) {
 export async function deleteFeature(url: string) {
   const response = await fetch(url, { method: 'DELETE' });
   if (!response.ok && response.status !== 404) {
-    throw new Error(`Delete failed with ${response.status}`);
+    throw await responseError(response, 'Delete failed');
   }
 }
 

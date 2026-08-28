@@ -348,7 +348,7 @@ def main(argv: list[str] | None = None) -> int:
             profile=get_profile(args.profile),
         )
     except ConversionError as err:
-        print(f"error: {err}", file=sys.stderr)
+        sys.stderr.write(f"error: {err}\n")
         return 1
     return 0
 

@@ -35,6 +35,18 @@ def _batch_payload(request: httpx2.Request) -> dict[str, Any]:
     return json.loads(request.content)
 
 
+def _assert_batch_request(
+    request: httpx2.Request,
+    *,
+    collection: str,
+) -> dict[str, Any]:
+    payload = _batch_payload(request)
+    assert request.url.path.endswith("/processes/upsert-batch/execution")
+    assert payload["inputs"]["collection"] == collection
+    assert payload["response"] == "raw"
+    return payload
+
+
 def _properties(**overrides: Any) -> dict[str, Any]:
     values = {
         "lokalid": "feature-1",
@@ -427,6 +439,19 @@ def _post_geojson(
     )
 
 
+def _post_sosi(
+    client: TestClient,
+    text: str,
+    *,
+    profile: str,
+    filename: str = "source.sos",
+) -> httpx2.Response:
+    return client.post(
+        f"/imports?profile={profile}",
+        files={"file": (filename, text, "text/plain")},
+    )
+
+
 def _test_client(
     handler: httpx2.MockTransport,
     *,
@@ -455,7 +480,7 @@ def test_import_publishes_start_batch_and_success_events() -> None:
     publisher = RecordingImportEventPublisher()
 
     def handler(request: httpx2.Request) -> httpx2.Response:
-        assert request.url.path.endswith("/processes/upsert-batch/execution")
+        _assert_batch_request(request, collection="jernbaneplattformkant")
         return httpx2.Response(
             200,
             json={
@@ -498,8 +523,10 @@ def test_import_accepts_multiple_uploaded_files_before_processing() -> None:
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        payload = _batch_payload(request)
-        assert payload["inputs"]["collection"] == "jernbaneplattformkant"
+        payload = _assert_batch_request(
+            request,
+            collection="jernbaneplattformkant",
+        )
         assert len(payload["inputs"]["features"]) == 2
         assert [
             feature["properties"]["lokalid"]
@@ -557,6 +584,111 @@ def test_import_publishes_parse_failure_event() -> None:
     assert publisher.events[1]["phase"] == "parsing"
 
 
+def test_imports_sosi_as_stats_without_upstream_calls() -> None:
+    publisher = RecordingImportEventPublisher()
+    calls = 0
+
+    def handler(_request: httpx2.Request) -> httpx2.Response:
+        nonlocal calls
+        calls += 1
+        return httpx2.Response(204)
+
+    with _test_client(
+        httpx2.MockTransport(handler),
+        event_publisher=publisher,
+    ) as client:
+        response = _post_sosi(
+            client,
+            """
+.HODE
+..TEGNSETT UTF-8
+.PUNKT 1:
+..OBJTYPE Bygning
+..NØ
+68530635600 5295421498
+.KURVE 27090:
+..OBJTYPE Takkant
+..NØH
+68530793009 5295402541 4956520 ...KP 1
+.FLATE 72639:
+..OBJTYPE AnnenBygning
+..REF :-27090
+..NØ
+68530770661 5295433520
+            """.strip(),
+            profile="bygning",
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "mode": "stats",
+        "format": "sosi",
+        "total_files": 1,
+        "has_header": True,
+        "has_footer": False,
+        "total_objects": 3,
+        "coordinate_records": 3,
+        "object_types": {"PUNKT": 1, "KURVE": 1, "FLATE": 1},
+        "objtypes": {"Bygning": 1, "Takkant": 1, "AnnenBygning": 1},
+        "coordinate_attribute_counts": {"KP": 1},
+        "files": [
+            {
+                "filename": "source.sos",
+                "has_header": True,
+                "has_footer": False,
+                "total_objects": 3,
+                "object_types": {"PUNKT": 1, "KURVE": 1, "FLATE": 1},
+                "objtypes": {"Bygning": 1, "Takkant": 1, "AnnenBygning": 1},
+                "coordinate_records": 3,
+                "coordinate_attribute_counts": {"KP": 1},
+            }
+        ],
+    }
+    assert calls == 0
+    assert [event["event"] for event in publisher.events] == [
+        "import.started",
+        "import.parsed",
+        "import.completed.succeeded",
+    ]
+    assert publisher.events[1]["mode"] == "stats"
+    assert publisher.events[1]["total_objects"] == 3
+    assert publisher.events[1]["total_features"] == 3
+    assert publisher.events[2]["total_features"] == 3
+    assert publisher.events[2]["imported_features"] == 0
+
+
+def test_imports_sosi_rejects_invalid_documents_before_upstream_calls() -> None:
+    publisher = RecordingImportEventPublisher()
+    calls = 0
+
+    def handler(_request: httpx2.Request) -> httpx2.Response:
+        nonlocal calls
+        calls += 1
+        return httpx2.Response(204)
+
+    with _test_client(
+        httpx2.MockTransport(handler),
+        event_publisher=publisher,
+    ) as client:
+        response = _post_sosi(
+            client,
+            "68530793009 5295402541 4956520",
+            profile="bygning",
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["message"] == "invalid SOSI document"
+    assert (
+        "coordinate record without a parent key"
+        in response.json()["detail"]["errors"][0]
+    )
+    assert calls == 0
+    assert [event["event"] for event in publisher.events] == [
+        "import.started",
+        "import.completed.failed",
+    ]
+
+
 def test_import_publishes_batch_and_completion_failures() -> None:
     publisher = RecordingImportEventPublisher()
 
@@ -588,9 +720,7 @@ def test_import_uses_caller_supplied_import_id() -> None:
     publisher = RecordingImportEventPublisher()
 
     def handler(request: httpx2.Request) -> httpx2.Response:
-        assert request.url.path.endswith("/processes/upsert-batch/execution")
-        payload = _batch_payload(request)
-        assert payload["inputs"]["collection"] == "jernbaneplattformkant"
+        _assert_batch_request(request, collection="jernbaneplattformkant")
         return _batch_success_response("jernbaneplattformkant", PLATFORM_UUID)
 
     feature = _feature(properties=_properties(lokalid="feature-1"))
@@ -639,6 +769,7 @@ def test_imports_place_and_fallback_geometry() -> None:
         requests.append(request)
         payload = _batch_payload(request)
         collection = payload["inputs"]["collection"]
+        assert payload["response"] == "raw"
         identifier = TRACK_UUID if collection == "spormidt" else PLATFORM_UUID
         return _batch_success_response(collection, identifier)
 
@@ -676,6 +807,7 @@ def test_imports_place_and_fallback_geometry() -> None:
     for request in requests:
         assert request.headers["content-type"] == "application/json"
         payload = _batch_payload(request)
+        assert payload["response"] == "raw"
         assert payload["inputs"]["features"][0]["type"] == "Feature"
         assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiLineString"
         assert payload["inputs"]["features"][0]["geometry"]["coordinates"][0][0] != [
@@ -707,9 +839,7 @@ def test_imports_batch_same_collection_features() -> None:
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        assert request.url.path.endswith("/processes/upsert-batch/execution")
-        payload = json.loads(request.content)
-        assert payload["inputs"]["collection"] == "jernbaneplattformkant"
+        payload = _assert_batch_request(request, collection="jernbaneplattformkant")
         assert len(payload["inputs"]["features"]) == 2
         return httpx2.Response(
             200,
@@ -904,8 +1034,7 @@ def test_imports_built_in_bygning_profile_with_multilinestring() -> None:
     assert [request.url.path for request in requests] == [
         "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
     ]
-    payload = _batch_payload(requests[0])
-    assert payload["inputs"]["collection"] == "bygning"
+    payload = _assert_batch_request(requests[0], collection="bygning")
     assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiLineString"
 
 
@@ -941,8 +1070,7 @@ def test_imports_built_in_bygning_omrade_profile_with_multipolygon() -> None:
     assert [request.url.path for request in requests] == [
         "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
     ]
-    payload = _batch_payload(requests[0])
-    assert payload["inputs"]["collection"] == "bygning_omrade"
+    payload = _assert_batch_request(requests[0], collection="bygning_omrade")
     assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiPolygon"
 
 
@@ -978,8 +1106,7 @@ def test_imports_built_in_bygning_senterlinje_profile_with_multilinestring() -> 
     assert [request.url.path for request in requests] == [
         "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
     ]
-    payload = _batch_payload(requests[0])
-    assert payload["inputs"]["collection"] == "bygning_senterlinje"
+    payload = _assert_batch_request(requests[0], collection="bygning_senterlinje")
     assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiLineString"
 
 
@@ -1015,8 +1142,7 @@ def test_imports_built_in_bygning_position_profile_with_point() -> None:
     assert [request.url.path for request in requests] == [
         "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
     ]
-    payload = _batch_payload(requests[0])
-    assert payload["inputs"]["collection"] == "bygning_posisjon"
+    payload = _assert_batch_request(requests[0], collection="bygning_posisjon")
     assert payload["inputs"]["features"][0]["geometry"]["type"] == "Point"
 
 
@@ -1180,6 +1306,7 @@ def test_request_profile_can_import_mixed_bygning_geojson() -> None:
         requests.append(request)
         payload = _batch_payload(request)
         collection = payload["inputs"]["collection"]
+        assert payload["response"] == "raw"
         return _batch_success_response(collection, PLATFORM_UUID)
 
     upstream_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
@@ -1276,7 +1403,7 @@ def test_imports_bygning_geojson_without_falling_back_to_bane() -> None:
     assert [request.url.path for request in requests] == [
         "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
     ]
-    payload = _batch_payload(requests[0])
+    payload = _assert_batch_request(requests[0], collection="bygning")
     assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiLineString"
 
 
@@ -1304,7 +1431,7 @@ def test_imports_bygning_omrade_geojson_without_falling_back_to_bane() -> None:
     assert [request.url.path for request in requests] == [
         "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
     ]
-    payload = _batch_payload(requests[0])
+    payload = _assert_batch_request(requests[0], collection="bygning_omrade")
     assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiPolygon"
 
 
