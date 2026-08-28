@@ -147,7 +147,7 @@ def test_upsert_function_conflicts_on_declared_business_key():
         for stmt in function_statements(plan)
         if f"function {platform.functions['upsert']}(" in stmt
     )
-    assert "on conflict ((\"identifikasjon\" #>> '{lokalid}'))" in sql
+    assert 'on conflict ("id")' in sql
 
 
 def test_has_z_collections_force_3d_on_ingest():

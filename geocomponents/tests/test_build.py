@@ -100,18 +100,15 @@ def test_standard_columns_and_geometry_present():
     assert parcels.table.geometry.srid == WGS84_SRID
 
 
-def test_relationship_becomes_fk_column():
+def test_relationship_becomes_association_role_row():
     plan = _cadastre_plan()
-    buildings = next(c for c in plan.collections if c.collection_name == "buildings")
-    assert "parcel_id" in {col.name for col in buildings.table.columns}
-    fks = {(fk.column, fk.ref_table) for fk in buildings.table.foreign_keys}
-    assert ("parcel_id", "cadastre.parcels") in fks
-
-
-def test_relationship_fk_ddl_is_rendered_with_stable_constraint_name():
-    ddl = "\n".join(postgis.table_statements(_cadastre_plan()))
-    assert "alter table cadastre.buildings" in ddl
-    assert 'add constraint "buildings_parcel_id_fkey"' in ddl
+    assert len(plan.association_role_rows) == 1
+    r = plan.association_role_rows[0]
+    assert (r.source_collection, r.property, r.target_collection) == (
+        "buildings",
+        "parcel",
+        "parcels",
+    )
 
 
 def test_internal_function_names_are_private_and_per_operation():
@@ -145,10 +142,8 @@ def test_auto_increment_field_uses_postgresql_identity():
 
 def test_bane_business_key_gets_unique_nulls_not_distinct_index():
     ddl = "\n".join(postgis.table_statements(_fkb_bane_plan()))
-    assert (
-        "on fkb_bane.jernbaneplattformkant ((\"identifikasjon\" #>> '{lokalid}')) "
-        "nulls not distinct"
-    ) in ddl
+    # The functional unique index is removed; the primary key indexes the id instead.
+    assert "upsert_key_idx" not in ddl
 
 
 def test_every_collection_gets_a_gist_index_on_geometry():
@@ -182,10 +177,7 @@ def test_fkb_bane_geometry_and_business_key_match_import_profile():
         assert coll.upsert_path == "identifikasjon.lokalid"
     ddl = "\n".join(postgis.table_statements(plan))
     assert '"geometry" geometry(MultiLineStringZ, 5973)' in ddl
-    assert (
-        "on fkb_bane.jernbaneplattformkant ((\"identifikasjon\" #>> '{lokalid}')) "
-        "nulls not distinct"
-    ) in ddl
+    assert "upsert_key_idx" not in ddl
 
 
 def test_bygning_geometry_and_business_key_are_built_correctly():
@@ -197,7 +189,7 @@ def test_bygning_geometry_and_business_key_are_built_correctly():
     assert coll.upsert_path == "lokalid"
     ddl = "\n".join(postgis.table_statements(plan))
     assert '"geometry" geometry(MultiLineStringZ, 5972)' in ddl
-    assert 'on bygning.bygning ("lokalid") nulls not distinct' in ddl
+    assert "upsert_key_idx" not in ddl
 
 
 def test_bygning_omrade_geometry_and_business_key_are_built_correctly():
@@ -209,7 +201,7 @@ def test_bygning_omrade_geometry_and_business_key_are_built_correctly():
     assert coll.upsert_path == "lokalid"
     ddl = "\n".join(postgis.table_statements(plan))
     assert '"geometry" geometry(MultiPolygonZ, 5972)' in ddl
-    assert 'on bygning.bygning_omrade ("lokalid") nulls not distinct' in ddl
+    assert "upsert_key_idx" not in ddl
 
 
 def test_bygning_senterlinje_geometry_and_business_key_are_built_correctly():
@@ -223,7 +215,7 @@ def test_bygning_senterlinje_geometry_and_business_key_are_built_correctly():
     assert coll.upsert_path == "lokalid"
     ddl = "\n".join(postgis.table_statements(plan))
     assert '"geometry" geometry(MultiLineStringZ, 5972)' in ddl
-    assert 'on bygning.bygning_senterlinje ("lokalid") nulls not distinct' in ddl
+    assert "upsert_key_idx" not in ddl
 
 
 def test_bygning_posisjon_geometry_and_business_key_are_built_correctly():
@@ -235,7 +227,7 @@ def test_bygning_posisjon_geometry_and_business_key_are_built_correctly():
     assert coll.upsert_path == "lokalid"
     ddl = "\n".join(postgis.table_statements(plan))
     assert '"geometry" geometry(PointZ, 5972)' in ddl
-    assert 'on bygning.bygning_posisjon ("lokalid") nulls not distinct' in ddl
+    assert "upsert_key_idx" not in ddl
 
 
 # --------------------------------------------------------------------------

@@ -6,18 +6,24 @@ Mapping rules (the heart of "description owns the names"):
 * collection         -> table inside that schema
 * every collection   -> id (uuid PK) + geometry + created_at/updated_at columns
 * commons + own fields -> attribute columns
-* relationship       -> ``<name>_id`` uuid foreign key to the target table
+* relationship       -> rows in ``<ds>.association_role``
 * each collection    -> one function name per operation (``<table>_<op>``)
 """
 
 from __future__ import annotations
 
-from geocomponents.descriptions.models import ResolvedCollection, ResolvedDataset
+from geocomponents.descriptions.models import (
+    ResolvedCollection,
+    ResolvedDataset,
+    ResolvedRelationship,
+)
 from geocomponents.schema.plan import (
     READ_OPS,
     UPSERT_OP,
     WRITE_OPS,
+    AssociationRoleRow,
     CollectionPlan,
+    CollectionRolePlan,
     ColumnPlan,
     ForeignKeyPlan,
     GeometryColumnPlan,
@@ -58,7 +64,6 @@ def _standard_columns() -> list[ColumnPlan]:
 def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: PLR0912
     columns: list[ColumnPlan] = _standard_columns()
     indexes: list[IndexPlan] = []
-    upsert_path = coll.upsert_path
 
     for fld in coll.fields:
         if fld.sql_type == "jsonb":
@@ -74,8 +79,6 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
                 if len(parts) == 2 and parts[0] == fld.name:  # noqa: PLR2004
                     sub_key = parts[1]
                     if rule == "outward_identifier":
-                        if path == upsert_path:
-                            continue
                         strip_keys.append(sub_key)
                         id_inject_key = sub_key
                     elif rule == "timestamp_iso":
@@ -89,10 +92,9 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
                 oi_parts = coll.outward_identifier_path.split(".", 1)
                 if len(oi_parts) == 2 and oi_parts[0] == fld.name:  # noqa: PLR2004
                     sub_key = oi_parts[1]
-                    if coll.outward_identifier_path != upsert_path:
-                        if sub_key not in strip_keys:
-                            strip_keys.append(sub_key)
-                        id_inject_key = sub_key
+                    if sub_key not in strip_keys:
+                        strip_keys.append(sub_key)
+                    id_inject_key = sub_key
 
             # Functional indexes for directly indexable sub-fields.
             # SafeIdentifier guarantees no single quotes in key names.
@@ -142,12 +144,6 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
                 indexes.append(IndexPlan(f'"{fld.name}"'))
 
     foreign_keys: list[ForeignKeyPlan] = []
-    for rel in coll.relationships:
-        col_name = f"{rel.name}_id"
-        columns.append(ColumnPlan(col_name, "uuid", nullable=True))
-        foreign_keys.append(
-            ForeignKeyPlan(col_name, ref_table=f"{schema}.{rel.target}")
-        )
 
     geometry = GeometryColumnPlan(
         name=coll.geometry_field,
@@ -166,6 +162,24 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
     )
 
 
+def _build_role(
+    rel: ResolvedRelationship,
+    schema: str,
+    target_coll: ResolvedCollection,
+) -> CollectionRolePlan:
+    oi_path = target_coll.outward_identifier_path
+    oi_leaf = oi_path.rsplit(".", 1)[-1] if oi_path else "id"
+    # Wire value is now always the uuid (OI = id); look up by primary key.
+    oi_lookup_cond = f"\"id\" = (_elem->>'{oi_leaf}')::uuid"
+    return CollectionRolePlan(
+        property=rel.property,
+        target_collection=rel.target,
+        target_table=f"{schema}.{rel.target}",
+        oi_leaf=oi_leaf,
+        oi_lookup_cond=oi_lookup_cond,
+    )
+
+
 def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
     """Turn a resolved dataset into a ``SchemaPlan`` -- the tables, columns,
     geometries, foreign keys, and function names it needs.
@@ -178,6 +192,11 @@ def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
         if coll.supports_upsert:
             ops += (UPSERT_OP,)
         functions = {op: internal_function(schema, coll.name, op) for op in ops}
+        coll_by_name = {c.name: c for c in dataset.collections}
+        roles = tuple(
+            _build_role(rel, schema, coll_by_name[rel.target])
+            for rel in coll.relationships
+        )
         collections.append(
             CollectionPlan(
                 collection_name=coll.name,
@@ -186,6 +205,16 @@ def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
                 functions=functions,
                 upsert_field=coll.upsert_field,
                 upsert_path=coll.upsert_path,
+                roles=roles,
             )
         )
-    return SchemaPlan(schema_name=schema, collections=tuple(collections))
+    role_rows = [
+        AssociationRoleRow(coll.name, rel.property, rel.target)
+        for coll in dataset.collections
+        for rel in coll.relationships
+    ]
+    return SchemaPlan(
+        schema_name=schema,
+        collections=tuple(collections),
+        association_role_rows=tuple(role_rows),
+    )
