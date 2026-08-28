@@ -152,7 +152,11 @@ def _collection_resource(dataset: str, coll: ResolvedCollection, dsn: str) -> di
 def _process_resource(dataset: ResolvedDataset, process_id: str, dsn: str) -> dict:
     resource = {
         "type": "process",
-        "processor": {"name": PROCESS_REGISTRY[process_id]},
+        "processor": {
+            "name": PROCESS_REGISTRY[process_id],
+            "dataset": dataset.name,
+            "dataset_title": dataset.title,
+        },
     }
     if process_id == "upsert-batch":
         provider_defs = {

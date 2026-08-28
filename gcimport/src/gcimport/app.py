@@ -332,7 +332,7 @@ async def _run_import(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={
-                "message": f"{context.request_profile.title} API upsert failed",
+                "message": (f"{context.request_profile.title} API batch upsert failed"),
                 "collection": err.collection,
                 "id": err.feature_id,
                 "reason": err.reason,

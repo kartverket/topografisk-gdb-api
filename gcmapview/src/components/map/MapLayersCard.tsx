@@ -124,6 +124,7 @@ type MapLayersCardProps = {
   backgroundMap: BackgroundMapId;
   availableLayerIds?: readonly MapLayerId[];
   is3d: boolean;
+  isEditingFeature?: boolean;
   isLoadingAvailableLayers?: boolean;
   terrainEnabled: boolean;
   visibility: LayerVisibility;
@@ -141,6 +142,7 @@ export function MapLayersCard({
   backgroundMap,
   availableLayerIds = MAP_LAYER_IDS,
   is3d,
+  isEditingFeature = false,
   isLoadingAvailableLayers = false,
   terrainEnabled,
   visibility,
@@ -208,6 +210,7 @@ export function MapLayersCard({
                       className="rounded-full px-2"
                       aria-pressed={is3d}
                       aria-label="3D-visning"
+                      disabled={isEditingFeature}
                       onClick={onToggle3d}
                     />
                   }>
@@ -226,12 +229,13 @@ export function MapLayersCard({
                       type="button"
                       size="icon-xs"
                       variant={terrainEnabled ? 'default' : 'ghost'}
-                      className={cn('rounded-full', !is3d ? 'cursor-default opacity-45' : '')}
+                      className={cn('rounded-full', !is3d || isEditingFeature ? 'cursor-default opacity-45' : '')}
                       aria-pressed={terrainEnabled}
                       aria-label="Terreng"
-                      aria-disabled={!is3d}
+                      aria-disabled={!is3d || isEditingFeature}
+                      disabled={isEditingFeature}
                       onClick={() => {
-                        if (is3d) {
+                        if (is3d && !isEditingFeature) {
                           onToggleTerrain();
                         }
                       }}
@@ -298,6 +302,7 @@ export function MapLayersCard({
                 <select
                   className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
                   aria-label="Velg favorittsted"
+                  disabled={isEditingFeature}
                   value={activeFavoriteView?.name ?? ''}
                   onChange={event => onSelectFavoriteView(event.target.value)}>
                   {favoriteViews.map(favoriteView => (
@@ -320,6 +325,7 @@ export function MapLayersCard({
                 type="button"
                 variant="outline"
                 size="xs"
+                disabled={isEditingFeature}
                 onClick={onSaveFavoriteView}>
                 Lagre gjeldende
               </Button>
@@ -327,7 +333,7 @@ export function MapLayersCard({
                 type="button"
                 variant="ghost"
                 size="xs"
-                disabled={!activeFavoriteView}
+                disabled={isEditingFeature || !activeFavoriteView}
                 onClick={onClearFavoriteView}>
                 Slett valgt
               </Button>

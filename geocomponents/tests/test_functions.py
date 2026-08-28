@@ -29,7 +29,7 @@ from geocomponents.schema.plan import (
     internal_function,
 )
 
-DESCRIPTIONS = Path(__file__).resolve().parents[1] / "descriptions"
+DESCRIPTIONS = Path(__file__).resolve().parents[2] / "descriptions"
 
 
 def _plan(name="cadastre"):

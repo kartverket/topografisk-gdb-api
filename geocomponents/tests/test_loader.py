@@ -16,7 +16,7 @@ from geocomponents.descriptions.models import (
     RelationshipDef,
 )
 
-DESCRIPTIONS = Path(__file__).resolve().parents[1] / "descriptions"
+DESCRIPTIONS = Path(__file__).resolve().parents[2] / "descriptions"
 
 
 def test_commons_base_field_is_inherited_by_every_collection():

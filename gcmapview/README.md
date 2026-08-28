@@ -1,7 +1,8 @@
 # gcmapview
 
-A small Vite + React map viewer for the `geocomponents` OGC API, plus a
-JSON-FG upload page that starts imports through `gcjobs`.
+A small Vite + React map viewer for the canonical `gcapi` OGC facade, plus a
+JSON-FG upload page that starts imports through gcapi-owned OGC process
+execution endpoints.
 
 Note that this is a small viewer for developer testing, it is not targeted for
 wide deployment.
@@ -9,17 +10,16 @@ wide deployment.
 ## Routes
 
 - `/` — map with editable Cadastre layers plus read-only FKB-Bane and Bygning layers
-- `/import` — upload a JSON-FG or classic GeoJSON FeatureCollection to `gcjobs`; the UI auto-detects FKB-Bane vs Bygning when possible, and still lets the user override the profile
+- `/import` — upload a JSON-FG or classic GeoJSON FeatureCollection to `gcapi`; the UI auto-detects FKB-Bane vs Bygning when possible, and still lets the user override the profile
 
 Current read-only import-backed layers on the map:
 
 - FKB-Bane: `jernbaneplattformkant`, `spormidt`
 - Bygning: `bygning`, `bygning_omrade`, `bygning_senterlinje`, `bygning_posisjon`
 
-In local development and Docker Compose, the browser talks directly to:
+In local development and Docker Compose, the browser talks only to:
 
-- `http://localhost:8000` for `geocomponents`
-- `http://localhost:8003` for `gcjobs` import start and status APIs
+- `http://localhost:8004` for `gcapi`
 
 ## Run
 
@@ -33,8 +33,7 @@ npm run dev
 Optional overrides:
 
 ```bash
-GEOCOMPONENTS_API_URL=http://localhost:8000 \
-GCJOBS_API_URL=http://localhost:8003 \
+GCAPI_API_URL=http://localhost:8004 \
 npm run dev
 ```
 
@@ -54,22 +53,20 @@ filesystem. API calls still go directly from the browser to the exposed backend
 addresses.
 
 To make the browser call public API addresses directly in a deployed
-environment, set these optional runtime variables instead:
+environment, set this runtime variable instead:
 
 ```bash
-GEOCOMPONENTS_API_URL=https://geocomponents.example.no
-GCJOBS_API_URL=https://gcjobs.example.no
+GCAPI_API_URL=https://gcapi.example.no
 ```
 
-When set, `gcmapview` uses those absolute URLs in the browser and bypasses the
-Nginx container for API requests. The target APIs must allow the frontend
-origin with CORS for this mode to work.
+When set, `gcmapview` uses that absolute URL in the browser and bypasses the
+Node container for API requests. `gcapi` must allow the frontend origin with
+CORS for this mode to work.
 
 For Docker Compose, `gcmapview` uses these direct browser URLs by default:
 
 ```bash
-GEOCOMPONENTS_API_URL=http://localhost:8000
-GCJOBS_API_URL=http://localhost:8003
+GCAPI_API_URL=http://localhost:8004
 ```
 
 The container does not provide built-in fallback values for these. If they are
@@ -83,17 +80,15 @@ addresses instead, for example:
 
 ```yaml
 env:
-  - name: GEOCOMPONENTS_API_URL
-    value: https://geocomponents.example.no
-  - name: GCJOBS_API_URL
-    value: https://gcjobs.example.no
+  - name: GCAPI_API_URL
+    value: https://gcapi.example.no
 ```
 
-`geocomponents` and `gcjobs` must allow the `gcmapview` origin through CORS.
-The local compose file sets that up for `http://localhost:5173` and
-`http://localhost:8080`.
+`gcapi` must allow the `gcmapview` origin through CORS. The local compose file
+sets that up for `http://localhost:5173` and `http://localhost:8080`.
 
-This is separate from the internal `gcjobs -> gcimport -> geocomponents` service
-configuration. Inside the backend containers, internal service URLs should still
-point at cluster or Compose service names. Only `gcmapview` should use public
-browser-facing URLs.
+This is separate from the internal `gcapi -> geocomponents`, `gcapi -> gcjobs`,
+and `gcjobs -> gcimport -> geocomponents` service configuration. Inside the
+backend containers, internal service URLs should still point at cluster or
+Compose service names. Only `gcmapview` should use the public browser-facing
+URL.

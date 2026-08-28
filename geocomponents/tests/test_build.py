@@ -12,7 +12,7 @@ from geocomponents.schema import postgis
 from geocomponents.schema.build import build_schema_plan
 from geocomponents.schema.plan import OPERATIONS, READ_OPS
 
-DESCRIPTIONS = Path(__file__).resolve().parents[1] / "descriptions"
+DESCRIPTIONS = Path(__file__).resolve().parents[2] / "descriptions"
 WGS84_SRID = 4326
 
 

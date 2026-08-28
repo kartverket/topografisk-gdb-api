@@ -20,7 +20,7 @@ from geocomponents.descriptions.loader import load_resolved_datasets
 from geocomponents.schema import functions, postgis
 from geocomponents.schema.build import build_schema_plan
 
-DESCRIPTIONS_DIR = Path(__file__).resolve().parents[1] / "descriptions"
+DESCRIPTIONS_DIR = Path(__file__).resolve().parents[2] / "descriptions"
 
 # Host-run tests target the local compose DB unless DB_* is already set (e.g. in
 # CI). This lives in the test harness so production config stays fail-loud.
