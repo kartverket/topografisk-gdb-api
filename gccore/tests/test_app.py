@@ -10,3 +10,12 @@ def test_root_reports_service_identity() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"service": "gccore", "schema": "gc_core"}
+
+
+def test_auth_reports_authorized_for_development() -> None:
+    client = TestClient(app)
+
+    response = client.get("/auth")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "authorized": True}
