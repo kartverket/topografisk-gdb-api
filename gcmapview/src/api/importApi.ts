@@ -51,6 +51,7 @@ export type ImportRun = {
   process_id: string | null;
   status: ImportJobStatus;
   phase: string | null;
+  filenames: string[];
   started_at: string;
   completed_at: string | null;
   last_event_at: string;
@@ -88,6 +89,7 @@ type JobStatusResponse = {
   succeededBatches?: unknown;
   failedBatches?: unknown;
   lastError?: unknown;
+  filenames?: unknown;
 };
 
 function gcapiDatasetJobUrl(profile: ImportProfile, suffix: string) {
@@ -183,9 +185,11 @@ function errorMessage(body: unknown, status: number) {
 
 const IMPORT_PROCESS_ID = 'import';
 
-export async function startImport(file: File, profile: ImportProfile): Promise<ImportResult> {
+export async function startImport(files: File[], profile: ImportProfile): Promise<ImportResult> {
   const form = new FormData();
-  form.append('file', file);
+  for (const file of files) {
+    form.append('file', file);
+  }
   const response = await fetch(
     `${gcapiApiBaseUrl}/datasets/${profile}/ogc_api/processes/${IMPORT_PROCESS_ID}/execution`,
     {
@@ -244,6 +248,16 @@ function integerOrNull(value: unknown, fieldName: string) {
   return integerOrThrow(value, fieldName);
 }
 
+function stringArray(value: unknown, fieldName: string) {
+  if (value === null || value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
+    throw new Error(`Unexpected import job response: invalid ${fieldName}`);
+  }
+  return value.filter(item => item.length > 0);
+}
+
 function jobStatus(value: unknown): ImportJobStatus {
   if (value === 'accepted' || value === 'running' || value === 'successful' || value === 'failed') {
     return value;
@@ -278,6 +292,7 @@ function mapJobStatus(body: JobStatusResponse): ImportRun {
     process_id: processId,
     status,
     phase: stringOrNull(body.phase),
+    filenames: stringArray(body.filenames, 'filenames'),
     started_at: startedAt,
     completed_at: completedAt,
     last_event_at: updatedAt,

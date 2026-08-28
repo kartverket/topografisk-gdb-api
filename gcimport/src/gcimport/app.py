@@ -13,8 +13,9 @@ from uuid import uuid4
 
 import httpx2
 import orjson
-from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile, status
+from fastapi import FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.datastructures import UploadFile
 
 from gcimport.config import Settings
 from gcimport.geojson_to_jsonfg import ConversionError, convert_document
@@ -39,6 +40,12 @@ class ImportRequestContext:
     publisher: ImportEventPublisher
     request_profile: ImportProfile
     base_event: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class UploadedImportFile:
+    filename: str | None
+    body: bytes
 
 
 def create_app(
@@ -91,7 +98,7 @@ def create_app(
 
     @application.post("/imports")
     async def create_import(
-        file: Annotated[UploadFile, File()],
+        request: Request,
         profile_name: Annotated[str, Query(alias="profile")],
         requested_import_id: Annotated[
             str | None,
@@ -100,7 +107,7 @@ def create_app(
     ) -> dict:
         return await _handle_import_request(
             application=application,
-            file=file,
+            request=request,
             profile_name=profile_name,
             requested_import_id=requested_import_id,
         )
@@ -111,14 +118,15 @@ def create_app(
 async def _handle_import_request(
     *,
     application: FastAPI,
-    file: UploadFile,
+    request: Request,
     profile_name: str,
     requested_import_id: str | None,
 ) -> dict[str, Any]:
     runtime_settings: Settings = application.state.settings
     publisher: ImportEventPublisher = application.state.event_publisher
     request_profile = _request_profile(profile_name)
-    body = await _read_bounded(file, runtime_settings.max_upload_bytes)
+    files = await _request_upload_files(request)
+    uploads = await _read_uploaded_files(files, runtime_settings.max_upload_bytes)
     import_id = _request_import_id(requested_import_id)
     context = ImportRequestContext(
         application=application,
@@ -128,7 +136,7 @@ async def _handle_import_request(
         base_event=_base_event(
             request_profile=request_profile,
             import_id=import_id,
-            filename=file.filename,
+            uploads=uploads,
         ),
     )
 
@@ -138,10 +146,8 @@ async def _handle_import_request(
         event_name="import.started",
         phase="parsing",
     )
-    document = await _load_import_document(body, publisher, context.base_event)
-    features = await _prepare_import_features(
-        document=document,
-        filename=file.filename,
+    features = await _prepare_import_features_from_uploads(
+        uploads=uploads,
         request_profile=request_profile,
         publisher=publisher,
         base_event=context.base_event,
@@ -177,13 +183,17 @@ def _base_event(
     *,
     request_profile: ImportProfile,
     import_id: str,
-    filename: str | None,
+    uploads: list[UploadedImportFile],
 ) -> dict[str, Any]:
+    filenames = [
+        filename for filename in (upload.filename for upload in uploads) if filename
+    ]
     return {
         "import_id": import_id,
         "profile": request_profile.name,
         "dataset_api_path": request_profile.dataset_api_path,
-        "filename": filename,
+        "filename": filenames[0] if len(filenames) == 1 else None,
+        "filenames": filenames,
     }
 
 
@@ -277,6 +287,30 @@ async def _prepare_import_features(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"message": "invalid JSON-FG document", "errors": err.errors},
         ) from err
+
+
+async def _prepare_import_features_from_uploads(
+    *,
+    uploads: list[UploadedImportFile],
+    request_profile: ImportProfile,
+    publisher: ImportEventPublisher,
+    base_event: dict[str, Any],
+) -> list[dict[str, Any]]:
+    features: list[dict[str, Any]] = []
+
+    for upload in uploads:
+        document = await _load_import_document(upload.body, publisher, base_event)
+        features.extend(
+            await _prepare_import_features(
+                document=document,
+                filename=upload.filename,
+                request_profile=request_profile,
+                publisher=publisher,
+                base_event=base_event,
+            )
+        )
+
+    return features
 
 
 def _batch_event_publisher(
@@ -395,6 +429,42 @@ def _request_profile(
 
 def _dataset_api_url(root_api_url: str, profile: ImportProfile) -> str:
     return f"{root_api_url.rstrip('/')}/{profile.dataset_api_path.strip('/')}"
+
+
+async def _request_upload_files(request: Request) -> list[UploadFile]:
+    form = await request.form()
+    files = [
+        value
+        for key, value in form.multi_items()
+        if key in {"file", "files"} and isinstance(value, UploadFile)
+    ]
+    if files:
+        return files
+
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail="at least one uploaded file is required",
+    )
+
+
+async def _read_uploaded_files(
+    files: list[UploadFile],
+    max_bytes: int,
+) -> list[UploadedImportFile]:
+    uploads: list[UploadedImportFile] = []
+    total_size = 0
+
+    for file in files:
+        body = await _read_bounded(file, max_bytes)
+        total_size += len(body)
+        if total_size > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"uploaded files exceed {max_bytes} bytes",
+            )
+        uploads.append(UploadedImportFile(filename=file.filename, body=body))
+
+    return uploads
 
 
 async def _read_bounded(file: UploadFile, max_bytes: int) -> bytes:

@@ -397,6 +397,23 @@ def _post(client: TestClient, document: Any, *, profile: str) -> httpx2.Response
     )
 
 
+def _post_files(
+    client: TestClient,
+    documents: list[Any],
+    *,
+    profile: str,
+    filenames: list[str] | None = None,
+) -> httpx2.Response:
+    names = filenames or [f"source-{index + 1}.json" for index in range(len(documents))]
+    return client.post(
+        f"/imports?profile={profile}",
+        files=[
+            ("file", (filename, json.dumps(document), "application/json"))
+            for filename, document in zip(names, documents, strict=True)
+        ],
+    )
+
+
 def _post_geojson(
     client: TestClient,
     document: Any,
@@ -473,6 +490,51 @@ def test_import_publishes_start_batch_and_success_events() -> None:
     assert publisher.events[2]["batch_size"] == 2
     assert publisher.events[3]["imported_features"] == 2
     assert len({event["import_id"] for event in publisher.events}) == 1
+
+
+def test_import_accepts_multiple_uploaded_files_before_processing() -> None:
+    publisher = RecordingImportEventPublisher()
+    requests: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        payload = _batch_payload(request)
+        assert payload["inputs"]["collection"] == "jernbaneplattformkant"
+        assert len(payload["inputs"]["features"]) == 2
+        assert [
+            feature["properties"]["lokalid"]
+            for feature in payload["inputs"]["features"]
+        ] == ["feature-1", "feature-2"]
+        return httpx2.Response(
+            200,
+            json={
+                "collection": "jernbaneplattformkant",
+                "total": 2,
+                "features": [
+                    {"id": PLATFORM_UUID},
+                    {"id": TRACK_UUID},
+                ],
+            },
+        )
+
+    first = _document([_feature(properties=_properties(lokalid="feature-1"))])
+    second = _document([_feature(properties=_properties(lokalid="feature-2"))])
+
+    with _test_client(
+        httpx2.MockTransport(handler), event_publisher=publisher
+    ) as client:
+        response = _post_files(client, [first, second], profile="fkb_bane")
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 2
+    assert len(requests) == 1
+    assert [event["event"] for event in publisher.events] == [
+        "import.started",
+        "import.parsed",
+        "import.batch.succeeded",
+        "import.completed.succeeded",
+    ]
+    assert publisher.events[1]["total_features"] == 2
 
 
 def test_import_publishes_parse_failure_event() -> None:
@@ -1405,6 +1467,23 @@ def test_rejects_oversized_upload() -> None:
         )
 
     assert response.status_code == 413
+
+
+def test_rejects_oversized_multi_file_upload() -> None:
+    with _test_client(
+        httpx2.MockTransport(lambda _request: httpx2.Response(204)),
+        max_upload_bytes=6,
+    ) as client:
+        response = client.post(
+            "/imports?profile=fkb_bane",
+            files=[
+                ("file", ("one.json", b"1234", "application/json")),
+                ("file", ("two.json", b"789", "application/json")),
+            ],
+        )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "uploaded files exceed 6 bytes"
 
 
 def test_reports_upstream_failure_as_bad_gateway() -> None:
