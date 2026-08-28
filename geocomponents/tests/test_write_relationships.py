@@ -1,11 +1,4 @@
-"""Write-path tests for association links (slice 2b).
-
-Tests 1-8 and 13 are temporary: they read topology.association directly,
-breaking the black-box rule (tests should observe behaviour through the
-public API, not internal tables).  No read path exists yet, so direct table
-access is the only way to assert links were written.  Slice C adds the read
-path and retires these tests by rewriting against ogc.feature_item.
-"""
+"""Contract tests for association links on the transaction and read paths."""
 
 from __future__ import annotations
 
@@ -34,6 +27,8 @@ _NO_SUCH_ID = str(uuid.UUID(int=0x999))  # valid UUID that matches no border
 
 # Minimal valid geometries for the fixture collections (all SRID 4326, 2D).
 _LINE_GEOM = {"type": "LineString", "coordinates": [[0, 0], [1, 0]]}
+_LINE_GEOM_ALT = {"type": "LineString", "coordinates": [[10, 0], [11, 0]]}
+_LINE_GEOM_ALT_2 = {"type": "LineString", "coordinates": [[20, 0], [21, 0]]}
 _POLYGON_GEOM = {
     "type": "MultiPolygon",
     "coordinates": [[[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]],
@@ -134,15 +129,56 @@ def _delete(collection, fid):
     return {"action": "delete", "collection": collection, "id": fid}
 
 
-def _assoc_rows(conn, source_id):
-    """Read (source_collection, property, target_id) for one source feature, sorted."""
+def _item(conn, collection, fid):
+    """Read one feature through the public OGC function."""
     return conn.execute(
-        "select source_collection, property, target_id::text "
-        "from topology.association "
-        "where source_id = %s::uuid "
-        "order by property, target_id",
-        (source_id,),
+        "select ogc.feature_item('topology', %s, %s::uuid)",
+        (collection, fid),
+    ).fetchone()[0]
+
+
+def _items(conn, collection, lim=1000):
+    """Read a feature collection through the public OGC function."""
+    return conn.execute(
+        "select ogc.feature_items('topology', %s, %s, %s, %s, %s)",
+        (collection, None, lim, 0, True),
+    ).fetchone()[0]
+
+
+def _association_rows(conn, collection, fid):
+    """Read one collection's stored associations through the internal helper."""
+    if collection == "surface":
+        sql = (
+            "select property, target_collection, target_id::text "
+            "from topology._surface_associations(%s::uuid) "
+            "order by property, target_id"
+        )
+    elif collection == "surface2":
+        sql = (
+            "select property, target_collection, target_id::text "
+            "from topology._surface2_associations(%s::uuid) "
+            "order by property, target_id"
+        )
+    else:
+        raise AssertionError(
+            f"unexpected collection for association helper: {collection}"
+        )
+    return conn.execute(sql, (fid,)).fetchall()
+
+
+def _sources_using_rows(conn, target_collection, ids):
+    """Read reverse users of one or more target ids through the internal helper."""
+    return conn.execute(
+        "select collection, id::text "
+        "from topology._sources_using(%s, %s::uuid[]) "
+        "order by collection, id",
+        (target_collection, ids),
     ).fetchall()
+
+
+def _properties(conn, collection, fid):
+    """Convenience wrapper for a feature's properties object."""
+    return _item(conn, collection, fid)["properties"]
 
 
 def _assert_rejected(report):
@@ -276,12 +312,8 @@ def test_duplicate_target_is_rejected(topology_conn, borders):
     _assert_rejected(report)
 
 
-def test_create_with_two_links_writes_two_rows(topology_conn, borders):
-    """Two elements under one link property → two association rows, each a uuid.
-
-    Finding two rows proves the lookup resolved the OI values to target row ids.
-    Temporary: slice C retires this test once ogc.feature_item returns links.
-    """
+def test_create_with_two_links_reads_same_shape(topology_conn, borders):
+    """Create with links reads back the same property shape the write accepted."""
     report = _txn(
         topology_conn,
         _insert(
@@ -296,15 +328,11 @@ def test_create_with_two_links_writes_two_rows(topology_conn, borders):
         ),
     )
     assert report["committed"] is True
-    surface_id = report["items"][0]["id"]
-
-    rows = _assoc_rows(topology_conn, surface_id)
-    assert len(rows) == 2
-    assert all(row[0] == "surface" for row in rows)
-    assert all(row[1] == "boundedByOuter" for row in rows)
-    # target_id is a uuid (not the lokaid text), proving a lookup was performed
-    for row in rows:
-        uuid.UUID(row[2])  # raises if not a valid uuid
+    got = _properties(topology_conn, "surface", report["items"][0]["id"])
+    assert got["boundedByOuter"] == [
+        {"featuretype": "border1", "lokalid": borders["b1a_lokalid"]},
+        {"featuretype": "border1", "lokalid": borders["b1b_lokalid"]},
+    ]
 
 
 def test_create_no_oi_target_by_uuid(topology_conn, borders):
@@ -320,9 +348,66 @@ def test_create_no_oi_target_by_uuid(topology_conn, borders):
         ),
     )
     assert report["committed"] is True
-    rows = _assoc_rows(topology_conn, report["items"][0]["id"])
-    assert len(rows) == 1
-    assert rows[0][1] == "describedByNote"
+    got = _properties(topology_conn, "surface", report["items"][0]["id"])
+    assert got["describedByNote"] == [
+        {"featuretype": "border3", "id": borders["b3_id"]}
+    ]
+
+
+def test_read_uses_declared_identifier_keys(topology_conn, borders):
+    """Each link element uses the identifier key declared by its target collection."""
+    report = _txn(
+        topology_conn,
+        _insert(
+            "surface",
+            _POLYGON_GEOM,
+            {
+                "boundedByOuter": [
+                    {"featuretype": "border1", "lokalid": borders["b1a_lokalid"]}
+                ],
+                "describedByNote": [{"featuretype": "border3", "id": borders["b3_id"]}],
+            },
+        ),
+    )
+
+    got = _properties(topology_conn, "surface", report["items"][0]["id"])
+    assert got["boundedByOuter"] == [
+        {"featuretype": "border1", "lokalid": borders["b1a_lokalid"]}
+    ]
+    assert got["describedByNote"] == [
+        {"featuretype": "border3", "id": borders["b3_id"]}
+    ]
+
+
+def test_read_uses_declared_featuretype(topology_conn, borders):
+    """Each read-back link carries the target collection declared in the catalogue."""
+    report = _txn(
+        topology_conn,
+        _insert(
+            "surface",
+            _POLYGON_GEOM,
+            {
+                "boundedByShared": [
+                    {"featuretype": "border2", "lokalid": borders["b2_lokalid"]}
+                ]
+            },
+        ),
+    )
+
+    got = _properties(topology_conn, "surface", report["items"][0]["id"])
+    assert got["boundedByShared"] == [
+        {"featuretype": "border2", "lokalid": borders["b2_lokalid"]}
+    ]
+
+
+def test_property_with_no_links_is_absent_on_read(topology_conn):
+    """A declared property with no links is omitted rather than returned as []."""
+    report = _txn(topology_conn, _insert("surface", _POLYGON_GEOM, {}))
+
+    got = _properties(topology_conn, "surface", report["items"][0]["id"])
+    assert "boundedByOuter" not in got
+    assert "boundedByShared" not in got
+    assert "describedByNote" not in got
 
 
 def test_update_leaves_unnamed_properties_intact(topology_conn, borders):
@@ -330,7 +415,6 @@ def test_update_leaves_unnamed_properties_intact(topology_conn, borders):
 
     Surface starts with rows under both boundedByOuter and boundedByShared.
     An update that only names boundedByShared must leave boundedByOuter untouched.
-    Temporary: slice C retires this test once ogc.feature_item returns links.
     """
     create_report = _txn(
         topology_conn,
@@ -351,10 +435,11 @@ def test_update_leaves_unnamed_properties_intact(topology_conn, borders):
 
     _txn(topology_conn, _update("surface", surface_id, {"boundedByShared": []}))
 
-    rows = _assoc_rows(topology_conn, surface_id)
-    props = {row[1] for row in rows}
-    assert "boundedByOuter" in props, "PATCH must not touch unmentioned properties"
-    assert "boundedByShared" not in props, "named empty array clears that property"
+    got = _properties(topology_conn, "surface", surface_id)
+    assert got["boundedByOuter"] == [
+        {"featuretype": "border1", "lokalid": borders["b1a_lokalid"]}
+    ]
+    assert "boundedByShared" not in got
 
 
 def test_replace_clears_declared_properties_not_in_document(topology_conn, borders):
@@ -362,7 +447,6 @@ def test_replace_clears_declared_properties_not_in_document(topology_conn, borde
 
     Surface starts with a boundedByOuter row. A replace that only names
     boundedByShared must clear boundedByOuter's rows entirely.
-    Temporary: slice C retires this test once ogc.feature_item returns links.
     """
     create_report = _txn(
         topology_conn,
@@ -392,19 +476,17 @@ def test_replace_clears_declared_properties_not_in_document(topology_conn, borde
         ),
     )
 
-    rows = _assoc_rows(topology_conn, surface_id)
-    props = {row[1] for row in rows}
-    assert "boundedByOuter" not in props, (
-        "PUT must clear declared-but-absent properties"
-    )
-    assert "boundedByShared" in props
+    got = _properties(topology_conn, "surface", surface_id)
+    assert "boundedByOuter" not in got
+    assert got["boundedByShared"] == [
+        {"featuretype": "border2", "lokalid": borders["b2_lokalid"]}
+    ]
 
 
 def test_empty_array_clears_that_property(topology_conn, borders):
     """An empty array in the document clears that property's rows.
 
     An absent key (PATCH) means 'leave alone'; an empty array means 'remove all'.
-    Temporary: slice C retires this test once ogc.feature_item returns links.
     """
     create_report = _txn(
         topology_conn,
@@ -422,8 +504,8 @@ def test_empty_array_clears_that_property(topology_conn, borders):
 
     _txn(topology_conn, _update("surface", surface_id, {"boundedByOuter": []}))
 
-    rows = _assoc_rows(topology_conn, surface_id)
-    assert all(row[1] != "boundedByOuter" for row in rows)
+    got = _properties(topology_conn, "surface", surface_id)
+    assert "boundedByOuter" not in got
 
 
 def test_delete_source_removes_its_own_association_rows(topology_conn, borders):
@@ -448,7 +530,7 @@ def test_delete_source_removes_its_own_association_rows(topology_conn, borders):
 
     _txn(topology_conn, _delete("surface", surface_id))
 
-    assert _assoc_rows(topology_conn, surface_id) == []
+    assert _item(topology_conn, "surface", surface_id) is None
 
 
 def test_delete_target_leaves_inbound_rows_intact(topology_conn, borders):
@@ -456,7 +538,6 @@ def test_delete_target_leaves_inbound_rows_intact(topology_conn, borders):
 
     There is no FK on target_id by design: a dangling reference must remain
     reportable by phase 2a (slice C).  This test verifies no cascade was added.
-    Temporary: slice C retires this test once ogc.feature_item returns links.
     """
     disposable_report = _txn(
         topology_conn,
@@ -482,8 +563,10 @@ def test_delete_target_leaves_inbound_rows_intact(topology_conn, borders):
 
     _txn(topology_conn, _delete("border1", disposable_id))
 
-    rows = _assoc_rows(topology_conn, surface_id)
-    assert len(rows) == 1, "Deleting a target must not remove inbound association rows"
+    got = _properties(topology_conn, "surface", surface_id)
+    assert got["boundedByOuter"] == [
+        {"featuretype": "border1", "lokalid": _B1_DISPOSABLE_ID}
+    ]
 
 
 def test_unlinking_does_not_modify_target_feature(topology_conn, borders):
@@ -542,9 +625,224 @@ def test_reverse_and_idx_on_element_are_accepted(topology_conn, borders):
         ),
     )
     assert report["committed"] is True
-    rows = _assoc_rows(topology_conn, report["items"][0]["id"])
-    assert len(rows) == 1
-    assert rows[0][1] == "boundedByOuter"
+    got = _properties(topology_conn, "surface", report["items"][0]["id"])
+    assert got["boundedByOuter"] == [
+        {"featuretype": "border1", "lokalid": borders["b1a_lokalid"]}
+    ]
+
+
+def test_write_read_replace_roundtrip_keeps_links(topology_conn, borders):
+    """A feature read back through feature_item round-trips through replace unchanged."""
+    report = _txn(
+        topology_conn,
+        _insert(
+            "surface",
+            _POLYGON_GEOM,
+            {
+                "boundedByOuter": [
+                    {"featuretype": "border1", "lokalid": borders["b1a_lokalid"]},
+                    {"featuretype": "border1", "lokalid": borders["b1b_lokalid"]},
+                ],
+                "describedByNote": [{"featuretype": "border3", "id": borders["b3_id"]}],
+            },
+        ),
+    )
+    surface_id = report["items"][0]["id"]
+    before = _item(topology_conn, "surface", surface_id)
+
+    replaced = _txn(
+        topology_conn,
+        {
+            "action": "replace",
+            "collection": "surface",
+            "id": surface_id,
+            "feature": {
+                "type": "Feature",
+                "geometry": before["geometry"],
+                "properties": before["properties"],
+            },
+        },
+    )
+
+    assert replaced["committed"] is True
+    after = _item(topology_conn, "surface", surface_id)
+    assert after["id"] == before["id"]
+    assert after["geometry"] == before["geometry"]
+    assert (
+        after["properties"]["boundedByOuter"] == before["properties"]["boundedByOuter"]
+    )
+    assert (
+        after["properties"]["describedByNote"]
+        == before["properties"]["describedByNote"]
+    )
+    assert after["properties"]["created_at"] == before["properties"]["created_at"]
+    assert after["properties"]["updated_at"] != before["properties"]["updated_at"]
+
+
+def test_link_order_is_stable_across_reads(topology_conn, borders):
+    """Repeated reads return link arrays in a stable order."""
+    report = _txn(
+        topology_conn,
+        _insert(
+            "surface",
+            _POLYGON_GEOM,
+            {
+                "boundedByOuter": [
+                    {"featuretype": "border1", "lokalid": borders["b1b_lokalid"]},
+                    {"featuretype": "border1", "lokalid": borders["b1a_lokalid"]},
+                ]
+            },
+        ),
+    )
+    surface_id = report["items"][0]["id"]
+
+    first = _properties(topology_conn, "surface", surface_id)["boundedByOuter"]
+    second = _properties(topology_conn, "surface", surface_id)["boundedByOuter"]
+    assert first == second
+
+
+def test_feature_items_returns_links_for_multiple_features(topology_conn, borders):
+    """feature_items returns link properties for several features in one collection."""
+    first = _txn(
+        topology_conn,
+        _insert(
+            "surface",
+            _POLYGON_GEOM,
+            {
+                "boundedByOuter": [
+                    {"featuretype": "border1", "lokalid": borders["b1a_lokalid"]}
+                ]
+            },
+        ),
+    )
+    second = _txn(
+        topology_conn,
+        _insert(
+            "surface",
+            _POLYGON_GEOM,
+            {"describedByNote": [{"featuretype": "border3", "id": borders["b3_id"]}]},
+        ),
+    )
+
+    features = _items(topology_conn, "surface")["features"]
+    by_id = {str(feature["id"]): feature for feature in features}
+    assert by_id[first["items"][0]["id"]]["properties"]["boundedByOuter"] == [
+        {"featuretype": "border1", "lokalid": borders["b1a_lokalid"]}
+    ]
+    assert by_id[second["items"][0]["id"]]["properties"]["describedByNote"] == [
+        {"featuretype": "border3", "id": borders["b3_id"]}
+    ]
+
+
+def test_collection_with_no_declared_link_properties_reads_as_before(topology_conn):
+    """A collection with no declared relationships reads without any link properties."""
+    report = _txn(topology_conn, _insert("border3", _LINE_GEOM, {}))
+
+    got = _properties(topology_conn, "border3", report["items"][0]["id"])
+    assert set(got) == {"created_at", "updated_at"}
+
+
+def test_associations_returns_one_row_per_link_including_dangling(
+    topology_conn, borders
+):
+    """The internal associations helper returns stored rows even after target deletion."""
+    disposable = _txn(
+        topology_conn,
+        _insert(
+            "border1", _LINE_GEOM, {"identifikasjon": {"lokalid": _B1_DISPOSABLE_ID}}
+        ),
+    )
+    report = _txn(
+        topology_conn,
+        _insert(
+            "surface",
+            _POLYGON_GEOM,
+            {
+                "boundedByOuter": [
+                    {"featuretype": "border1", "lokalid": borders["b1a_lokalid"]},
+                    {"featuretype": "border1", "lokalid": _B1_DISPOSABLE_ID},
+                ]
+            },
+        ),
+    )
+    surface_id = report["items"][0]["id"]
+
+    _txn(topology_conn, _delete("border1", disposable["items"][0]["id"]))
+
+    assert _association_rows(topology_conn, "surface", surface_id) == [
+        ("boundedByOuter", "border1", borders["b1a_lokalid"]),
+        ("boundedByOuter", "border1", _B1_DISPOSABLE_ID),
+    ]
+
+
+def test_sources_using_is_polymorphic_on_source_collection(topology_conn, borders):
+    """One target can be referenced from more than one source collection."""
+    reverse_id = str(uuid.uuid4())
+    report = _txn(
+        topology_conn,
+        _insert(
+            "border1",
+            _LINE_GEOM_ALT,
+            {"identifikasjon": {"lokalid": reverse_id}},
+        ),
+        _insert(
+            "surface",
+            _POLYGON_GEOM,
+            {"boundedByOuter": [{"featuretype": "border1", "lokalid": reverse_id}]},
+        ),
+        _insert(
+            "surface2",
+            _POLYGON_GEOM,
+            {"boundedByOuter": [{"featuretype": "border1", "lokalid": reverse_id}]},
+        ),
+    )
+    surface_id = report["items"][1]["id"]
+    surface2_id = report["items"][2]["id"]
+
+    assert _sources_using_rows(topology_conn, "border1", [reverse_id]) == [
+        ("surface", surface_id),
+        ("surface2", surface2_id),
+    ]
+
+
+def test_sources_using_accepts_many_ids_in_one_call(topology_conn, borders):
+    """Reverse lookup accepts several target ids in one set-based call."""
+    reverse_a = str(uuid.uuid4())
+    reverse_b = str(uuid.uuid4())
+    report = _txn(
+        topology_conn,
+        _insert(
+            "border1",
+            _LINE_GEOM_ALT,
+            {"identifikasjon": {"lokalid": reverse_a}},
+        ),
+        _insert(
+            "border1",
+            _LINE_GEOM_ALT_2,
+            {"identifikasjon": {"lokalid": reverse_b}},
+        ),
+        _insert(
+            "surface",
+            _POLYGON_GEOM,
+            {"boundedByOuter": [{"featuretype": "border1", "lokalid": reverse_a}]},
+        ),
+        _insert(
+            "surface2",
+            _POLYGON_GEOM,
+            {"boundedByOuter": [{"featuretype": "border1", "lokalid": reverse_b}]},
+        ),
+    )
+    first_id = report["items"][2]["id"]
+    second_id = report["items"][3]["id"]
+
+    assert _sources_using_rows(
+        topology_conn,
+        "border1",
+        [reverse_a, reverse_b],
+    ) == [
+        ("surface", first_id),
+        ("surface2", second_id),
+    ]
 
 
 def test_upsert_rejects_declared_link_property(db):

@@ -417,7 +417,7 @@ def _server_write_columns(table: TablePlan) -> list[ColumnPlan]:
     return [c for c in table.property_columns if c.server_write_expr]
 
 
-def _properties_object(table: TablePlan, alias: str) -> str:
+def _scalar_properties_object(table: TablePlan, alias: str) -> str:
     pairs = []
     for col in table.property_columns:
         val = f'{alias}."{col.name}"'
@@ -432,14 +432,66 @@ def _properties_object(table: TablePlan, alias: str) -> str:
     return "jsonb_build_object(\n      " + ",\n      ".join(pairs) + "\n    )"
 
 
-def _feature_object(table: TablePlan, alias: str) -> str:
+def _association_element_object(role: CollectionRolePlan, target_id_sql: str) -> str:
+    return (
+        "jsonb_build_object("
+        f"'featuretype', '{_quote_key(role.target_collection)}', "
+        f"'{_quote_key(role.oi_leaf)}', {target_id_sql}::text)"
+    )
+
+
+def _association_properties_object(plan: CollectionPlan, source_id_sql: str) -> str:
+    if not plan.roles:
+        return "'{}'::jsonb"
+
+    selects = []
+    for role in plan.roles:
+        selects.append(
+            "      select "
+            f"'{_quote_key(role.property)}'::text as property, "
+            "jsonb_agg("
+            + _association_element_object(role, "a.target_id")
+            + " order by a.target_id) as refs\n"
+            f"      from {plan.table.schema}.association a\n"
+            f"      where a.source_collection = '{_quote_key(plan.collection_name)}'\n"
+            f"        and a.source_id = {source_id_sql}\n"
+            f"        and a.property = '{_quote_key(role.property)}'\n"
+            "      having count(*) > 0"
+        )
+    union_sql = "\n      union all\n".join(selects)
+    return (
+        "coalesce((\n"
+        "      select jsonb_object_agg(property, refs)\n"
+        "      from (\n"
+        f"{union_sql}\n"
+        "      ) link_props\n"
+        "    ), '{}'::jsonb)"
+    )
+
+
+def _properties_object(
+    plan: CollectionPlan | TablePlan, alias: str, assoc_expr: str | None = None
+) -> str:
+    if isinstance(plan, TablePlan):
+        return _scalar_properties_object(plan, alias)
+
+    props = _scalar_properties_object(plan.table, alias)
+    if assoc_expr is None:
+        assoc_expr = _association_properties_object(plan, f'{alias}."{plan.id_field}"')
+    return f"({props} || coalesce({assoc_expr}, '{{}}'::jsonb))"
+
+
+def _feature_object(
+    plan: CollectionPlan, alias: str, assoc_expr: str | None = None
+) -> str:
+    table = plan.table
     geom = table.geometry.name
     return (
         "jsonb_build_object(\n"
         "    'type', 'Feature',\n"
         f"    'id', {alias}.\"{table.id_column}\",\n"
         f"    'geometry', ST_AsGeoJSON({alias}.\"{geom}\")::jsonb,\n"
-        f"    'properties', {_properties_object(table, alias)}\n"
+        f"    'properties', {_properties_object(plan, alias, assoc_expr)}\n"
         "  )"
     )
 
@@ -500,7 +552,7 @@ def _geom_checks(table: TablePlan, *, guarded_by_presence: bool) -> list[str]:
     checks: list[str] = []
     # nullable null check
     if table.geometry.nullable:
-        first_condition = "coalesce(jsonb_typeof(feature->'geometry'), 'null') not in ('object', 'null)"
+        first_condition = "coalesce(jsonb_typeof(feature->'geometry'), 'null') not in ('object', 'null')"
     else:
         first_condition = (
             "coalesce(jsonb_typeof(feature->'geometry'), 'null') not in ('object')"
@@ -664,13 +716,63 @@ def _link_upsert_guards(roles: tuple[CollectionRolePlan, ...]) -> str:
     return "\n".join(checks) + ("\n" if checks else "")
 
 
+def _fn_associations(plan: CollectionPlan) -> str:
+    if not plan.roles:
+        body = (
+            "  select null::text as property, null::text as target_collection, null::uuid as target_id\n"
+            "  where false"
+        )
+    else:
+        selects = []
+        for role in plan.roles:
+            selects.append(
+                "  select "
+                f"'{_quote_key(role.property)}'::text as property, "
+                f"'{_quote_key(role.target_collection)}'::text as target_collection, "
+                "a.target_id\n"
+                f"  from {plan.table.schema}.association a\n"
+                f"  where a.source_collection = '{_quote_key(plan.collection_name)}'\n"
+                "    and a.source_id = fid\n"
+                f"    and a.property = '{_quote_key(role.property)}'"
+            )
+        body = "\n  union all\n".join(selects) + "\n  order by property, target_id"
+    return f"""\
+create or replace function {plan.table.schema}._{plan.collection_name}_associations(fid uuid)
+returns table (property text, target_collection text, target_id uuid)
+language sql stable as $func$
+{body};
+$func$"""
+
+
+def _fn_sources_using(plan: SchemaPlan) -> str:
+    return f"""\
+create or replace function {plan.schema_name}._sources_using(target_collection text, ids uuid[])
+returns table (collection text, id uuid)
+language sql stable as $func$
+    select distinct
+                 a.source_collection as collection,
+                 a.source_id as id
+    from {plan.schema_name}.association a
+    join {plan.schema_name}.association_role r
+        on r.source_collection = a.source_collection
+     and r.property = a.property
+    where r.target_collection = _sources_using.target_collection
+        and a.target_id = any(ids)
+    order by collection, id;
+$func$"""
+
+
 def _fn_item(plan: CollectionPlan) -> str:
     t = plan.table
     return f"""\
 create or replace function {plan.functions["item"]}(fid uuid)
 returns jsonb language sql stable as $func$
-  select {_feature_object(t, "t")}
+    with link_props as (
+        select {_association_properties_object(plan, "fid")} as props
+    )
+    select {_feature_object(plan, "t", "link_props.props")}
   from {t.qualified} t
+    cross join link_props
   where t."{t.id_column}" = fid;
 $func$"""
 
@@ -678,6 +780,35 @@ $func$"""
 def _fn_items(plan: CollectionPlan) -> str:
     t = plan.table
     geom = t.geometry.name
+    links_cte = ""
+    links_join = ""
+    assoc_expr = "null"
+    if plan.roles:
+        selects = []
+        for role in plan.roles:
+            selects.append(
+                "    select a.source_id, "
+                f"'{_quote_key(role.property)}'::text as property, "
+                "jsonb_agg("
+                + _association_element_object(role, "a.target_id")
+                + " order by a.target_id) as refs\n"
+                f"    from {t.schema}.association a\n"
+                f"    where a.source_collection = '{_quote_key(plan.collection_name)}'\n"
+                f"      and a.property = '{_quote_key(role.property)}'\n"
+                f'      and a.source_id in (select "{t.id_column}" from page)\n'
+                "    group by a.source_id"
+            )
+        links_cte = (
+            ",\n  page_links as (\n"
+            "    select source_id, jsonb_object_agg(property, refs) as props\n"
+            "    from (\n" + "\n    union all\n".join(selects) + "\n    ) link_rows\n"
+            "    group by source_id\n"
+            "  )"
+        )
+        links_join = (
+            f'\n         left join page_links l on l.source_id = p."{t.id_column}"'
+        )
+        assoc_expr = "l.props"
     # numberMatched is optional in OGC Features and costs an extra count over the
     # filtered set, so it is only computed (and only included) when with_matched.
     return f"""\
@@ -690,12 +821,12 @@ returns jsonb language sql stable as $func$
     where bbox is null
        or t."{geom}" && ST_MakeEnvelope(bbox[1], bbox[2], bbox[3], bbox[4], {t.geometry.srid})
   ),
-  page as (select * from filtered order by "{t.id_column}" offset off limit lim)
+    page as (select * from filtered order by "{t.id_column}" offset off limit lim){links_cte}
   select jsonb_build_object(
     'type', 'FeatureCollection',
     'features', coalesce(
       (select jsonb_agg(f) from (
-         select {_feature_object(t, "p")} as f from page p
+                 select {_feature_object(plan, "p", assoc_expr)} as f from page p{links_join}
        ) sub), '[]'::jsonb),
     'numberReturned', (select count(*) from page)
   ) || case when with_matched
@@ -1006,7 +1137,11 @@ _BUILDER_BY_OP = {
 
 def function_statements(plan: SchemaPlan) -> list[str]:
     stmts: list[str] = []
+    if plan.association_role_rows:
+        stmts.append(_fn_sources_using(plan))
     for coll in plan.collections:
+        if coll.roles:
+            stmts.append(_fn_associations(coll))
         for op in coll.functions:
             stmts.append(_BUILDER_BY_OP[op](coll))
     return stmts
