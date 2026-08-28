@@ -75,19 +75,21 @@ def dispatch_statements() -> list[str]:
     def _write_dispatch_statement(
         operation: str,
         *,
-        args_sql: str,
+        args: tuple[tuple[str, str], ...],
         result_type: str,
-        using_sql: str,
     ) -> str:
+        args_sql = ", ".join(f"{name} {sql_type}" for name, sql_type in args)
+        call_sql = ", ".join(f"${idx}" for idx, _ in enumerate(args, start=1))
+        using_sql = ", ".join(name for name, _ in args)
         return f"""\
 create or replace function {s}.feature_{operation}(dataset text, collection text, {args_sql})
 returns {result_type} language plpgsql as $disp$
 declare result {result_type};
 begin
-  perform {s}._assert_direct_write_allowed(dataset, collection);
-  execute format('select %I.%I({using_sql})', dataset, '_' || collection || '_{operation}')
-    into result using {using_sql};
-  return result;
+    perform {s}._assert_direct_write_allowed(dataset, collection);
+    execute format('select %I.%I({call_sql})', dataset, '_' || collection || '_{operation}')
+        into result using {using_sql};
+    return result;
 end;
 $disp$"""
 
@@ -143,28 +145,24 @@ end;
 $disp$""",
         _write_dispatch_statement(
             "create",
-            args_sql="feature jsonb",
+            args=(("feature", "jsonb"),),
             result_type="uuid",
-            using_sql="$1",
-        ).replace("using $1", "using feature"),
+        ),
         _write_dispatch_statement(
             "replace",
-            args_sql="fid uuid, feature jsonb",
+            args=(("fid", "uuid"), ("feature", "jsonb")),
             result_type="boolean",
-            using_sql="$1, $2",
-        ).replace("using $1, $2", "using fid, feature"),
+        ),
         _write_dispatch_statement(
             "update",
-            args_sql="fid uuid, feature jsonb",
+            args=(("fid", "uuid"), ("feature", "jsonb")),
             result_type="boolean",
-            using_sql="$1, $2",
-        ).replace("using $1, $2", "using fid, feature"),
+        ),
         _write_dispatch_statement(
             "delete",
-            args_sql="fid uuid",
+            args=(("fid", "uuid"),),
             result_type="boolean",
-            using_sql="$1",
-        ).replace("using $1", "using fid"),
+        ),
         f"""\
 create or replace function {s}.transaction(dataset text, document jsonb)
 returns jsonb language plpgsql as $disp$
@@ -307,10 +305,9 @@ end;
 $disp$""",
         _write_dispatch_statement(
             "upsert",
-            args_sql="feature jsonb",
+            args=(("feature", "jsonb"),),
             result_type="uuid",
-            using_sql="$1",
-        ).replace("using $1", "using feature"),
+        ),
         _comment_statement(
             "_collection_feature_model(text, text)",
             "Return the feature_model declared for one dataset collection from <dataset>.collection_capability. "
