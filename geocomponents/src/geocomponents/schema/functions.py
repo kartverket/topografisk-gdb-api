@@ -496,7 +496,7 @@ def _enum_checks(writable: list[ColumnPlan], *, guarded_by_presence: bool) -> li
 
 
 def _geom_checks(table: TablePlan, *, guarded_by_presence: bool) -> list[str]:
-    """IF blocks that raises P0001 when the incoming geometry is not valid."""
+    """IF blocks that raise P0001 when geometry is missing, invalid, or non-simple."""
     checks: list[str] = []
     # nullable null check
     if table.geometry.nullable:
@@ -513,11 +513,16 @@ def _geom_checks(table: TablePlan, *, guarded_by_presence: bool) -> list[str]:
         f"  end if;"
     )
 
-    # valid geometry check
-    inner = f"not ST_IsValid({_geom_from_feature(table)})"
+    geom_expr = _geom_from_feature(table)
+    # Add Validity and simplicity checks
     checks.append(
-        f"  if jsonb_typeof(feature->'geometry') = 'object' and {inner} then\n"
-        f"    raise exception 'invalid geometry' using errcode = 'P0001';\n"
+        f"  if jsonb_typeof(feature->'geometry') = 'object' then\n"
+        f"    if not ST_IsValid({geom_expr}) then\n"
+        f"      raise exception 'invalid geometry' using errcode = 'P0001';\n"
+        f"    end if;\n"
+        f"    if not ST_IsSimple({geom_expr}) then\n"
+        f"      raise exception 'non-simple geometry' using errcode = 'P0001';\n"
+        f"    end if;\n"
         f"  end if;"
     )
     return checks
