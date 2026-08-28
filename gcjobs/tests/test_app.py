@@ -776,6 +776,7 @@ def test_job_endpoint_serializes_datetime_timestamps(
             "last_error": None,
         },
     )
+    monkeypatch.setattr("gcjobs.app.db.get_import_events", lambda _job_id, limit=5: [])
     client = TestClient(create_app(event_listener=StubImportEventListener([])))
 
     response = client.get(f"{_dataset_api('fkb_bane')}/jobs/job-1")
