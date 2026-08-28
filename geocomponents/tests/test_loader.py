@@ -38,7 +38,7 @@ def test_type_ref_and_codelist_resolve_to_sql_types():
 def test_relationship_resolves_to_target_collection():
     cad = next(d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "cadastre")
     buildings = next(c for c in cad.collections if c.name == "buildings")
-    assert [(r.name, r.target) for r in buildings.relationships] == [
+    assert [(r.property, r.target) for r in buildings.relationships] == [
         ("parcel", "parcels")
     ]
 
@@ -62,7 +62,7 @@ def test_relationship_to_unknown_collection_raises():
         {
             "name": "x",
             "collections": [
-                {"name": "c", "relationships": [{"name": "r", "target": "ghost"}]}
+                {"name": "c", "relationships": [{"property": "r", "target": "ghost"}]}
             ],
         }
     )
@@ -177,7 +177,7 @@ def test_relationship_target_rejects_invalid_sql_identifier():
     parse time names the field ('target') in the error, versus the resolver's
     less-specific 'unknown collection X'."""
     with pytest.raises(ValidationError):
-        RelationshipDef.model_validate({"name": "r", "target": "fkb-bane"})
+        RelationshipDef.model_validate({"property": "r", "target": "fkb-bane"})
 
 
 @pytest.mark.parametrize(

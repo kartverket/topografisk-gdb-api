@@ -1,0 +1,65 @@
+name: topology
+title: Topology fixture
+description: Synthetic fixture for association table tests (slice 2a).
+
+collections:
+  - name: surface
+    title: Surface
+    description: ''
+    feature_model: topology
+    geometry:
+      type: MultiPolygon
+      srid: 4326
+    relationships:
+      - property: boundedByOuter
+        target: border1
+      - property: boundedByShared
+        target: border2
+      - property: describedByNote
+        target: border3
+
+  - name: surface2
+    title: Surface2
+    description: ''
+    feature_model: topology
+    geometry:
+      type: MultiPolygon
+      srid: 4326
+    relationships:
+      - property: boundedByOuter
+        target: border1
+
+  - name: border1
+    title: Border1
+    description: ''
+    geometry:
+      type: LineString
+      srid: 4326
+    outward_identifier: identifikasjon.lokalid
+    fields:
+      - name: identifikasjon
+        type: object
+        fields:
+          - name: lokalid
+            type: string
+
+  - name: border2
+    title: Border2
+    description: ''
+    geometry:
+      type: LineString
+      srid: 4326
+    outward_identifier: identifikasjon.lokalid
+    fields:
+      - name: identifikasjon
+        type: object
+        fields:
+          - name: lokalid
+            type: string
+
+  - name: border3
+    title: Border3
+    description: ''
+    geometry:
+      type: LineString
+      srid: 4326

@@ -171,6 +171,60 @@ def test_process_execution_proxies_to_gcimport(
     ]
 
 
+def test_process_execution_proxies_multiple_files_to_gcimport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "gcjobs.app.config.gcimport_api_url", lambda: "http://gcimport:8000"
+    )
+    monkeypatch.setattr("gcjobs.app.config.max_upload_bytes", lambda: 1024 * 1024)
+    requests: list[httpx2.Request] = []
+
+    monkeypatch.setattr(
+        "gcjobs.app.db.record_import_event",
+        lambda event, *, message_id=None: {"id": event["import_id"]},
+    )
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        assert b'filename="source-1.geojson"' in request.content
+        assert b'filename="source-2.geojson"' in request.content
+        return httpx2.Response(200, json={"total": 2, "features": []})
+
+    proxy_client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
+    app = create_app(
+        event_listener=StubImportEventListener([]),
+        import_client=proxy_client,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"{_dataset_api('fkb_bane')}/processes/import/execution",
+            files=[
+                (
+                    "file",
+                    (
+                        "source-1.geojson",
+                        jsonlib.dumps({"type": "FeatureCollection", "features": []}),
+                        "application/geo+json",
+                    ),
+                ),
+                (
+                    "file",
+                    (
+                        "source-2.geojson",
+                        jsonlib.dumps({"type": "FeatureCollection", "features": []}),
+                        "application/geo+json",
+                    ),
+                ),
+            ],
+        )
+
+    assert response.status_code == 201
+    assert len(requests) == 1
+    assert requests[0].url == "http://gcimport:8000/imports?profile=fkb_bane"
+
+
 def test_process_execution_rejects_unknown_process(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -627,6 +681,16 @@ def test_job_results_returns_summary_for_successful_import(
             "completed_at": "2026-08-24T10:01:00Z",
         },
     )
+    monkeypatch.setattr(
+        "gcjobs.app.db.get_import_events",
+        lambda _job_id, limit=500: [
+            {
+                "payload": {
+                    "filenames": ["source-1.geojson", "source-2.geojson"],
+                }
+            }
+        ],
+    )
     client = TestClient(create_app(event_listener=StubImportEventListener([])))
 
     response = client.get(f"{_dataset_api('fkb_bane')}/jobs/job-1/results")
@@ -643,8 +707,50 @@ def test_job_results_returns_summary_for_successful_import(
             "failedBatches": 0,
             "totalFeatures": 2,
             "completed": "2026-08-24T10:01:00Z",
+            "filenames": ["source-1.geojson", "source-2.geojson"],
         }
     }
+
+
+def test_job_endpoint_returns_uploaded_filenames(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "gcjobs.app.db.get_import_run",
+        lambda _job_id: {
+            "id": "job-1",
+            "profile": "fkb_bane",
+            "status": "completed",
+            "phase": "completed",
+            "total_features": 2,
+            "processed_features": 2,
+            "succeeded_features": 2,
+            "failed_features": 0,
+            "processed_batches": 1,
+            "succeeded_batches": 1,
+            "failed_batches": 0,
+            "started_at": "2026-08-24T10:00:00Z",
+            "completed_at": "2026-08-24T10:01:00Z",
+            "last_event_at": "2026-08-24T10:01:00Z",
+            "last_error": None,
+        },
+    )
+    monkeypatch.setattr(
+        "gcjobs.app.db.get_import_events",
+        lambda _job_id, limit=500: [
+            {
+                "payload": {
+                    "filenames": ["source-1.geojson", "source-2.geojson"],
+                }
+            }
+        ],
+    )
+    client = TestClient(create_app(event_listener=StubImportEventListener([])))
+
+    response = client.get(f"{_dataset_api('fkb_bane')}/jobs/job-1")
+
+    assert response.status_code == 200
+    assert response.json()["filenames"] == ["source-1.geojson", "source-2.geojson"]
 
 
 def test_job_endpoint_serializes_datetime_timestamps(
@@ -670,6 +776,7 @@ def test_job_endpoint_serializes_datetime_timestamps(
             "last_error": None,
         },
     )
+    monkeypatch.setattr("gcjobs.app.db.get_import_events", lambda _job_id, limit=5: [])
     client = TestClient(create_app(event_listener=StubImportEventListener([])))
 
     response = client.get(f"{_dataset_api('fkb_bane')}/jobs/job-1")

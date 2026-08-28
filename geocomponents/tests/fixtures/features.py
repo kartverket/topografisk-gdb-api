@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid as _uuid_mod
+
 _GEOM = {
     "Point": {"type": "Point", "coordinates": [10, 55]},
     "MultiPoint": {"type": "MultiPoint", "coordinates": [[10, 55]]},
@@ -57,6 +59,14 @@ def _sample_feature(coll, *, geometry=_DEFAULT_GEOMETRY, properties=None, fid=No
         props["source"] = "orig"
     if properties:
         props.update(properties)
+    # If the collection declares an outward identifier that is a JSONB sub-key,
+    # ensure that sub-key is a valid UUID (it becomes the row id on insert).
+    if coll.outward_identifier_path and "." in coll.outward_identifier_path:
+        oi_col, oi_key = coll.outward_identifier_path.split(".", 1)
+        if oi_col in props and isinstance(props[oi_col], dict):
+            props[oi_col][oi_key] = (
+                str(fid) if fid is not None else str(_uuid_mod.uuid4())
+            )
     feature = {
         "type": "Feature",
         "properties": props,

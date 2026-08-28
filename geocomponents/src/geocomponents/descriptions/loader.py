@@ -277,10 +277,10 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
         for rel in coll.relationships:
             if rel.target not in collection_names:
                 raise DescriptionError(
-                    f"{where}: relationship '{rel.name}' targets unknown "
+                    f"{where}: relationship '{rel.property}' targets unknown "
                     f"collection '{rel.target}' (cross-dataset refs not allowed)"
                 )
-            resolved_rels.append(ResolvedRelationship(rel.name, rel.target))
+            resolved_rels.append(ResolvedRelationship(rel.property, rel.target))
 
         resolved_collections.append(
             ResolvedCollection(

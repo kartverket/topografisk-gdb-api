@@ -50,6 +50,20 @@ It keeps the configured geocomponents root and swaps only the dataset path.
 - `.json` / `.jsonfg`: JSON-FG (`featureType`, optional `place`, `coordRefSys`)
 - `.geojson`: classic GeoJSON with a `crs` member and `properties.objtype`;
   converted automatically before validation
+- `.sos`: SOSI text; parsed for structural stats only, with no feature emission or
+  upstream writes
+
+SOSI notes:
+
+- `gcimport.parsers.sosi` parses `.sos` text into a tree that preserves nested
+  directives, repeated coordinate blocks, and inline attributes such as `KP 1`.
+- The `/imports` endpoint accepts `.sos` uploads for stats-only analysis and
+  returns aggregate counts instead of emitting feature objects.
+- The SOSI header (`.HODE`) is tracked separately from counted data objects;
+  object totals and object-type counts include records such as `PUNKT`, `KURVE`,
+  and `FLATE`, but not the header itself.
+- There is still no SOSI-to-feature emission step, so `.sos` uploads never call
+  upstream dataset write endpoints.
 
 Examples:
 

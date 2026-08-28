@@ -105,10 +105,7 @@ def _field_schema(fld: ResolvedField) -> dict:
 
 
 def _provider_fields(coll: ResolvedCollection) -> dict:
-    fields = {f.name: _field_schema(f) for f in coll.fields}
-    for rel in coll.relationships:
-        fields[f"{rel.name}_id"] = {"type": "string"}
-    return fields
+    return {f.name: _field_schema(f) for f in coll.fields}
 
 
 def _collection_resource(dataset: str, coll: ResolvedCollection, dsn: str) -> dict:

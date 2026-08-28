@@ -5,13 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from gcimport.geojson_to_jsonfg import (
+from gcimport.importer import prepare_document
+from gcimport.parsers.geojson_to_jsonfg import (
     ConversionError,
     convert_document,
     convert_file,
     normalize_crs,
 )
-from gcimport.importer import prepare_document
 from gcimport.profiles.bane import BANE_PROFILE
 from gcimport.profiles.bygning import (
     _AREA_SOURCE_OBJTYPES as _BUILDING_AREA_SOURCE_OBJTYPES,
