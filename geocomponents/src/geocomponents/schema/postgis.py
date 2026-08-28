@@ -21,7 +21,6 @@ from geocomponents.schema.plan import (
     ColumnPlan,
     SchemaPlan,
     TablePlan,
-    upsert_sql_expression,
 )
 
 # PostgreSQL's NAMEDATALEN default. Identifiers longer than this are silently
@@ -109,14 +108,8 @@ def _geometry_index_ddl(plan: CollectionPlan) -> str:
 
 
 def _upsert_index_ddl(plan: CollectionPlan) -> str | None:
-    if plan.upsert_field is None:
-        return None
-    conflict_path = plan.upsert_path or plan.upsert_field
-    columns = upsert_sql_expression(conflict_path)
-    return (
-        f'create unique index if not exists "{plan.collection_name}_upsert_key_idx" '
-        f"on {plan.table.qualified} ({columns}) nulls not distinct"
-    )
+    # The outward identifier is now the row id; the primary key already indexes it.
+    return None
 
 
 def _collection_capability_table_ddl(plan: SchemaPlan) -> str:
@@ -155,6 +148,91 @@ def _collection_capability_comment_ddl(plan: SchemaPlan) -> str:
     return f"comment on table {plan.schema_name}.collection_capability is '{comment}'"
 
 
+def _association_role_table_ddl(plan: SchemaPlan) -> str:
+    s = plan.schema_name
+    return (
+        f"create table if not exists {s}.association_role ("
+        "source_collection text not null, "
+        "property text not null, "
+        "target_collection text not null, "
+        "primary key (source_collection, property))"
+    )
+
+
+def _association_table_ddl(plan: SchemaPlan) -> str:
+    s = plan.schema_name
+    return (
+        f"create table if not exists {s}.association ("
+        "source_collection text not null, "
+        "source_id uuid not null, "
+        "property text not null, "
+        "target_id uuid not null, "
+        f"primary key (source_collection, source_id, property, target_id), "
+        f"foreign key (source_collection, property) "
+        f"references {s}.association_role (source_collection, property))"
+    )
+
+
+def _association_role_seed_ddl(plan: SchemaPlan) -> str:
+    values = ", ".join(
+        f"('{_quote_literal(r.source_collection)}', "
+        f"'{_quote_literal(r.property)}', "
+        f"'{_quote_literal(r.target_collection)}')"
+        for r in plan.association_role_rows
+    )
+    return (
+        f"insert into {plan.schema_name}.association_role "
+        "(source_collection, property, target_collection) values "
+        f"{values} on conflict (source_collection, property) do update set "
+        "target_collection = excluded.target_collection"
+    )
+
+
+def _association_index_ddl(plan: SchemaPlan) -> str:
+    s = plan.schema_name
+    return (
+        f'create index if not exists "association_target_id_idx" '
+        f"on {s}.association (target_id)"
+    )
+
+
+def _guard_association_role_removal(conn: psycopg.Connection, plan: SchemaPlan) -> None:
+    """Raise RuntimeError if removing a property would orphan association rows."""
+    schema = plan.schema_name
+    table_exists = conn.execute(
+        "select 1 from information_schema.tables "
+        "where table_schema = %s and table_name = 'association_role'",
+        (schema,),
+    ).fetchone()
+    if not table_exists:
+        return
+    current = {
+        (row[0], row[1])
+        for row in conn.execute(
+            f"select source_collection, property from {schema}.association_role"
+        ).fetchall()
+    }
+    new_props = {(r.source_collection, r.property) for r in plan.association_role_rows}
+    removed = current - new_props
+    if not removed:
+        return
+    blocking: list[str] = []
+    for source_collection, prop in sorted(removed):
+        count = conn.execute(
+            f"select count(*) from {schema}.association "
+            "where source_collection = %s and property = %s",
+            (source_collection, prop),
+        ).fetchone()[0]
+        if count > 0:
+            blocking.append(f"  {source_collection}.{prop}: {count} row(s)")
+    if blocking:
+        raise RuntimeError(
+            f"apply-schema: removing {len(blocking)} property(ies) from "
+            f"{schema}.association_role would orphan association rows:\n"
+            + "\n".join(blocking)
+        )
+
+
 def table_statements(plan: SchemaPlan) -> list[str]:
     """One complete SQL command per list element (idempotent where possible).
 
@@ -172,9 +250,15 @@ def table_statements(plan: SchemaPlan) -> list[str]:
         _collection_capability_table_ddl(plan),
         _collection_capability_comment_ddl(plan),
     ]
+    if plan.association_role_rows:
+        stmts.append(_association_role_table_ddl(plan))
+        stmts.append(_association_table_ddl(plan))
     for coll in plan.collections:
         stmts.append(_table_ddl(coll.table))
     stmts.append(_collection_capability_seed_ddl(plan))
+    if plan.association_role_rows:
+        stmts.append(_association_role_seed_ddl(plan))
+        stmts.append(_association_index_ddl(plan))
     for coll in plan.collections:
         stmts.append(_geometry_index_ddl(coll))
         stmts.extend(_extra_index_ddl(coll.collection_name, coll.table))
@@ -198,6 +282,7 @@ def apply_tables(conn: psycopg.Connection, plan: SchemaPlan) -> None:
     transaction.
     """
     with conn.transaction():
+        _guard_association_role_removal(conn, plan)
         for stmt in table_statements(plan):
             try:
                 with conn.transaction():

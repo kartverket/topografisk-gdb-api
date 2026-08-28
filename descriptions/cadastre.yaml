@@ -40,8 +40,8 @@ collections:
       - name: floors
         type: integer
     relationships:
-      # Cross-collection reference within the same dataset: adds parcel_id FK.
-      - name: parcel
+      # Cross-collection reference within the same dataset.
+      - property: parcel
         target: parcels
 
   - name: blocks

@@ -155,12 +155,15 @@ class GeometryDef(BaseModel):
 
 
 class RelationshipDef(BaseModel):
-    """A foreign-key-like link to another collection in the same dataset.
+    """A declared link from a source collection to a target collection.
 
-    Generates a ``<name>_id`` column referencing the target's ``id``.
+    ``property`` is property-name on the source feature; ``target`` names
+    the collection this property points at. Property names are stored verbatim
+    (UML spelling, including uppercase and ø/å); ``target`` must be a
+    ``SafeIdentifier`` because it becomes a table reference.
     """
 
-    name: SafeIdentifier
+    property: str
     target: SafeIdentifier
     description: str | None = None
 
@@ -244,8 +247,8 @@ class ResolvedField:
 
 @dataclass(frozen=True)
 class ResolvedRelationship:
-    name: str  # column base name; column is <name>_id
-    target: str  # target collection (table) name
+    property: str  # property-rolename on source
+    target: str  # target collection name
 
 
 @dataclass(frozen=True)

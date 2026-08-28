@@ -12,6 +12,7 @@ assertions pin the examples.
 
 from __future__ import annotations
 
+import uuid
 from http import HTTPStatus
 
 import orjson
@@ -367,6 +368,7 @@ def test_golden_bbox_filter(client):
 @pytest.mark.parametrize("dataset_name", ["fkb_bane"])
 def test_bane_upsert_is_idempotent_by_business_key(client, dataset_name):
     url = f"{_api(dataset_name)}/collections/jernbaneplattformkant/items:upsert"
+    lok = str(uuid.UUID(int=0xFACE))
     feature = {
         "type": "Feature",
         "geometry": {
@@ -374,15 +376,12 @@ def test_bane_upsert_is_idempotent_by_business_key(client, dataset_name):
             "coordinates": [[[100000, 7000000], [100010, 7000010]]],
         },
         "properties": {
-            "lokalid": "platform-1",
-            "identifikasjon_navnerom": "test",
             "identifikasjon": {
-                "lokalid": "platform-1",
+                "lokalid": lok,
                 "navnerom": "test",
             },
             "oppdateringsdato": "2026-08-05T12:00:00Z",
             "datafangstdato": "2026-08-05T12:00:00Z",
-            "kvalitet_datafangstmetode": "fot",
             "kvalitet": {"datafangstmetode": "fot"},
             "medium": "T",
             "informasjon": "first",
@@ -409,7 +408,7 @@ def test_bane_upsert_is_idempotent_by_business_key(client, dataset_name):
         f"{first.json()['id']}?f=json"
     ).json()
     assert item["properties"]["informasjon"] == "replaced"
-    assert item["properties"]["identifikasjon"]["lokalid"] == "platform-1"
+    assert item["properties"]["identifikasjon"]["lokalid"] == first.json()["id"]
 
 
 def test_golden_conformance_includes_part4_even_though_dataset_has_topology(client):
@@ -430,6 +429,7 @@ def test_golden_process_execution_echoes(client):
 
 
 def test_fkb_bane_batch_upsert_process_executes(client):
+    lok = str(uuid.UUID(int=0xBA7C))
     r = client.post(
         f"{_api('fkb_bane')}/processes/upsert-batch/execution",
         content=orjson.dumps(
@@ -444,15 +444,12 @@ def test_fkb_bane_batch_upsert_process_executes(client):
                                 "coordinates": [[[100000, 7000000], [100010, 7000010]]],
                             },
                             "properties": {
-                                "lokalid": "platform-process-1",
-                                "identifikasjon_navnerom": "test",
                                 "identifikasjon": {
-                                    "lokalid": "platform-process-1",
+                                    "lokalid": lok,
                                     "navnerom": "test",
                                 },
                                 "oppdateringsdato": "2026-08-05T12:00:00Z",
                                 "datafangstdato": "2026-08-05T12:00:00Z",
-                                "kvalitet_datafangstmetode": "fot",
                                 "kvalitet": {"datafangstmetode": "fot"},
                                 "medium": "T",
                             },
