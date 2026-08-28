@@ -452,30 +452,6 @@ def _geom_from_feature(table: TablePlan) -> str:
     return geom
 
 
-def _feature_property_text_expr(dot_path: str) -> str:
-    parts = dot_path.split(".")
-    if len(parts) == 1:
-        return f"(feature->'properties'->>'{_quote_key(parts[0])}')"
-
-    head, *tail = parts
-    expr = f"feature->'properties'->'{_quote_key(head)}'"
-    for part in tail[:-1]:
-        expr = f"({expr}->'{_quote_key(part)}')"
-    return f"({expr}->>'{_quote_key(tail[-1])}')"
-
-
-def _table_property_text_expr(table: TablePlan, dot_path: str) -> str:
-    parts = dot_path.split(".")
-    if len(parts) == 1:
-        return f'"{parts[0]}"'
-
-    head, *tail = parts
-    expr = f'"{head}"'
-    for part in tail[:-1]:
-        expr = f"({expr}->'{_quote_key(part)}')"
-    return f"({expr}->>'{_quote_key(tail[-1])}')"
-
-
 def _prop_read(col: ColumnPlan) -> str:
     """SQL expression that extracts one property from the incoming feature JSON.
 
@@ -824,22 +800,10 @@ def _fn_upsert(plan: CollectionPlan) -> str:
             "  result_id := coalesce((feature->>'id')::uuid, _oi_raw::uuid);\n"
         )
         id_val = "result_id"
-        conflict_target = f'"{t.id_column}"'
-    elif plan.upsert_path is not None:
-        upsert_expr = _feature_property_text_expr(plan.upsert_path)
-        oi_declare = f"  _upsert_raw text := {upsert_expr};\n"
-        oi_resolve = (
-            "  if _upsert_raw is null then\n"
-            "    raise exception 'upsert requires the configured business key' using errcode = 'P0001';\n"
-            "  end if;\n"
-        )
-        id_val = "coalesce((feature->>'id')::uuid, gen_random_uuid())"
-        conflict_target = _table_property_text_expr(t, plan.upsert_path)
     else:
         oi_declare = ""
         oi_resolve = ""
         id_val = "coalesce((feature->>'id')::uuid, gen_random_uuid())"
-        conflict_target = f'"{t.id_column}"'
     vals = ", ".join(
         [id_val, _geom_from_feature(t)]
         + [_prop_read(c) for c in writable]
@@ -868,7 +832,7 @@ returns uuid language plpgsql as $func$
 begin
 {upsert_guards}{guard_block}{oi_resolve}  insert into {t.qualified} ({cols})
   values ({vals})
-    on conflict ({conflict_target}) do update set
+  on conflict ("{t.id_column}") do update set
       {set_clause}
   returning "{t.id_column}" into result_id;
   return result_id;

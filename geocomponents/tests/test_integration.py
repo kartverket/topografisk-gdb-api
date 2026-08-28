@@ -317,50 +317,6 @@ def test_bygning_batch_upsert_process_roundtrip(db, datasets):
     assert second_item["properties"]["lokalid"] == "building-integration-2"
 
 
-def test_bygning_omrade_batch_upsert_matches_existing_row_by_lokalid(db, datasets):
-    client = _client(db, datasets)
-
-    lokalid = str(uuid.UUID(int=0xBC1))
-    existing = dict(BYGNING_OMRADE)
-    existing["id"] = str(uuid.UUID(int=0xBC0))
-    existing["properties"] = dict(BYGNING_OMRADE["properties"])
-    existing["properties"]["lokalid"] = lokalid
-
-    first = client.post(
-        f"{BYGNING_API}/collections/bygning_omrade/items:upsert",
-        content=orjson.dumps(existing).decode(),
-        headers={"content-type": "application/geo+json"},
-    )
-    assert first.status_code == HTTPStatus.OK
-    assert first.json()["id"] == existing["id"]
-
-    imported = dict(existing)
-    imported["id"] = lokalid
-    imported["properties"] = dict(existing["properties"])
-    imported["properties"]["informasjon"] = "updated from batch"
-
-    response = client.post(
-        f"{BYGNING_API}/processes/upsert-batch/execution",
-        content=orjson.dumps(
-            {"inputs": {"collection": "bygning_omrade", "features": [imported]}}
-        ).decode(),
-        headers={"content-type": "application/json"},
-    )
-
-    assert response.status_code == HTTPStatus.OK
-    assert response.json() == {
-        "collection": "bygning_omrade",
-        "total": 1,
-        "features": [{"id": existing["id"]}],
-    }
-
-    item = client.get(
-        f"{BYGNING_API}/collections/bygning_omrade/items/{existing['id']}?f=json"
-    ).json()
-    assert item["properties"]["lokalid"] == lokalid
-    assert item["properties"]["informasjon"] == "updated from batch"
-
-
 def test_bygning_omrade_upsert_roundtrip(db, datasets):
     client = _client(db, datasets)
 

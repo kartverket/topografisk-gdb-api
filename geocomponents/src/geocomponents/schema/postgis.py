@@ -107,33 +107,9 @@ def _geometry_index_ddl(plan: CollectionPlan) -> str:
     )
 
 
-def _table_property_index_expr(dot_path: str) -> str:
-    parts = dot_path.split(".")
-    if len(parts) == 1:
-        return f'"{parts[0]}"'
-
-    head, *tail = parts
-    expr = f'"{head}"'
-    for part in tail[:-1]:
-        expr = f"({expr}->'{_quote_literal(part)}')"
-    return f"({expr}->>'{_quote_literal(tail[-1])}')"
-
-
 def _upsert_index_ddl(plan: CollectionPlan) -> str | None:
-    if plan.upsert_path is None:
-        return None
-    if any(
-        col.id_inject_key is not None
-        and plan.upsert_path == f"{col.name}.{col.id_inject_key}"
-        for col in plan.table.property_columns
-    ):
-        return None
-
-    expr = _table_property_index_expr(plan.upsert_path)
-    return (
-        f'create unique index if not exists "{plan.collection_name}_upsert_key_idx" '
-        f"on {plan.table.qualified} ({expr}) nulls not distinct"
-    )
+    # The outward identifier is now the row id; the primary key already indexes it.
+    return None
 
 
 def _collection_capability_table_ddl(plan: SchemaPlan) -> str:
