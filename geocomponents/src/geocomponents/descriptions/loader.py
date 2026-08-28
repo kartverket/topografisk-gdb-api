@@ -34,6 +34,9 @@ class DescriptionError(ValueError):
     """Raised when a description document is structurally invalid."""
 
 
+_RESERVED_COLLECTION_NAMES = frozenset({"association", "association_role"})
+
+
 def _read_yaml(path: Path) -> dict:
     # Pin UTF-8; host locale defaults would mojibake Norwegian å/ø/æ.
     with path.open(encoding="utf-8") as fh:
@@ -55,6 +58,13 @@ def load_dataset(path: Path) -> DatasetDef:
         return DatasetDef.model_validate(_read_yaml(path))
     except Exception as exc:
         raise DescriptionError(f"invalid dataset file {path}: {exc}") from exc
+
+
+def _validate_collection_name(name: str, *, where: str) -> None:
+    if name in _RESERVED_COLLECTION_NAMES:
+        raise DescriptionError(
+            f"{where}: collection name '{name}' is reserved for generated tables"
+        )
 
 
 # --------------------------------------------------------------------------
@@ -213,6 +223,7 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
     resolved_collections: list[ResolvedCollection] = []
     for coll in dataset.collections:
         where = f"dataset '{dataset.name}' / collection '{coll.name}'"
+        _validate_collection_name(coll.name, where=where)
 
         # Shared base schema: commons.base_fields are prepended, then the
         # collection's own fields. (id/geometry/audit columns are added later

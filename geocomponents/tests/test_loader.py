@@ -1,3 +1,5 @@
+from contextlib import nullcontext
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -17,6 +19,24 @@ from geocomponents.descriptions.models import (
 )
 
 DESCRIPTIONS = Path(__file__).resolve().parents[2] / "descriptions"
+
+
+@dataclass(frozen=True)
+class CollectionNameCase:
+    id: str
+    collection_name: str
+    error_fragment: str | None
+
+
+COLLECTION_NAME_CASES = [
+    CollectionNameCase("association-is-reserved", "association", "association"),
+    CollectionNameCase(
+        "association-role-is-reserved",
+        "association_role",
+        "association_role",
+    ),
+    CollectionNameCase("association-kind-is-allowed", "association_kind", None),
+]
 
 
 def test_commons_base_field_is_inherited_by_every_collection():
@@ -68,6 +88,28 @@ def test_relationship_to_unknown_collection_raises():
     )
     with pytest.raises(DescriptionError, match="unknown collection 'ghost'"):
         resolve_dataset(dataset, Commons())
+
+
+@pytest.mark.parametrize("case", COLLECTION_NAME_CASES, ids=lambda case: case.id)
+def test_collection_name_reserves_generated_table_names(case):
+    dataset = DatasetDef.model_validate(
+        {
+            "name": "x",
+            "collections": [{"name": case.collection_name}],
+        }
+    )
+    expectation = (
+        pytest.raises(DescriptionError, match=case.error_fragment)
+        if case.error_fragment is not None
+        else nullcontext()
+    )
+    with expectation:
+        resolve_dataset(dataset, Commons())
+
+
+def test_existing_descriptions_still_resolve_with_reserved_name_guard():
+    datasets = load_resolved_datasets(DESCRIPTIONS)
+    assert datasets
 
 
 def test_feature_model_and_processes_resolve():

@@ -2,11 +2,12 @@
 
 These tests prove that the description generates exactly the schema it claims to
 (§4.1 of topology_plan.md) and that the guard against unsafe property removal
-works before any write path exists.
+still works once links are written through the public surface.
 """
 
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +23,12 @@ from geocomponents.schema import postgis
 from geocomponents.schema.build import build_schema_plan
 
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "topology_fixture.yaml"
+_BORDER_ID = str(uuid.UUID(int=0xB1A))
+_LINE_GEOM = {"type": "LineString", "coordinates": [[0, 0], [1, 0]]}
+_POLYGON_GEOM = {
+    "type": "MultiPolygon",
+    "coordinates": [[[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]],
+}
 
 
 # --------------------------------------------------------------------------
@@ -37,8 +44,28 @@ def _load_topology_plan():
 @pytest.fixture(scope="module")
 def topology_conn(db):
     """Apply the topology fixture schema; yield an autocommit connection."""
-    with _schema_conn(db, _load_topology_plan(), with_functions=False) as conn:
+    with _schema_conn(db, _load_topology_plan(), with_functions=True) as conn:
         yield conn
+
+
+def _txn(conn, *items):
+    doc = {"semantic": "atomic", "transaction": list(items)}
+    return conn.execute(
+        "select ogc.transaction('topology', %s::jsonb)",
+        (json.dumps(doc),),
+    ).fetchone()[0]
+
+
+def _insert(collection, geom, props):
+    return {
+        "action": "insert",
+        "collection": collection,
+        "feature": {"type": "Feature", "geometry": geom, "properties": props},
+    }
+
+
+def _delete(collection, fid):
+    return {"action": "delete", "collection": collection, "id": fid}
 
 
 # --------------------------------------------------------------------------
@@ -81,7 +108,7 @@ def _render_column_info(rows: list[ColumnInfo]) -> str:
 
 
 # --------------------------------------------------------------------------
-# Expected golden data
+# Expected
 # --------------------------------------------------------------------------
 
 _EXPECTED_ROLE_ROWS: list[RoleRow] = [
@@ -110,8 +137,7 @@ _EXPECTED_ASSOC_COLUMNS: list[ColumnInfo] = [
 # --------------------------------------------------------------------------
 
 
-def test_catalogue_contents_match_golden_table(topology_conn):
-    """Catalogue rows after apply-schema match §6 of topology_plan.md exactly."""
+def test_catalogue_rows_expected(topology_conn):
     rows = topology_conn.execute(
         "select source_collection, property, target_collection "
         "from topology.association_role "
@@ -122,7 +148,7 @@ def test_catalogue_contents_match_golden_table(topology_conn):
 
 
 def test_association_and_role_column_shapes(topology_conn):
-    """Column names, types, and nullability match §4.1, sorted by name."""
+    """Column names, types, and nullability sorted by name."""
 
     def _columns(table: str) -> list[ColumnInfo]:
         rows = topology_conn.execute(
@@ -171,7 +197,7 @@ def test_constraints_are_canonical(topology_conn):
 
 
 def test_dataset_with_no_relationships_applies_cleanly(db):
-    """A dataset with no relationships gets no association tables (test 4)."""
+    """A dataset with no relationships gets no association tables"""
     raw = {
         "name": "no_rels",
         "collections": [{"name": "item", "geometry": {"type": "Point", "srid": 4326}}],
@@ -197,20 +223,26 @@ def test_dataset_with_no_relationships_applies_cleanly(db):
 
 def test_guard_aborts_when_referenced_property_removed(topology_conn, db):
     """apply-schema aborts unchanged when association rows reference a removed
-    property (test 5).
-
-    NOTE: inserts directly into association because no write path exists yet.
-    Slice B or C should replace this direct insert once links can be written
-    through ogc.*.
-    """
-    source_id = uuid.uuid4()
-    target_id = uuid.uuid4()
-    topology_conn.execute(
-        "insert into topology.association "
-        "(source_collection, source_id, property, target_id) "
-        "values ('surface', %s, 'boundedByOuter', %s)",
-        (source_id, target_id),
+    property"""
+    source_id = None
+    target_id = None
+    target_report = _txn(
+        topology_conn,
+        _insert("border1", _LINE_GEOM, {"identifikasjon": {"lokalid": _BORDER_ID}}),
     )
+    assert target_report["committed"] is True
+    target_id = target_report["items"][0]["id"]
+
+    source_report = _txn(
+        topology_conn,
+        _insert(
+            "surface",
+            _POLYGON_GEOM,
+            {"boundedByOuter": [{"featuretype": "border1", "lokalid": _BORDER_ID}]},
+        ),
+    )
+    assert source_report["committed"] is True
+    source_id = source_report["items"][0]["id"]
 
     try:
         raw = yaml.safe_load(FIXTURE_PATH.read_text(encoding="utf-8"))
@@ -233,18 +265,20 @@ def test_guard_aborts_when_referenced_property_removed(topology_conn, db):
         # Original row must still be there — nothing was changed
         count = topology_conn.execute(
             "select count(*) from topology.association "
-            "where source_collection = 'surface' and property = 'boundedByOuter'"
+            "where source_collection = 'surface' and property = 'boundedByOuter' "
+            "and source_id = %s::uuid",
+            (source_id,),
         ).fetchone()[0]
         assert count == 1
     finally:
-        topology_conn.execute("delete from topology.association")
+        if source_id is not None:
+            _txn(topology_conn, _delete("surface", source_id))
+        if target_id is not None:
+            _txn(topology_conn, _delete("border1", target_id))
 
 
 def test_association_has_no_target_collection_column(topology_conn):
-    """association carries no target_collection; the catalogue is the authority
-    (test 6). Also verifies association_role has no unique constraint beyond
-    its primary key.
-    """
+    """Potentially covered by catalogue expected"""
     col_names = {
         row[0]
         for row in topology_conn.execute(
@@ -263,9 +297,6 @@ def test_association_has_no_target_collection_column(topology_conn):
 
 
 def test_relationship_target_not_in_dataset_rejected_at_load_time():
-    """A relationship whose target is not a collection in the dataset is
-    rejected by resolve_dataset, not silently accepted (test 7).
-    """
     from geocomponents.descriptions.loader import DescriptionError
 
     raw = {
