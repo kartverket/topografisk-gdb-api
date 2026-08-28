@@ -36,14 +36,19 @@ const PROFILE_META: Record<ImportProfile, { title: string; crs: string; detail: 
 export function ImportView() {
   const inputRef = useRef<HTMLInputElement>(null);
   const selectionVersionRef = useRef(0);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [profile, setProfile] = useState<ImportProfile>('fkb_bane');
   const [detectedProfile, setDetectedProfile] = useState<ImportProfile | null>(null);
+  const [hasMixedDetectedProfiles, setHasMixedDetectedProfiles] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [importRun, setImportRun] = useState<ImportRun | null>(null);
   const [error, setError] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const profileMeta = PROFILE_META[profile];
+  const totalSelectedBytes = files.reduce((total, currentFile) => total + currentFile.size, 0);
+  const sosiFileCount = files.filter(file => isSosiFilename(file.name)).length;
+  const hasOnlySosiFiles = files.length > 0 && sosiFileCount === files.length;
+  const hasMixedSosiSelection = sosiFileCount > 0 && sosiFileCount < files.length;
   const importId = result?.import_id;
   const importLocation = result?.location;
   const importProfile = result?.profile;
@@ -82,13 +87,13 @@ export function ImportView() {
   }, [importId, importLocation, importProfile]);
 
   async function submit() {
-    if (!file) return;
+    if (files.length === 0 || hasMixedDetectedProfiles || hasMixedSosiSelection) return;
     setIsUploading(true);
     setError('');
     setResult(null);
     setImportRun(null);
     try {
-      setResult(await startImport(file, profile));
+      setResult(await startImport(files, profile));
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : 'Importen mislyktes');
     } finally {
@@ -96,23 +101,31 @@ export function ImportView() {
     }
   }
 
-  async function chooseFile(selected: File | undefined) {
-    const nextFile = selected ?? null;
+  async function chooseFiles(selected: FileList | File[] | null | undefined) {
+    const nextFiles = deduplicateFiles(Array.from(selected ?? []));
     const selectionVersion = selectionVersionRef.current + 1;
     selectionVersionRef.current = selectionVersion;
-    setFile(nextFile);
+    setFiles(nextFiles);
     setError('');
     setResult(null);
     setImportRun(null);
     setDetectedProfile(null);
-    if (!nextFile) return;
+    setHasMixedDetectedProfiles(false);
+    if (nextFiles.length === 0) return;
 
-    const inferredProfile = await inferImportProfile(nextFile);
-    if (selectionVersionRef.current !== selectionVersion || inferredProfile === null) {
+    const inferredProfiles = await Promise.all(nextFiles.map(file => inferImportProfile(file)));
+    if (selectionVersionRef.current !== selectionVersion) {
       return;
     }
-    setProfile(inferredProfile);
-    setDetectedProfile(inferredProfile);
+
+    const uniqueProfiles = Array.from(
+      new Set(inferredProfiles.filter((value): value is ImportProfile => value !== null))
+    );
+    setHasMixedDetectedProfiles(uniqueProfiles.length > 1);
+    if (uniqueProfiles.length === 1) {
+      setProfile(uniqueProfiles[0]);
+      setDetectedProfile(uniqueProfiles[0]);
+    }
   }
 
   function chooseProfile(nextProfile: ImportProfile) {
@@ -123,184 +136,302 @@ export function ImportView() {
     setImportRun(null);
   }
 
-  const progressPercent = progressValue(importRun);
+  const importedFileNames = importRun?.filenames.length ? importRun.filenames : files.map(file => file.name);
+  const isSosiRun = importedFileNames.length > 0 && importedFileNames.every(isSosiFilename);
+  const isStatsOnlyMode = hasOnlySosiFiles || isSosiRun;
+  const progressPercent = progressValue(importRun, isStatsOnlyMode);
   const isActive = isUploading || importRun?.status === 'accepted' || importRun?.status === 'running';
   const currentPhase = importRun?.phase ?? 'accepted';
   const currentStatus = importRun?.status ?? 'accepted';
 
   return (
-    <Card className="mx-auto w-full max-w-xl">
-      <CardHeader>
-        <p className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">Import</p>
-        <CardTitle className="text-2xl">Importer {profileMeta.title}-data</CardTitle>
-        <CardDescription className="max-w-[52ch]">
-          Last opp JSON-FG eller klassisk GeoJSON (.geojson med CRS og objtype). Objektene blir validert, transformert
-          til {profileMeta.crs} og importert med valgt datasettprofil.
-        </CardDescription>
-      </CardHeader>
+    <section className="min-h-0 overflow-y-auto pr-1">
+      <Card className="mx-auto w-full max-w-xl">
+        <CardHeader>
+          <p className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">Import</p>
+          <CardTitle className="text-2xl">
+            {hasOnlySosiFiles ? 'Analyser SOSI-filer' : `Importer ${profileMeta.title}-data`}
+          </CardTitle>
+          <CardDescription className="max-w-[52ch]">
+            {hasOnlySosiFiles
+              ? 'Last opp en eller flere SOSI-filer. gcimport tolker dem kun for statistikk, og ingen objekter sendes videre eller lagres i datasettet.'
+              : `Last opp en eller flere JSON-FG-, GeoJSON- eller SOSI-filer. JSON-FG og GeoJSON valideres, transformeres til ${profileMeta.crs} og importeres med valgt datasettprofil, mens SOSI bare analyseres for statistikk.`}
+          </CardDescription>
+        </CardHeader>
 
-      <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <div className="flex flex-wrap gap-2">
-            {(['fkb_bane', 'bygning'] as const).map(option => (
-              <Button
-                key={option}
-                type="button"
-                variant={profile === option ? 'default' : 'outline'}
-                onClick={() => chooseProfile(option)}>
-                {PROFILE_META[option].title}
-              </Button>
-            ))}
-          </div>
-          <p className="text-sm text-muted-foreground">{profileMeta.detail}</p>
-          {detectedProfile && file && (
-            <p className="text-sm text-muted-foreground">
-              Oppdaget {PROFILE_META[detectedProfile].title} fra filinnholdet.
-            </p>
-          )}
-        </div>
-
-        <button
-          type="button"
-          className={cn(
-            'grid w-full cursor-pointer gap-1.5 rounded-2xl border border-dashed border-border bg-muted/40 px-5 py-7 text-left transition-colors hover:border-ring hover:bg-muted/60 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none',
-            file && 'border-solid border-primary bg-accent'
-          )}
-          onClick={() => inputRef.current?.click()}
-          onDragOver={event => event.preventDefault()}
-          onDrop={event => {
-            event.preventDefault();
-            chooseFile(event.dataTransfer.files[0]);
-          }}>
-          <input
-            ref={inputRef}
-            type="file"
-            accept=".json,.jsonfg,.geojson,application/json,application/geo+json"
-            onChange={event => chooseFile(event.target.files?.[0])}
-            hidden
-          />
-          <span className="inline-flex items-center gap-2 text-base font-medium text-foreground">
-            <FileJson className="size-4" />
-            {file ? file.name : 'Velg eller slipp en JSON-FG- eller .geojson-fil'}
-          </span>
-          <span className="text-sm text-muted-foreground">
-            {file
-              ? `${(file.size / 1024).toFixed(1)} KB`
-              : '.jsonfg/.json for JSON-FG, .geojson for klassiske CRS-eksporter'}
-          </span>
-        </button>
-
-        <Button
-          size="lg"
-          disabled={!file || isActive}
-          onClick={submit}>
-          {isActive ? (
-            <>
-              <Loader2
-                data-icon="inline-start"
-                className="animate-spin"
-              />
-              Importerer…
-            </>
-          ) : (
-            'Importer datasett'
-          )}
-        </Button>
-
-        {error && (
-          <Alert variant="destructive">
-            <AlertCircle />
-            <AlertTitle>Importen mislyktes</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-
-        {result && (
-          <Alert className="border-chart-1/40 bg-chart-1/10">
-            <CheckCircle2 className="text-foreground" />
-            <AlertTitle>{statusTitle(importRun, result)}</AlertTitle>
-            <AlertDescription className="space-y-3">
-              <div className="space-y-2">
-                <div className="flex flex-wrap gap-1.5">
-                  <Badge variant="secondary">Import-ID: {result.import_id}</Badge>
-                  <Badge variant="secondary">Fase: {phaseLabel(currentPhase)}</Badge>
-                  <Badge variant="secondary">Batcher: {importRun?.processed_batches ?? 0}</Badge>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {phaseSteps(currentPhase, currentStatus).map(step => (
-                    <Badge
-                      key={step.label}
-                      variant={step.variant}>
-                      {step.label}
-                    </Badge>
-                  ))}
-                </div>
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{progressLabel(importRun, result)}</span>
-                    <span>{progressPercent === null ? indeterminateLabel(currentPhase) : `${progressPercent}%`}</span>
-                  </div>
-                  <div className="h-2 w-full rounded-full bg-muted">
-                    <div
-                      className={cn(
-                        'h-full rounded-full bg-primary transition-all',
-                        progressPercent === null && 'w-1/3 animate-pulse'
-                      )}
-                      style={progressPercent === null ? undefined : { width: `${progressPercent}%` }}
-                    />
-                  </div>
-                  {progressPercent === null && (
-                    <p className="text-xs text-muted-foreground">{indeterminateDescription(currentPhase)}</p>
-                  )}
-                </div>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-2">
+              {(['fkb_bane', 'bygning'] as const).map(option => (
+                <Button
+                  key={option}
+                  type="button"
+                  variant={profile === option ? 'default' : 'outline'}
+                  onClick={() => chooseProfile(option)}>
+                  {PROFILE_META[option].title}
+                </Button>
+              ))}
+            </div>
+            <p className="text-sm text-muted-foreground">{profileMeta.detail}</p>
+            {detectedProfile && files.length > 0 && (
+              <p className="text-sm text-muted-foreground">
+                Oppdaget {PROFILE_META[detectedProfile].title} fra filinnholdet i utvalget.
+              </p>
+            )}
+            {hasOnlySosiFiles && (
+              <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-foreground">
+                SOSI-opplasting kjører i statistikkmodus. Ingen objekter blir importert, selv om du velger en
+                datasettprofil.
               </div>
-              {importRun && (importRun.succeeded_features > 0 || importRun.failed_features > 0) && (
-                <>
-                  <Separator />
-                  <div className="grid gap-1 text-xs text-foreground">
-                    <div>Vellykkede objekter: {importRun.succeeded_features}</div>
-                    <div>Feilede objekter: {importRun.failed_features}</div>
-                    <div>Vellykkede batcher: {importRun.succeeded_batches}</div>
-                    <div>Feilede batcher: {importRun.failed_batches}</div>
-                  </div>
-                </>
-              )}
-              {importRun && terminalStats(importRun) && (
-                <>
-                  <Separator />
-                  <div className="grid gap-1 text-xs text-foreground">
-                    <div>Kjøretid: {terminalStats(importRun)?.durationLabel}</div>
-                    <div>Hastighet: {terminalStats(importRun)?.throughputLabel}</div>
-                    <div>Fullført: {terminalStats(importRun)?.completedLabel}</div>
-                  </div>
-                </>
-              )}
-              {importRun?.last_error?.reason && (
-                <>
-                  <Separator />
-                  <div className="text-xs text-destructive">{importRun.last_error.reason}</div>
-                </>
-              )}
-              <Button
-                variant="link"
-                size="sm"
-                className="h-auto px-0"
-                render={<Link to="/" />}>
-                Tilbake til kartet
-              </Button>
-            </AlertDescription>
-          </Alert>
-        )}
-      </CardContent>
+            )}
+          </div>
 
-      <CardFooter className="text-xs text-muted-foreground">{profileMeta.footer}</CardFooter>
-    </Card>
+          <button
+            type="button"
+            disabled={isActive}
+            className={cn(
+              'grid w-full gap-1.5 rounded-2xl border border-dashed border-border bg-muted/40 px-5 py-7 text-left transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none',
+              !isActive && 'cursor-pointer hover:border-ring hover:bg-muted/60',
+              isActive && 'cursor-not-allowed opacity-70',
+              files.length > 0 && 'border-solid border-primary bg-accent'
+            )}
+            onClick={() => inputRef.current?.click()}
+            onDragOver={event => event.preventDefault()}
+            onDrop={event => {
+              event.preventDefault();
+              if (isActive) {
+                return;
+              }
+              void chooseFiles(event.dataTransfer.files);
+            }}>
+            <input
+              ref={inputRef}
+              type="file"
+              multiple
+              accept=".json,.jsonfg,.geojson,.sos,application/json,application/geo+json,text/plain"
+              onChange={event => {
+                void chooseFiles(event.target.files);
+                event.target.value = '';
+              }}
+              hidden
+            />
+            <span className="inline-flex items-center gap-2 text-base font-medium text-foreground">
+              <FileJson className="size-4" />
+              {files.length === 0
+                ? 'Velg eller slipp JSON-FG-, .geojson- eller .sos-filer'
+                : files.length === 1
+                  ? files[0].name
+                  : `${files.length} filer valgt`}
+            </span>
+            <span className="text-sm text-muted-foreground">
+              {files.length > 0
+                ? `${formatFileSize(totalSelectedBytes)} totalt`
+                : '.jsonfg/.json for JSON-FG, .geojson for klassiske CRS-eksporter, .sos for statistikkmodus'}
+            </span>
+          </button>
+
+          {files.length > 0 && (
+            <div className="space-y-2 rounded-2xl border bg-background/70 p-3">
+              <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                <span>{files.length} filer klare for samlet import</span>
+                <span>{formatFileSize(totalSelectedBytes)}</span>
+              </div>
+              <div className="space-y-1.5">
+                {files.map(currentFile => (
+                  <div
+                    key={`${currentFile.name}:${currentFile.size}:${currentFile.lastModified}`}
+                    className="flex items-center justify-between gap-3 text-sm text-foreground">
+                    <span className="truncate">{currentFile.name}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{formatFileSize(currentFile.size)}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {hasOnlySosiFiles
+                  ? 'Alle valgte SOSI-filer lastes opp samlet og analyseres for strukturell statistikk. Ingen objekter skrives til datasettet.'
+                  : 'Alle valgte filer lastes opp til jobb- og importtjenesten før validering og import starter.'}
+              </p>
+            </div>
+          )}
+
+          <Button
+            size="lg"
+            disabled={files.length === 0 || isActive || hasMixedDetectedProfiles || hasMixedSosiSelection}
+            onClick={submit}>
+            {isActive ? (
+              <>
+                <Loader2
+                  data-icon="inline-start"
+                  className="animate-spin"
+                />
+                {isStatsOnlyMode ? 'Analyserer…' : 'Importerer…'}
+              </>
+            ) : hasOnlySosiFiles ? (
+              files.length > 1 ? (
+                `Analyser ${files.length} SOSI-filer`
+              ) : (
+                'Analyser SOSI-fil'
+              )
+            ) : files.length > 1 ? (
+              `Importer ${files.length} filer`
+            ) : (
+              'Importer datasett'
+            )}
+          </Button>
+
+          {hasMixedDetectedProfiles && (
+            <Alert variant="destructive">
+              <AlertCircle />
+              <AlertTitle>Blandet datasettutvalg</AlertTitle>
+              <AlertDescription>Velg filer som tilhører samme datasettprofil før importen startes.</AlertDescription>
+            </Alert>
+          )}
+
+          {hasMixedSosiSelection && (
+            <Alert variant="destructive">
+              <AlertCircle />
+              <AlertTitle>Blandet filformatutvalg</AlertTitle>
+              <AlertDescription>
+                SOSI-filer kan ikke blandes med JSON-FG eller GeoJSON i samme opplasting.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle />
+              <AlertTitle>Importen mislyktes</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          {result && (
+            <Alert className="border-chart-1/40 bg-chart-1/10">
+              <CheckCircle2 className="text-foreground" />
+              <AlertTitle>{statusTitle(importRun, result, isStatsOnlyMode)}</AlertTitle>
+              <AlertDescription className="space-y-3">
+                {isStatsOnlyMode && (
+                  <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-xs text-foreground">
+                    Denne kjøringen analyserer bare SOSI-struktur og teller innhold. Ingen objekter blir importert eller
+                    skrevet til kartdatasettet.
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <div className="flex flex-wrap gap-1.5">
+                    <Badge variant="secondary">Import-ID: {result.import_id}</Badge>
+                    <Badge variant="secondary">Filer: {importedFileNames.length}</Badge>
+                    <Badge variant="secondary">Fase: {phaseLabel(currentPhase)}</Badge>
+                    <Badge variant="secondary">Batcher: {importRun?.processed_batches ?? 0}</Badge>
+                    {isStatsOnlyMode && <Badge variant="secondary">Kun statistikk</Badge>}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {phaseSteps(currentPhase, currentStatus).map(step => (
+                      <Badge
+                        key={step.label}
+                        variant={step.variant}>
+                        {step.label}
+                      </Badge>
+                    ))}
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{progressLabel(importRun, result, isStatsOnlyMode)}</span>
+                      <span>{progressPercent === null ? indeterminateLabel(currentPhase) : `${progressPercent}%`}</span>
+                    </div>
+                    <div className="h-2 w-full rounded-full bg-muted">
+                      <div
+                        className={cn(
+                          'h-full rounded-full bg-primary transition-all',
+                          progressPercent === null && 'w-1/3 animate-pulse'
+                        )}
+                        style={progressPercent === null ? undefined : { width: `${progressPercent}%` }}
+                      />
+                    </div>
+                    {progressPercent === null && (
+                      <p className="text-xs text-muted-foreground">
+                        {indeterminateDescription(currentPhase, isStatsOnlyMode)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                {importedFileNames.length > 0 && (
+                  <>
+                    <Separator />
+                    <div className="space-y-2">
+                      <div className="text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
+                        Kildefiler
+                      </div>
+                      <div className="grid gap-1 text-xs text-foreground">
+                        {importedFileNames.map(fileName => (
+                          <div key={fileName}>{fileName}</div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+                {importRun && (importRun.succeeded_features > 0 || importRun.failed_features > 0) && (
+                  <>
+                    <Separator />
+                    <div className="grid gap-1 text-xs text-foreground">
+                      <div>Vellykkede objekter: {importRun.succeeded_features}</div>
+                      <div>Feilede objekter: {importRun.failed_features}</div>
+                      <div>Vellykkede batcher: {importRun.succeeded_batches}</div>
+                      <div>Feilede batcher: {importRun.failed_batches}</div>
+                    </div>
+                  </>
+                )}
+                {isStatsOnlyMode && importRun?.status === 'successful' && (
+                  <>
+                    <Separator />
+                    <div className="grid gap-1 text-xs text-foreground">
+                      <div>Tolkede objekter: {importRun.total_features ?? 0}</div>
+                      <div>Importerte objekter: 0</div>
+                      <div>Analyserte filer: {importedFileNames.length}</div>
+                    </div>
+                  </>
+                )}
+                {importRun && terminalStats(importRun) && (
+                  <>
+                    <Separator />
+                    <div className="grid gap-1 text-xs text-foreground">
+                      <div>Kjøretid: {terminalStats(importRun)?.durationLabel}</div>
+                      <div>Hastighet: {terminalStats(importRun)?.throughputLabel}</div>
+                      <div>Fullført: {terminalStats(importRun)?.completedLabel}</div>
+                    </div>
+                  </>
+                )}
+                {importRun?.last_error?.reason && (
+                  <>
+                    <Separator />
+                    <div className="text-xs text-destructive">{importRun.last_error.reason}</div>
+                  </>
+                )}
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="h-auto px-0"
+                  render={<Link to="/" />}>
+                  Tilbake til kartet
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+
+        <CardFooter className="text-xs text-muted-foreground">
+          {hasOnlySosiFiles ? 'SOSI kjøres som analyse uten varige dataendringer.' : profileMeta.footer}
+        </CardFooter>
+      </Card>
+    </section>
   );
 }
 
-function progressValue(importRun: ImportRun | null): number | null {
+function progressValue(importRun: ImportRun | null, isStatsOnly: boolean): number | null {
   if (!importRun) {
     return null;
+  }
+  if (isStatsOnly && importRun.status === 'successful') {
+    return 100;
   }
   if (importRun.progress !== null) {
     return importRun.progress;
@@ -311,39 +442,47 @@ function progressValue(importRun: ImportRun | null): number | null {
   return Math.max(0, Math.min(100, Math.round((importRun.processed_features / importRun.total_features) * 100)));
 }
 
-function progressLabel(importRun: ImportRun | null, result: ImportResult): string {
+function progressLabel(importRun: ImportRun | null, result: ImportResult, isStatsOnly: boolean): string {
   if (!importRun) {
-    return `Import ${result.import_id} er mottatt av jobbtjenesten`;
+    return isStatsOnly
+      ? `SOSI-analyse ${result.import_id} er mottatt av jobbtjenesten`
+      : `Import ${result.import_id} er mottatt av jobbtjenesten`;
   }
   if (importRun.phase === 'accepted') {
     return 'Lagt i jobbkø og venter på at importen skal starte';
   }
   if (importRun.phase === 'parsing') {
-    return 'Tolker filen og finner totalt antall objekter';
+    return isStatsOnly ? 'Tolker SOSI-filen og beregner statistikk' : 'Tolker filen og finner totalt antall objekter';
+  }
+  if (isStatsOnly && importRun.status === 'successful') {
+    return 'SOSI-analysen er fullført. Ingen objekter ble importert.';
   }
   if (importRun.total_features === null) {
-    return 'Forbereder opptelling av objekter';
+    return isStatsOnly ? 'Forbereder statistikkoppsummering' : 'Forbereder opptelling av objekter';
   }
   return `${importRun.processed_features} / ${importRun.total_features} objekter, ${importRun.processed_batches} batcher behandlet`;
 }
 
-function statusTitle(importRun: ImportRun | null, result: ImportResult): string {
+function statusTitle(importRun: ImportRun | null, result: ImportResult, isStatsOnly: boolean): string {
   if (!importRun) {
-    return `Import ${result.import_id} er mottatt`;
+    return isStatsOnly ? `SOSI-analyse ${result.import_id} er mottatt` : `Import ${result.import_id} er mottatt`;
+  }
+  if (isStatsOnly && importRun.status === 'successful') {
+    return 'SOSI analysert, ingen objekter importert';
   }
   if (importRun.status === 'successful') {
     return `Importerte ${importRun.succeeded_features} objekt${importRun.succeeded_features === 1 ? '' : 'er'}`;
   }
   if (importRun.status === 'failed') {
-    return 'Importen mislyktes';
+    return isStatsOnly ? 'SOSI-analysen mislyktes' : 'Importen mislyktes';
   }
   if (importRun.phase === 'accepted') {
-    return 'Venter på import';
+    return isStatsOnly ? 'Venter på SOSI-analyse' : 'Venter på import';
   }
   if (importRun.phase === 'parsing') {
-    return 'Tolker import';
+    return isStatsOnly ? 'Tolker SOSI' : 'Tolker import';
   }
-  return 'Import pågår';
+  return isStatsOnly ? 'SOSI-analyse pågår' : 'Import pågår';
 }
 
 function terminalStats(importRun: ImportRun): {
@@ -391,14 +530,20 @@ function indeterminateLabel(phase: string | null): string {
   return 'Arbeider…';
 }
 
-function indeterminateDescription(phase: string | null): string {
+function indeterminateDescription(phase: string | null, isStatsOnly: boolean): string {
   if (phase === 'accepted') {
     return 'gcjobs har mottatt opplastingen og sender den videre til gcimport.';
   }
   if (phase === 'parsing') {
-    return 'Filen tolkes før batchframdrift kan måles.';
+    return isStatsOnly
+      ? 'SOSI-filen tolkes før statistikkoppsummeringen kan vises.'
+      : 'Filen tolkes før batchframdrift kan måles.';
   }
   return 'Venter på den første målbare framdriftsoppdateringen.';
+}
+
+function isSosiFilename(filename: string): boolean {
+  return filename.trim().toLowerCase().endsWith('.sos');
 }
 
 function phaseLabel(phase: string | null): string {
@@ -447,4 +592,15 @@ function phaseSteps(
     }
     return { label: step.label, variant: 'outline' as const };
   });
+}
+
+function deduplicateFiles(files: File[]): File[] {
+  return Array.from(new Map(files.map(file => [`${file.name}:${file.size}:${file.lastModified}`, file])).values());
+}
+
+function formatFileSize(sizeBytes: number): string {
+  if (sizeBytes >= 1024 * 1024) {
+    return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${(sizeBytes / 1024).toFixed(1)} KB`;
 }

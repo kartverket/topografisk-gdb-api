@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -13,22 +14,25 @@ from uuid import uuid4
 
 import httpx2
 import orjson
-from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile, status
+from fastapi import FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.datastructures import UploadFile
 
 from gcimport.config import Settings
-from gcimport.geojson_to_jsonfg import ConversionError, convert_document
 from gcimport.importer import (
     DocumentValidationError,
     UpstreamImportError,
     import_features,
     prepare_document,
 )
+from gcimport.parsers.geojson_to_jsonfg import ConversionError, convert_document
+from gcimport.parsers.sosi import SosiParseError, SosiStats, parse_text, summarize_tree
 from gcimport.profiles import BUILTIN_PROFILES, ImportProfile, get_profile
 from gcimport.pubsub import ImportEventPublisher, RedisImportEventPublisher
 
 READ_CHUNK_BYTES = 64 * 1024
 CLASSIC_GEOJSON_SUFFIX = ".geojson"
+SOSI_SUFFIX = ".sos"
 LOGGER = logging.getLogger(__name__)
 
 
@@ -39,6 +43,18 @@ class ImportRequestContext:
     publisher: ImportEventPublisher
     request_profile: ImportProfile
     base_event: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class UploadedImportFile:
+    filename: str | None
+    body: bytes
+
+
+@dataclass(frozen=True)
+class SosiUploadSummary:
+    filename: str | None
+    stats: SosiStats
 
 
 def create_app(
@@ -91,7 +107,7 @@ def create_app(
 
     @application.post("/imports")
     async def create_import(
-        file: Annotated[UploadFile, File()],
+        request: Request,
         profile_name: Annotated[str, Query(alias="profile")],
         requested_import_id: Annotated[
             str | None,
@@ -100,7 +116,7 @@ def create_app(
     ) -> dict:
         return await _handle_import_request(
             application=application,
-            file=file,
+            request=request,
             profile_name=profile_name,
             requested_import_id=requested_import_id,
         )
@@ -111,14 +127,15 @@ def create_app(
 async def _handle_import_request(
     *,
     application: FastAPI,
-    file: UploadFile,
+    request: Request,
     profile_name: str,
     requested_import_id: str | None,
 ) -> dict[str, Any]:
     runtime_settings: Settings = application.state.settings
     publisher: ImportEventPublisher = application.state.event_publisher
     request_profile = _request_profile(profile_name)
-    body = await _read_bounded(file, runtime_settings.max_upload_bytes)
+    files = await _request_upload_files(request)
+    uploads = await _read_uploaded_files(files, runtime_settings.max_upload_bytes)
     import_id = _request_import_id(requested_import_id)
     context = ImportRequestContext(
         application=application,
@@ -128,7 +145,7 @@ async def _handle_import_request(
         base_event=_base_event(
             request_profile=request_profile,
             import_id=import_id,
-            filename=file.filename,
+            uploads=uploads,
         ),
     )
 
@@ -138,10 +155,51 @@ async def _handle_import_request(
         event_name="import.started",
         phase="parsing",
     )
-    document = await _load_import_document(body, publisher, context.base_event)
-    features = await _prepare_import_features(
-        document=document,
-        filename=file.filename,
+    if _contains_sosi_uploads(uploads):
+        if not _all_uploads_are_sosi(uploads):
+            reason = "SOSI uploads cannot be mixed with JSON or GeoJSON uploads"
+            await _publish_import_update(
+                publisher,
+                context.base_event,
+                event_name="import.completed.failed",
+                phase="parsing",
+                reason=reason,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=reason,
+            )
+
+        result = await _summarize_sosi_uploads(
+            uploads=uploads,
+            publisher=publisher,
+            base_event=context.base_event,
+        )
+        await _publish_import_update(
+            publisher,
+            context.base_event,
+            event_name="import.parsed",
+            phase="completed",
+            mode="stats",
+            total_features=result["total_objects"],
+            total_objects=result["total_objects"],
+            total_files=result["total_files"],
+        )
+        await _publish_import_update(
+            publisher,
+            context.base_event,
+            event_name="import.completed.succeeded",
+            phase="completed",
+            mode="stats",
+            total_features=result["total_objects"],
+            total_objects=result["total_objects"],
+            total_files=result["total_files"],
+            imported_features=0,
+        )
+        return result
+
+    features = await _prepare_import_features_from_uploads(
+        uploads=uploads,
         request_profile=request_profile,
         publisher=publisher,
         base_event=context.base_event,
@@ -177,13 +235,17 @@ def _base_event(
     *,
     request_profile: ImportProfile,
     import_id: str,
-    filename: str | None,
+    uploads: list[UploadedImportFile],
 ) -> dict[str, Any]:
+    filenames = [
+        filename for filename in (upload.filename for upload in uploads) if filename
+    ]
     return {
         "import_id": import_id,
         "profile": request_profile.name,
         "dataset_api_path": request_profile.dataset_api_path,
-        "filename": filename,
+        "filename": filenames[0] if len(filenames) == 1 else None,
+        "filenames": filenames,
     }
 
 
@@ -279,6 +341,30 @@ async def _prepare_import_features(
         ) from err
 
 
+async def _prepare_import_features_from_uploads(
+    *,
+    uploads: list[UploadedImportFile],
+    request_profile: ImportProfile,
+    publisher: ImportEventPublisher,
+    base_event: dict[str, Any],
+) -> list[dict[str, Any]]:
+    features: list[dict[str, Any]] = []
+
+    for upload in uploads:
+        document = await _load_import_document(upload.body, publisher, base_event)
+        features.extend(
+            await _prepare_import_features(
+                document=document,
+                filename=upload.filename,
+                request_profile=request_profile,
+                publisher=publisher,
+                base_event=base_event,
+            )
+        )
+
+    return features
+
+
 def _batch_event_publisher(
     publisher: ImportEventPublisher,
     base_event: dict[str, Any],
@@ -369,6 +455,20 @@ def _is_classic_geojson_filename(filename: str | None) -> bool:
     return PurePosixPath(filename).suffix.casefold() == CLASSIC_GEOJSON_SUFFIX
 
 
+def _is_sosi_filename(filename: str | None) -> bool:
+    if not filename:
+        return False
+    return PurePosixPath(filename).suffix.casefold() == SOSI_SUFFIX
+
+
+def _contains_sosi_uploads(uploads: list[UploadedImportFile]) -> bool:
+    return any(_is_sosi_filename(upload.filename) for upload in uploads)
+
+
+def _all_uploads_are_sosi(uploads: list[UploadedImportFile]) -> bool:
+    return all(_is_sosi_filename(upload.filename) for upload in uploads)
+
+
 def _normalize_upload(
     document: Any,
     filename: str | None,
@@ -378,6 +478,101 @@ def _normalize_upload(
     if not _is_classic_geojson_filename(filename):
         return document
     return convert_document(document, profile=profile)
+
+
+async def _summarize_sosi_uploads(
+    *,
+    uploads: list[UploadedImportFile],
+    publisher: ImportEventPublisher,
+    base_event: dict[str, Any],
+) -> dict[str, Any]:
+    summaries: list[SosiUploadSummary] = []
+
+    for upload in uploads:
+        try:
+            text = upload.body.decode("utf-8")
+        except UnicodeDecodeError as err:
+            reason = "uploaded SOSI file must contain valid UTF-8 text"
+            await _publish_import_update(
+                publisher,
+                base_event,
+                event_name="import.completed.failed",
+                phase="parsing",
+                reason=reason,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=reason,
+            ) from err
+
+        try:
+            stats = summarize_tree(parse_text(text))
+        except SosiParseError as err:
+            await _publish_import_update(
+                publisher,
+                base_event,
+                event_name="import.completed.failed",
+                phase="parsing",
+                reason=str(err),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "message": "invalid SOSI document",
+                    "errors": [str(err)],
+                },
+            ) from err
+
+        summaries.append(SosiUploadSummary(filename=upload.filename, stats=stats))
+
+    return _aggregate_sosi_summaries(summaries)
+
+
+def _aggregate_sosi_summaries(summaries: list[SosiUploadSummary]) -> dict[str, Any]:
+    object_types: Counter[str] = Counter()
+    objtypes: Counter[str] = Counter()
+    coordinate_attribute_counts: Counter[str] = Counter()
+    files: list[dict[str, Any]] = []
+    has_header = False
+    has_footer = False
+    total_objects = 0
+    coordinate_records = 0
+
+    for summary in summaries:
+        stats = summary.stats
+        has_header = has_header or stats.has_header
+        has_footer = has_footer or stats.has_footer
+        total_objects += stats.total_objects
+        coordinate_records += stats.coordinate_records
+        object_types.update(stats.object_types)
+        objtypes.update(stats.objtypes)
+        coordinate_attribute_counts.update(stats.coordinate_attribute_counts)
+        files.append(
+            {
+                "filename": summary.filename,
+                "has_header": stats.has_header,
+                "has_footer": stats.has_footer,
+                "total_objects": stats.total_objects,
+                "object_types": stats.object_types,
+                "objtypes": stats.objtypes,
+                "coordinate_records": stats.coordinate_records,
+                "coordinate_attribute_counts": stats.coordinate_attribute_counts,
+            }
+        )
+
+    return {
+        "mode": "stats",
+        "format": "sosi",
+        "total_files": len(summaries),
+        "has_header": has_header,
+        "has_footer": has_footer,
+        "total_objects": total_objects,
+        "coordinate_records": coordinate_records,
+        "object_types": dict(object_types),
+        "objtypes": dict(objtypes),
+        "coordinate_attribute_counts": dict(coordinate_attribute_counts),
+        "files": files,
+    }
 
 
 def _request_profile(
@@ -395,6 +590,42 @@ def _request_profile(
 
 def _dataset_api_url(root_api_url: str, profile: ImportProfile) -> str:
     return f"{root_api_url.rstrip('/')}/{profile.dataset_api_path.strip('/')}"
+
+
+async def _request_upload_files(request: Request) -> list[UploadFile]:
+    form = await request.form()
+    files = [
+        value
+        for key, value in form.multi_items()
+        if key in {"file", "files"} and isinstance(value, UploadFile)
+    ]
+    if files:
+        return files
+
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail="at least one uploaded file is required",
+    )
+
+
+async def _read_uploaded_files(
+    files: list[UploadFile],
+    max_bytes: int,
+) -> list[UploadedImportFile]:
+    uploads: list[UploadedImportFile] = []
+    total_size = 0
+
+    for file in files:
+        body = await _read_bounded(file, max_bytes)
+        total_size += len(body)
+        if total_size > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"uploaded files exceed {max_bytes} bytes",
+            )
+        uploads.append(UploadedImportFile(filename=file.filename, body=body))
+
+    return uploads
 
 
 async def _read_bounded(file: UploadFile, max_bytes: int) -> bytes:

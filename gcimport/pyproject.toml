@@ -27,7 +27,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.scripts]
-geojson-to-jsonfg = "gcimport.geojson_to_jsonfg:main"
+geojson-to-jsonfg = "gcimport.parsers.geojson_to_jsonfg:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gcimport"]

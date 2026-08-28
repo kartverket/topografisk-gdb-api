@@ -95,7 +95,7 @@ def get_dataset_job(
     base_url: str,
     settings: JobPayloadSettings,
 ) -> dict[str, Any]:
-    run = _require_dataset_run(dataset_name, job_id)
+    run = _run_with_filenames(_require_dataset_run(dataset_name, job_id))
     return _job_payload(
         run,
         base_url=base_url,
@@ -104,7 +104,7 @@ def get_dataset_job(
 
 
 def get_dataset_job_results(*, dataset_name: str, job_id: str) -> dict[str, Any]:
-    run = _require_dataset_run(dataset_name, job_id)
+    run = _run_with_filenames(_require_dataset_run(dataset_name, job_id))
     mapped_status = _map_status(run)
     if mapped_status in {"accepted", "running"}:
         raise HTTPException(status_code=404, detail="job results are not ready")
@@ -200,6 +200,43 @@ def _rfc3339_timestamp(value: Any) -> str | None:
     return None
 
 
+def _run_with_filenames(run: dict[str, Any]) -> dict[str, Any]:
+    filenames = _normalized_filenames(run.get("filenames"))
+    if filenames is None:
+        filenames = _import_filenames(str(run["id"]))
+    if filenames is None:
+        filenames = _normalized_filenames(run.get("filename"))
+    if filenames is None:
+        return run
+    return {**run, "filenames": filenames}
+
+
+def _import_filenames(import_id: str) -> list[str] | None:
+    for event in db.get_import_events(import_id, limit=5):
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        filenames = _normalized_filenames(payload.get("filenames"))
+        if filenames is not None:
+            return filenames
+        filenames = _normalized_filenames(payload.get("filename"))
+        if filenames is not None:
+            return filenames
+    return None
+
+
+def _normalized_filenames(value: Any) -> list[str] | None:
+    if isinstance(value, str):
+        filename = value.strip()
+        return [filename] if filename else None
+    if not isinstance(value, list):
+        return None
+    filenames = [
+        item.strip() for item in value if isinstance(item, str) and item.strip()
+    ]
+    return filenames or None
+
+
 def _job_payload(
     run: dict[str, Any],
     *,
@@ -246,6 +283,9 @@ def _job_payload(
     last_error = run.get("last_error")
     if isinstance(last_error, dict):
         payload["lastError"] = last_error
+    filenames = _normalized_filenames(run.get("filenames"))
+    if filenames is not None:
+        payload["filenames"] = filenames
     payload["message"] = _job_message(status, last_error)
     return payload
 
@@ -278,19 +318,21 @@ def _filter_jobs(
 
 
 def _job_results_payload(run: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "summary": {
-            "jobID": str(run["id"]),
-            "processedFeatures": run.get("processed_features"),
-            "succeededFeatures": run.get("succeeded_features"),
-            "failedFeatures": run.get("failed_features"),
-            "processedBatches": run.get("processed_batches"),
-            "succeededBatches": run.get("succeeded_batches"),
-            "failedBatches": run.get("failed_batches"),
-            "totalFeatures": run.get("total_features"),
-            "completed": run.get("completed_at"),
-        }
+    summary = {
+        "jobID": str(run["id"]),
+        "processedFeatures": run.get("processed_features"),
+        "succeededFeatures": run.get("succeeded_features"),
+        "failedFeatures": run.get("failed_features"),
+        "processedBatches": run.get("processed_batches"),
+        "succeededBatches": run.get("succeeded_batches"),
+        "failedBatches": run.get("failed_batches"),
+        "totalFeatures": run.get("total_features"),
+        "completed": run.get("completed_at"),
     }
+    filenames = _normalized_filenames(run.get("filenames"))
+    if filenames is not None:
+        summary["filenames"] = filenames
+    return {"summary": summary}
 
 
 def _run_is_terminal(run: dict[str, Any] | None) -> bool:
