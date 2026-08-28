@@ -23,6 +23,7 @@ The only local endpoint is:
 Required environment variables:
 
 - `GCAPI_GEOCOMPONENTS_URL`
+- `GCAPI_GCCORE_URL`
 
 Optional environment variables:
 
@@ -30,6 +31,24 @@ Optional environment variables:
 - `GCAPI_REQUEST_TIMEOUT_SECONDS`
 - `GCAPI_CONNECT_TIMEOUT_SECONDS`
 - `GCAPI_MAX_UPLOAD_BYTES`
+- `GCAPI_SESSION_TTL_SECONDS`
+- `GCAPI_SESSION_COOKIE_NAME`
+- `GCAPI_SESSION_COOKIE_SECURE`
+- `GCAPI_SESSION_COOKIE_SAMESITE`
+
+## Authentication
+
+`gcapi` automatically acquires a server-side in-memory session for proxied
+requests by calling `GCAPI_GCCORE_URL/auth` when the request has no valid
+session cookie.
+
+Current development behavior:
+
+- sessions are stored in memory only and are lost on restart
+- sessions are local to a single process and are not shared across instances
+- valid sessions are cached for 10 minutes by default
+- missing or expired sessions trigger a new auth request
+- `/healthz` and CORS preflight requests remain unauthenticated
 
 Run locally with `uv`:
 

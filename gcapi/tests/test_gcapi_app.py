@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
+import time
 
 import httpx2
 from fastapi.testclient import TestClient
 
 from gcapi.app import create_app
+from gcapi.auth import SessionRecord
 from gcapi.config import Settings
+
+GCCORE_URL = "http://localhost:8002"
+AUTH_URL = f"{GCCORE_URL}/auth"
 
 
 def _json_response(
@@ -19,10 +24,17 @@ def _json_response(
     )
 
 
+def _settings(**overrides: object) -> Settings:
+    values: dict[str, object] = {
+        "geocomponents_url": "http://localhost:8000",
+        "gccore_url": GCCORE_URL,
+    }
+    values.update(overrides)
+    return Settings(**values)
+
+
 def test_create_app_uses_injected_client() -> None:
-    settings = Settings(
-        geocomponents_url="http://localhost:8000",
-    )
+    settings = _settings()
     client = httpx2.AsyncClient(trust_env=False)
     app = create_app(settings=settings, client=client)
 
@@ -36,13 +48,19 @@ def test_create_app_uses_injected_client() -> None:
 
 
 def test_root_redirects_to_datasets() -> None:
+    auth_calls = 0
+
     def handler(request: httpx2.Request) -> httpx2.Response:
+        nonlocal auth_calls
+        if str(request.url) == AUTH_URL:
+            auth_calls += 1
+            return _json_response({"status": "ok", "authorized": True})
         assert request.method == "GET"
         assert str(request.url) == "http://localhost:8000"
         return _json_response({"service": "geocomponents"})
 
     app = create_app(
-        settings=Settings(geocomponents_url="http://localhost:8000"),
+        settings=_settings(),
         client=httpx2.AsyncClient(
             transport=httpx2.MockTransport(handler), trust_env=False
         ),
@@ -53,12 +71,19 @@ def test_root_redirects_to_datasets() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"service": "geocomponents"}
+    assert auth_calls == 1
+    assert "gcapi_session=" in response.headers["set-cookie"]
 
 
 def test_proxy_forwards_nested_paths_query_and_json_without_rewriting() -> None:
     seen_requests: list[httpx2.Request] = []
+    auth_calls = 0
 
     def handler(request: httpx2.Request) -> httpx2.Response:
+        nonlocal auth_calls
+        if str(request.url) == AUTH_URL:
+            auth_calls += 1
+            return _json_response({"status": "ok", "authorized": True})
         seen_requests.append(request)
         assert request.method == "GET"
         assert (
@@ -77,7 +102,7 @@ def test_proxy_forwards_nested_paths_query_and_json_without_rewriting() -> None:
         )
 
     app = create_app(
-        settings=Settings(geocomponents_url="http://localhost:8000"),
+        settings=_settings(),
         client=httpx2.AsyncClient(
             transport=httpx2.MockTransport(handler), trust_env=False
         ),
@@ -94,10 +119,13 @@ def test_proxy_forwards_nested_paths_query_and_json_without_rewriting() -> None:
         "http://localhost:8000/datasets/cadastre/ogc_api/collections?f=json&limit=1"
     )
     assert seen_requests[0].headers["host"] == "localhost:8000"
+    assert auth_calls == 1
 
 
 def test_dataset_import_process_paths_proxy_to_gcjobs_when_configured() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
+        if str(request.url) == AUTH_URL:
+            return _json_response({"status": "ok", "authorized": True})
         assert request.method == "POST"
         assert (
             str(request.url)
@@ -113,7 +141,7 @@ def test_dataset_import_process_paths_proxy_to_gcjobs_when_configured() -> None:
         )
 
     app = create_app(
-        settings=Settings(
+        settings=_settings(
             geocomponents_url="http://geocomponents.test",
             gcjobs_url="http://gcjobs.test",
         ),
@@ -137,6 +165,8 @@ def test_dataset_import_process_paths_proxy_to_gcjobs_when_configured() -> None:
 
 def test_dataset_job_paths_proxy_to_gcjobs_when_configured() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
+        if str(request.url) == AUTH_URL:
+            return _json_response({"status": "ok", "authorized": True})
         assert request.method == "GET"
         assert (
             str(request.url)
@@ -156,7 +186,7 @@ def test_dataset_job_paths_proxy_to_gcjobs_when_configured() -> None:
         )
 
     app = create_app(
-        settings=Settings(
+        settings=_settings(
             geocomponents_url="http://geocomponents.test",
             gcjobs_url="http://gcjobs.test",
         ),
@@ -181,6 +211,8 @@ def test_proxy_passes_request_body_and_location_headers_through() -> None:
     body_chunks: list[bytes] = []
 
     def handler(request: httpx2.Request) -> httpx2.Response:
+        if str(request.url) == AUTH_URL:
+            return _json_response({"status": "ok", "authorized": True})
         assert request.method == "POST"
         assert str(request.url) == "http://localhost:8000/imports"
         body_chunks.append(request.read())
@@ -194,7 +226,7 @@ def test_proxy_passes_request_body_and_location_headers_through() -> None:
         )
 
     app = create_app(
-        settings=Settings(geocomponents_url="http://localhost:8000"),
+        settings=_settings(),
         client=httpx2.AsyncClient(
             transport=httpx2.MockTransport(handler), trust_env=False
         ),
@@ -215,9 +247,7 @@ def test_proxy_passes_request_body_and_location_headers_through() -> None:
 
 def test_create_app_always_allows_wildcard_cors() -> None:
     app = create_app(
-        settings=Settings(
-            geocomponents_url="http://localhost:8000",
-        ),
+        settings=_settings(),
         client=httpx2.AsyncClient(trust_env=False),
     )
 
@@ -232,3 +262,130 @@ def test_create_app_always_allows_wildcard_cors() -> None:
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "*"
+
+
+def test_healthz_bypasses_authentication() -> None:
+    auth_calls = 0
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        nonlocal auth_calls
+        if str(request.url) == AUTH_URL:
+            auth_calls += 1
+            return _json_response({"status": "ok", "authorized": True})
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    app = create_app(
+        settings=_settings(),
+        client=httpx2.AsyncClient(
+            transport=httpx2.MockTransport(handler), trust_env=False
+        ),
+    )
+
+    with TestClient(app) as test_client:
+        response = test_client.get("/healthz")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "service": "gcapi"}
+    assert auth_calls == 0
+
+
+def test_valid_session_skips_reauth_until_expiry() -> None:
+    auth_calls = 0
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        nonlocal auth_calls
+        if str(request.url) == AUTH_URL:
+            auth_calls += 1
+            return _json_response({"status": "ok", "authorized": True})
+        assert str(request.url) == "http://localhost:8000/protected"
+        return _json_response({"ok": True})
+
+    app = create_app(
+        settings=_settings(session_ttl_seconds=600),
+        client=httpx2.AsyncClient(
+            transport=httpx2.MockTransport(handler), trust_env=False
+        ),
+    )
+
+    with TestClient(app) as test_client:
+        first_response = test_client.get("/protected")
+        second_response = test_client.get("/protected")
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert auth_calls == 1
+
+
+def test_expired_session_triggers_reauthentication() -> None:
+    auth_calls = 0
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        nonlocal auth_calls
+        if str(request.url) == AUTH_URL:
+            auth_calls += 1
+            return _json_response({"status": "ok", "authorized": True})
+        assert str(request.url) == "http://localhost:8000/protected"
+        return _json_response({"ok": True})
+
+    app = create_app(
+        settings=_settings(session_ttl_seconds=600),
+        client=httpx2.AsyncClient(
+            transport=httpx2.MockTransport(handler), trust_env=False
+        ),
+    )
+
+    with TestClient(app) as test_client:
+        first_response = test_client.get("/protected")
+        session_cookie = test_client.cookies.get("gcapi_session")
+        assert session_cookie is not None
+        app.state.session_store._sessions[session_cookie] = SessionRecord(
+            session_id=session_cookie,
+            expires_at=time.time() - 1,
+        )
+        second_response = test_client.get("/protected")
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert auth_calls == 2
+    assert "gcapi_session=" in first_response.headers["set-cookie"]
+    assert "gcapi_session=" in second_response.headers["set-cookie"]
+
+
+def test_authentication_failure_returns_unauthorized() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        if str(request.url) == AUTH_URL:
+            return _json_response({"status": "ok", "authorized": False})
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    app = create_app(
+        settings=_settings(),
+        client=httpx2.AsyncClient(
+            transport=httpx2.MockTransport(handler), trust_env=False
+        ),
+    )
+
+    with TestClient(app) as test_client:
+        response = test_client.get("/protected")
+
+    assert response.status_code == 401
+    assert response.json()["title"] == "Authentication required"
+
+
+def test_authentication_upstream_failure_returns_service_unavailable() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        if str(request.url) == AUTH_URL:
+            return _json_response({"detail": "down"}, status_code=500)
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    app = create_app(
+        settings=_settings(),
+        client=httpx2.AsyncClient(
+            transport=httpx2.MockTransport(handler), trust_env=False
+        ),
+    )
+
+    with TestClient(app) as test_client:
+        response = test_client.get("/protected")
+
+    assert response.status_code == 503
+    assert response.json()["title"] == "Authentication unavailable"
