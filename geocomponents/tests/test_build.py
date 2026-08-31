@@ -86,6 +86,25 @@ def test_derived_plan_carries_areas_and_holes(areas, holes):
     assert role.when_field is None
 
 
+def test_derived_geometry_column_is_nullable_in_plan_even_when_required():
+    ds = _make_dataset(
+        geometry_type="MultiPolygon",
+        derived=ResolvedDerivedDef(
+            rule="footprint",
+            areas=DerivedAreas.ONE,
+            holes=DerivedHoles.ALLOWED,
+            one_of=((ResolvedDerivedRole("boundedByOuter", "border"),),),
+        ),
+    )
+
+    plan = build_schema_plan(ds)
+    coll = plan.collections[0]
+
+    assert coll.derived is not None
+    assert coll.derived.required is True
+    assert coll.table.geometry.nullable is True
+
+
 def _cadastre_plan():
     cad = next(d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "cadastre")
     return build_schema_plan(cad)

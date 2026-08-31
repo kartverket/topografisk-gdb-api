@@ -31,6 +31,10 @@ _LINE_GEOM_ALT_2 = {
     "type": "LineString",
     "coordinates": [[30, 0], [40, 0], [40, 10], [30, 10], [30, 0]],
 }
+_LINE_GEOM_WIDER = {
+    "type": "LineString",
+    "coordinates": [[0, 0], [25, 0], [20, 20]],
+}
 _NOTE_LINE_GEOM = {"type": "LineString", "coordinates": [[50, 0], [51, 0]]}
 _OUTER_RING_GEOM = {
     "type": "LineString",
@@ -50,6 +54,10 @@ _OPEN_LINE_GEOM_ALT = {
     "type": "LineString",
     "coordinates": [[20, 0.001], [20, 20]],
 }
+_OPEN_SHARED_LINE_GEOM = {
+    "type": "LineString",
+    "coordinates": [[0, 0], [25, 0], [25, 20]],
+}
 _FREE_FLOATING_LINE_GEOM = {
     "type": "LineString",
     "coordinates": [[30, 0], [40, 0]],
@@ -67,6 +75,22 @@ _POLYGON_GEOM = {
     "type": "MultiPolygon",
     "coordinates": [[[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]],
 }
+_RING_POLYGON = {
+    "type": "Polygon",
+    "coordinates": [[[0, 0], [20, 0], [20, 20], [0, 20], [0, 0]]],
+}
+_WIDER_RING_POLYGON = {
+    "type": "Polygon",
+    "coordinates": [[[0, 0], [25, 0], [20, 20], [0, 20], [0, 0]]],
+}
+_TWO_RINGS_MULTIPOLYGON = {
+    "type": "MultiPolygon",
+    "coordinates": [
+        [[[0, 0], [20, 0], [20, 20], [0, 20], [0, 0]]],
+        [[[30, 0], [40, 0], [40, 10], [30, 10], [30, 0]]],
+    ],
+}
+_DERIVED_COLLECTIONS = {"surface", "surface2"}
 
 
 def _new_id():
@@ -218,8 +242,10 @@ def _txn_doc(conn, document, *, dataset="topology"):
     ).fetchone()[0]
 
 
-def _insert(collection, geom, props, *, fid=None):
-    feature = {"type": "Feature", "geometry": geom, "properties": props}
+def _insert(collection, geom, props, *, fid=None, keep_geometry=False):
+    feature = {"type": "Feature", "properties": props}
+    if keep_geometry or collection not in _DERIVED_COLLECTIONS:
+        feature["geometry"] = geom
     if fid is not None:
         feature["id"] = fid
     return {
@@ -250,13 +276,25 @@ def _update(collection, fid, props):
     }
 
 
-def _replace(collection, fid, geom, props):
+def _update_with_geometry(collection, fid, geom, props):
+    return {
+        "action": "update",
+        "collection": collection,
+        "id": fid,
+        "feature": {"type": "Feature", "geometry": geom, "properties": props},
+    }
+
+
+def _replace(collection, fid, geom, props, *, keep_geometry=False):
     """PUT: full document, all columns and link properties replaced."""
+    feature = {"type": "Feature", "properties": props}
+    if keep_geometry or collection not in _DERIVED_COLLECTIONS:
+        feature["geometry"] = geom
     return {
         "action": "replace",
         "collection": collection,
         "id": fid,
-        "feature": {"type": "Feature", "geometry": geom, "properties": props},
+        "feature": feature,
     }
 
 
@@ -311,6 +349,30 @@ def _footprint_members_rows(conn, collection, fid, *, dataset="topology"):
         psycopg.sql.Identifier(f"_{collection}_footprint_members"),
     )
     return conn.execute(sql, (fid,)).fetchall()
+
+
+def _stored_geometry_equals(
+    conn, collection, fid, expected_geometry, *, dataset="topology"
+):
+    sql = psycopg.sql.SQL(
+        'select ST_Equals("geometry", ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326)) '
+        'from {}.{} where "id" = %s::uuid'
+    ).format(
+        psycopg.sql.Identifier(dataset),
+        psycopg.sql.Identifier(collection),
+    )
+    return conn.execute(sql, (json.dumps(expected_geometry), fid)).fetchone()[0]
+
+
+def _stored_geometry_meta(conn, collection, fid, *, dataset="topology"):
+    sql = psycopg.sql.SQL(
+        'select ST_AsGeoJSON("geometry")::jsonb, GeometryType("geometry"), '
+        'ST_NumGeometries("geometry") from {}.{} where "id" = %s::uuid'
+    ).format(
+        psycopg.sql.Identifier(dataset),
+        psycopg.sql.Identifier(collection),
+    )
+    return conn.execute(sql, (fid,)).fetchone()
 
 
 def _properties(conn, collection, fid):
@@ -1860,6 +1922,220 @@ def test_property_with_no_links_is_absent_on_read(topology_conn):
     assert "boundedByOuter" not in got
 
 
+def test_derived_insert_with_geometry_is_rejected(topology_conn):
+    report = _txn(
+        topology_conn,
+        _insert("surface2", _POLYGON_GEOM, {}, keep_geometry=True),
+    )
+
+    _assert_rejected(report)
+    assert report["items"][0]["collection"] == "surface2"
+
+
+def test_derived_update_with_geometry_is_rejected(topology_conn):
+    created = _txn(topology_conn, _insert_without_geometry("surface2", {}))
+    surface_id = created["items"][0]["id"]
+
+    report = _txn(
+        topology_conn,
+        _update_with_geometry("surface2", surface_id, _POLYGON_GEOM, {}),
+    )
+
+    _assert_rejected(report)
+    assert _stored_geometry_meta(topology_conn, "surface2", surface_id)[0] is None
+
+
+def test_derived_replace_with_geometry_is_rejected(topology_conn):
+    created = _txn(topology_conn, _insert_without_geometry("surface2", {}))
+    surface_id = created["items"][0]["id"]
+
+    report = _txn(
+        topology_conn,
+        _replace("surface2", surface_id, _POLYGON_GEOM, {}, keep_geometry=True),
+    )
+
+    _assert_rejected(report)
+    assert _stored_geometry_meta(topology_conn, "surface2", surface_id)[0] is None
+
+
+def test_closed_ring_surface_stores_built_geometry(topology_conn):
+    ring_id = _new_id()
+    _txn(topology_conn, _border1_segment_item(ring_id, _OUTER_RING_GEOM))
+
+    report = _txn(
+        topology_conn,
+        _insert_without_geometry("surface2", _surface2_props(ring_id)),
+    )
+    surface_id = report["items"][0]["id"]
+
+    stored_json, geometry_type, part_count = _stored_geometry_meta(
+        topology_conn, "surface2", surface_id
+    )
+    assert stored_json is not None
+    assert geometry_type == "MULTIPOLYGON"
+    assert part_count == 1
+    assert _stored_geometry_equals(topology_conn, "surface2", surface_id, _RING_POLYGON)
+
+
+def test_member_curve_update_refreshes_stored_footprint(topology_conn):
+    first_id = _new_id()
+    second_id = _new_id()
+    _txn(topology_conn, *_border1_ring_pair_items(first_id, second_id))
+    created = _txn(
+        topology_conn,
+        _insert_without_geometry("surface2", _surface2_props(first_id, second_id)),
+    )
+    surface_id = created["items"][0]["id"]
+    assert _stored_geometry_equals(topology_conn, "surface2", surface_id, _RING_POLYGON)
+
+    updated = _txn(
+        topology_conn,
+        _update_with_geometry(
+            "border1",
+            first_id,
+            _LINE_GEOM_WIDER,
+            {"identifikasjon": {"lokalid": first_id}},
+        ),
+    )
+
+    assert updated["committed"] is True
+    assert _stored_geometry_equals(
+        topology_conn, "surface2", surface_id, _WIDER_RING_POLYGON
+    )
+
+
+def test_member_curve_opening_ring_rolls_back_and_keeps_stored_footprint(topology_conn):
+    first_id = _new_id()
+    second_id = _new_id()
+    _txn(topology_conn, *_border1_ring_pair_items(first_id, second_id))
+    created = _txn(
+        topology_conn,
+        _insert_without_geometry("surface2", _surface2_props(first_id, second_id)),
+    )
+    surface_id = created["items"][0]["id"]
+
+    report = _txn(
+        topology_conn,
+        _update_with_geometry(
+            "border1",
+            first_id,
+            _OPEN_SHARED_LINE_GEOM,
+            {"identifikasjon": {"lokalid": first_id}},
+        ),
+    )
+
+    _assert_geometry_failure(
+        report,
+        (
+            _footprint_geometry_finding(
+                "surface2",
+                surface_id,
+                "boundary_does_not_close",
+                counts=(2, 2),
+            ),
+        ),
+    )
+    assert _stored_geometry_equals(topology_conn, "surface2", surface_id, _RING_POLYGON)
+
+
+def test_shared_curve_update_refreshes_both_stored_footprints(topology_conn, borders):
+    shared_id = _new_id()
+    surface2_tail_id = _new_id()
+    report = _txn(
+        topology_conn,
+        _insert(
+            "border1",
+            _LINE_GEOM,
+            {"identifikasjon": {"lokalid": shared_id}},
+            fid=shared_id,
+        ),
+        _insert(
+            "border1",
+            _LINE_GEOM_ALT,
+            {"identifikasjon": {"lokalid": surface2_tail_id}},
+            fid=surface2_tail_id,
+        ),
+        _insert_without_geometry(
+            "surface",
+            _surface_props(outer=(shared_id,), shared=(borders["b2_lokalid"],)),
+        ),
+        _insert_without_geometry(
+            "surface2",
+            _surface2_props(shared_id, surface2_tail_id),
+        ),
+    )
+    surface_id = report["items"][2]["id"]
+    surface2_id = report["items"][3]["id"]
+
+    updated = _txn(
+        topology_conn,
+        _update_with_geometry(
+            "border1",
+            shared_id,
+            _LINE_GEOM_WIDER,
+            {"identifikasjon": {"lokalid": shared_id}},
+        ),
+    )
+
+    assert updated["committed"] is True
+    assert _stored_geometry_equals(
+        topology_conn, "surface", surface_id, _WIDER_RING_POLYGON
+    )
+    assert _stored_geometry_equals(
+        topology_conn, "surface2", surface2_id, _WIDER_RING_POLYGON
+    )
+
+
+def test_optional_boundary_with_no_members_stores_null_geometry(topology_conn):
+    report = _txn(topology_conn, _insert_without_geometry("surface2", {}))
+    surface_id = report["items"][0]["id"]
+
+    stored_json, geometry_type, part_count = _stored_geometry_meta(
+        topology_conn, "surface2", surface_id
+    )
+    assert stored_json is None
+    assert geometry_type is None
+    assert part_count is None
+
+
+def test_disjoint_rings_surface_stores_two_part_multipolygon(db):
+    case = _case_disjoint_rings_allowed_on_surface2()
+    dataset = case.raw["name"]
+    with _topology_case_conn(db, case.raw) as conn:
+        setup = _txn(conn, *case.setup_items, dataset=dataset)
+        _assert_structure_clean_commit(setup, len(case.setup_items))
+
+        report = _txn(conn, *case.tx_items, dataset=dataset)
+        _assert_structure_clean_commit(report, len(case.tx_items))
+
+        surface_id = report["items"][0]["id"]
+        stored_json, geometry_type, part_count = _stored_geometry_meta(
+            conn, "surface2", surface_id, dataset=dataset
+        )
+        assert stored_json is not None
+        assert geometry_type == "MULTIPOLYGON"
+        assert part_count == 2
+        assert _stored_geometry_equals(
+            conn, "surface2", surface_id, _TWO_RINGS_MULTIPOLYGON, dataset=dataset
+        )
+
+
+def test_three_collection_ring_stores_built_geometry(db):
+    case = _case_three_collection_ring_is_valid()
+    dataset = case.raw["name"]
+    with _topology_case_conn(db, case.raw) as conn:
+        setup = _txn(conn, *case.setup_items, dataset=dataset)
+        _assert_structure_clean_commit(setup, len(case.setup_items))
+
+        report = _txn(conn, *case.tx_items, dataset=dataset)
+        _assert_structure_clean_commit(report, len(case.tx_items))
+
+        surface_id = report["items"][0]["id"]
+        assert _stored_geometry_equals(
+            conn, "surface", surface_id, _RING_POLYGON, dataset=dataset
+        )
+
+
 def test_update_leaves_unnamed_properties_intact(topology_conn, borders):
     """PATCH: a property absent from the document keeps its existing rows.
 
@@ -2106,7 +2382,6 @@ def test_write_read_replace_roundtrip_keeps_links(topology_conn, borders):
             "id": surface_id,
             "feature": {
                 "type": "Feature",
-                "geometry": before["geometry"],
                 "properties": before["properties"],
             },
         },
@@ -2372,10 +2647,13 @@ def test_structural_checks_one_of_and_when_valid_cases_commit_cleanly(db, case_b
 
 
 def _replace_footprint_verdict_with_raise(conn, dataset, function_name):
+    signature = "(fid uuid)"
+    if function_name.endswith("_geometry_verdict"):
+        signature = "(fid uuid, measure topogdb.footprint_measure)"
     conn.execute(
         psycopg.sql.SQL(
             """
-create or replace function {}.{}(fid uuid)
+create or replace function {}.{}{}
 returns jsonb language plpgsql stable as $f$
 begin
     raise exception 'sabotage' using errcode = 'XX000';
@@ -2385,6 +2663,7 @@ $f$
         ).format(
             psycopg.sql.Identifier(dataset),
             psycopg.sql.Identifier(function_name),
+            psycopg.sql.SQL(signature),
         )
     )
 
@@ -2517,7 +2796,11 @@ def test_transaction_report_always_includes_top_level_sqlstate(db):
         rejected = _txn(
             conn,
             _insert(
-                "surface2", _POLYGON_GEOM, _surface2_props(rejected_id), fid=_new_id()
+                "surface2",
+                _POLYGON_GEOM,
+                _surface2_props(rejected_id),
+                fid=_new_id(),
+                keep_geometry=True,
             ),
             dataset="topology",
         )

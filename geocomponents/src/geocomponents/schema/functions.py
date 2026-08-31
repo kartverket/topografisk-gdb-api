@@ -369,34 +369,7 @@ $q$,
         if touched_features <> '[]'::jsonb then
             phase := 'geometry';
             execute format(
-                $q$
-with touched_rows as (
-    select collection, id
-    from jsonb_to_recordset($1)
-         as t(item_index int, action text, collection text, id uuid)
-), touched_sets as (
-    select collection, array_agg(distinct id order by id) as ids
-    from touched_rows
-    group by collection
-), reverse_surfaces as (
-    select distinct s.collection, s.id
-    from touched_sets t
-    cross join lateral %1$I._sources_using(t.collection, t.ids) s
-), dirty_surfaces as (
-    select distinct collection, id from touched_rows
-    union
-    select collection, id from reverse_surfaces
-), verdicts as (
-    select d.collection,
-           d.id,
-           %1$I._footprint_geometry_verdict(d.collection, d.id) as verdict
-    from dirty_surfaces d
-)
-select coalesce(jsonb_agg(verdict order by collection, id), '[]'::jsonb)
-from verdicts
-where verdict is not null
-  and (verdict->>'valid')::boolean is false
-$q$,
+                'select %1$I._apply_dirty_footprints($1)',
                 dataset)
                 into geometry_findings using touched_features;
         end if;
@@ -703,8 +676,25 @@ def _enum_checks(writable: list[ColumnPlan], *, guarded_by_presence: bool) -> li
     return checks
 
 
-def _geom_checks(table: TablePlan, *, guarded_by_presence: bool) -> list[str]:
+def _derived_geometry_guard(plan: CollectionPlan) -> str:
+    if plan.derived is None:
+        raise ValueError("derived geometry guard requires a derived collection")
+    props = ", ".join(
+        _quote_key(role.property) for role in _derived_roles(plan.derived)
+    )
+    return (
+        "  if feature ? 'geometry' then\n"
+        f"    raise exception 'collection {plan.collection_name}: geometry is derived from boundary properties {props}; omit geometry' using errcode = 'P0001';\n"
+        "  end if;"
+    )
+
+
+def _geom_checks(plan: CollectionPlan, *, guarded_by_presence: bool) -> list[str]:
     """IF blocks that raise P0001 when geometry is missing, invalid, or non-simple."""
+    if plan.derived is not None:
+        return [_derived_geometry_guard(plan)]
+
+    table = plan.table
     checks: list[str] = []
     # nullable null check
     if table.geometry.nullable:
@@ -734,6 +724,28 @@ def _geom_checks(table: TablePlan, *, guarded_by_presence: bool) -> list[str]:
         f"  end if;"
     )
     return checks
+
+
+def _geometry_insert_value(plan: CollectionPlan) -> str:
+    if plan.derived is not None:
+        return "null"
+    return _geom_from_feature(plan.table)
+
+
+def _geometry_replace_value(plan: CollectionPlan) -> str:
+    if plan.derived is not None:
+        return "null"
+    return _geom_from_feature(plan.table)
+
+
+def _geometry_update_value(plan: CollectionPlan) -> str:
+    t = plan.table
+    if plan.derived is not None:
+        return "null"
+    return (
+        f"case when feature ? 'geometry' "
+        f'then {_geom_from_feature(t)} else "{t.geometry.name}" end'
+    )
 
 
 # ==========================================================================
@@ -970,6 +982,87 @@ language sql stable as $func$
 $func$"""
 
 
+def _fn_footprint_measure(plan: CollectionPlan, derived: DerivedPlan) -> str:
+    return f"""\
+create or replace function {plan.table.schema}._{plan.collection_name}_footprint_measure(fid uuid)
+returns topogdb.footprint_measure language plpgsql stable as $func$
+declare
+    measure topogdb.footprint_measure;
+    linework geometry;
+    facts topogdb.footprint_facts;
+begin
+    measure.row_exists := false;
+    measure.members := 0;
+    measure.included := 0;
+    measure.linework_simple := true;
+    measure.footprint := null;
+    measure.areas := 0;
+    measure.holes := 0;
+    measure.curves_all_used := true;
+    measure.unused := '[]'::jsonb;
+
+    select exists(
+        select 1
+        from {plan.table.qualified} t
+        where t."{plan.table.id_column}" = fid
+    ) into measure.row_exists;
+
+    if not measure.row_exists then
+        return measure;
+    end if;
+
+    select count(*)::int,
+           count(*) filter (where included)::int
+    into measure.members, measure.included
+    from {plan.table.schema}._{plan.collection_name}_footprint_members(fid);
+
+    if measure.included = 0 then
+        return measure;
+    end if;
+
+    select ST_Collect(part.geom)
+    into linework
+    from (
+        select (ST_Dump(m.geom)).geom as geom
+        from {plan.table.schema}._{plan.collection_name}_footprint_members(fid) m
+        where m.included
+          and m.geom is not null
+    ) part;
+
+    measure.linework_simple := coalesce(ST_IsSimple(linework), true);
+    if not measure.linework_simple then
+        return measure;
+    end if;
+
+    facts := topogdb.build_footprint(linework);
+    measure.areas := (facts).areas;
+    measure.holes := (facts).holes;
+    measure.curves_all_used := (facts).curves_all_used;
+
+    if (facts).footprint is not null and not ST_IsEmpty((facts).footprint) then
+        measure.footprint := (facts).footprint;
+    end if;
+
+    if not measure.curves_all_used then
+        select coalesce(
+            jsonb_agg(
+                jsonb_build_object(
+                    'collection', target_collection,
+                    'id', target_id::text)
+                order by target_collection, target_id),
+            '[]'::jsonb)
+        into measure.unused
+        from {plan.table.schema}._{plan.collection_name}_footprint_members(fid)
+        where included
+          and geom is not null
+          and not ST_CoveredBy(ST_Force2D(geom), ST_Boundary((facts).footprint));
+    end if;
+
+    return measure;
+end;
+$func$"""
+
+
 def _fn_footprint_structure_verdict(plan: CollectionPlan, derived: DerivedPlan) -> str:
 
     roles_by_property = {role.property: role for role in _derived_roles(derived)}
@@ -1125,142 +1218,103 @@ def _fn_footprint_geometry_verdict(plan: CollectionPlan, derived: DerivedPlan) -
     areas_restricted = derived.areas == "one"
     holes_restricted = derived.holes == "forbidden"
     areas_check = (
-        f"""    if (facts).areas > 1 then
+        f"""    if (measure).areas > 1 then
         return jsonb_build_object(
             'valid', false,
             'collection', '{_quote_key(plan.collection_name)}',
             'id', fid::text,
             'rule', '{_quote_key(derived.rule)}',
             'reason', 'multiple_disjoint_areas',
-            'members', member_count,
-            'included', included_count,
-            'areas', (facts).areas,
-            'holes', (facts).holes,
-            'details', jsonb_build_object('areas', (facts).areas));
+            'members', (measure).members,
+            'included', (measure).included,
+            'areas', (measure).areas,
+            'holes', (measure).holes,
+            'details', jsonb_build_object('areas', (measure).areas));
     end if;
 """
         if areas_restricted
         else ""
     )
     holes_check = (
-        f"""    if (facts).holes > 0 then
+        f"""    if (measure).holes > 0 then
         return jsonb_build_object(
             'valid', false,
             'collection', '{_quote_key(plan.collection_name)}',
             'id', fid::text,
             'rule', '{_quote_key(derived.rule)}',
             'reason', 'holes_not_allowed',
-            'members', member_count,
-            'included', included_count,
-            'areas', (facts).areas,
-            'holes', (facts).holes,
-            'details', jsonb_build_object('holes', (facts).holes));
+            'members', (measure).members,
+            'included', (measure).included,
+            'areas', (measure).areas,
+            'holes', (measure).holes,
+            'details', jsonb_build_object('holes', (measure).holes));
     end if;
 """
         if holes_restricted
         else ""
     )
     return f"""\
-create or replace function {plan.table.schema}._{plan.collection_name}_footprint_geometry_verdict(fid uuid)
+create or replace function {plan.table.schema}._{plan.collection_name}_footprint_geometry_verdict(fid uuid, measure topogdb.footprint_measure)
 returns jsonb language plpgsql stable as $func$
-declare
-    member_count int := 0;
-    included_count int := 0;
-    linework geometry;
-    facts topogdb.footprint_facts;
-    unused jsonb := '[]'::jsonb;
 begin
-    if not exists(
-        select 1
-        from {plan.table.qualified} t
-        where t."{plan.table.id_column}" = fid
-    ) then
+    if not (measure).row_exists then
         return null;
     end if;
 
-    select count(*)::int,
-           count(*) filter (where included)::int
-    into member_count, included_count
-    from {plan.table.schema}._{plan.collection_name}_footprint_members(fid);
-
-    if included_count = 0 then
+    if (measure).included = 0 then
         return jsonb_build_object(
             'valid', true,
             'collection', '{_quote_key(plan.collection_name)}',
             'id', fid::text,
             'rule', '{_quote_key(derived.rule)}',
             'reason', null,
-            'members', member_count,
-            'included', included_count,
+            'members', (measure).members,
+            'included', (measure).included,
             'areas', 0,
             'holes', 0,
             'details', '{{}}'::jsonb);
     end if;
 
-    select ST_Collect(part.geom)
-    into linework
-    from (
-                select (ST_Dump(m.geom)).geom as geom
-        from {plan.table.schema}._{plan.collection_name}_footprint_members(fid) m
-        where m.included
-          and m.geom is not null
-    ) part;
-
-    if not ST_IsSimple(linework) then
+    if not (measure).linework_simple then
         return jsonb_build_object(
             'valid', false,
             'collection', '{_quote_key(plan.collection_name)}',
             'id', fid::text,
             'rule', '{_quote_key(derived.rule)}',
             'reason', 'nonsimple_boundary',
-            'members', member_count,
-            'included', included_count,
+            'members', (measure).members,
+            'included', (measure).included,
             'areas', 0,
             'holes', 0,
             'details', '{{}}'::jsonb);
     end if;
 
-    facts := topogdb.build_footprint(linework);
-
-    if (facts).footprint is null or ST_IsEmpty((facts).footprint) then
+    if (measure).footprint is null then
         return jsonb_build_object(
             'valid', false,
             'collection', '{_quote_key(plan.collection_name)}',
             'id', fid::text,
             'rule', '{_quote_key(derived.rule)}',
             'reason', 'boundary_does_not_close',
-            'members', member_count,
-            'included', included_count,
-            'areas', (facts).areas,
-            'holes', (facts).holes,
+            'members', (measure).members,
+            'included', (measure).included,
+            'areas', (measure).areas,
+            'holes', (measure).holes,
             'details', '{{}}'::jsonb);
     end if;
 
-    if not (facts).curves_all_used then
-        select coalesce(
-            jsonb_agg(
-                jsonb_build_object(
-                    'collection', target_collection,
-                    'id', target_id::text)
-                order by target_collection, target_id),
-            '[]'::jsonb)
-        into unused
-        from {plan.table.schema}._{plan.collection_name}_footprint_members(fid)
-        where included
-          and geom is not null
-          and not ST_CoveredBy(ST_Force2D(geom), ST_Boundary((facts).footprint));
-
+    if not (measure).curves_all_used then
         return jsonb_build_object(
             'valid', false,
             'collection', '{_quote_key(plan.collection_name)}',
             'id', fid::text,
             'rule', '{_quote_key(derived.rule)}',
             'reason', 'unused_boundary_line',
-            'members', member_count,
-            'included', included_count,
-            'areas', (facts).areas,
-            'holes', (facts).holes,
-            'details', jsonb_build_object('unused', unused));
+            'members', (measure).members,
+            'included', (measure).included,
+            'areas', (measure).areas,
+            'holes', (measure).holes,
+            'details', jsonb_build_object('unused', coalesce((measure).unused, '[]'::jsonb)));
     end if;
 {areas_check}{holes_check}
     return jsonb_build_object(
@@ -1269,10 +1323,10 @@ begin
         'id', fid::text,
         'rule', '{_quote_key(derived.rule)}',
         'reason', null,
-        'members', member_count,
-        'included', included_count,
-        'areas', (facts).areas,
-        'holes', (facts).holes,
+        'members', (measure).members,
+        'included', (measure).included,
+        'areas', (measure).areas,
+        'holes', (measure).holes,
         'details', '{{}}'::jsonb);
 end;
 $func$"""
@@ -1285,24 +1339,91 @@ def _fn_footprint_geometry_verdict_dispatch(plan: SchemaPlan) -> str:
     if not derived_collections:
         return f"""\
 create or replace function {plan.schema_name}._footprint_geometry_verdict(collection text, fid uuid)
-returns jsonb language sql stable as $func$
-    select null::jsonb;
+returns table (verdict jsonb, footprint geometry) language sql stable as $func$
+    select null::jsonb as verdict, null::geometry as footprint;
 $func$"""
 
     branches = "\n".join(
-        f"    when '{_quote_key(coll.collection_name)}' then return {plan.schema_name}._{coll.collection_name}_footprint_geometry_verdict(fid);"
+        f"    when '{_quote_key(coll.collection_name)}' then\n"
+        f"      measure := {plan.schema_name}._{coll.collection_name}_footprint_measure(fid);\n"
+        f"      return query select {plan.schema_name}._{coll.collection_name}_footprint_geometry_verdict(fid, measure), (measure).footprint;"
         for coll in derived_collections
     )
     return f"""\
 create or replace function {plan.schema_name}._footprint_geometry_verdict(collection text, fid uuid)
-returns jsonb language plpgsql stable as $func$
+returns table (verdict jsonb, footprint geometry) language plpgsql stable as $func$
+declare
+  measure topogdb.footprint_measure;
 begin
   case collection
 {branches}
     else
-      return null;
+      return query select null::jsonb, null::geometry;
   end case;
 end;
+$func$"""
+
+
+def _fn_apply_dirty_footprints(plan: SchemaPlan) -> str:
+    derived_collections = [
+        coll for coll in plan.collections if coll.derived is not None
+    ]
+    if not derived_collections:
+        return f"""\
+create or replace function {plan.schema_name}._apply_dirty_footprints(touched jsonb)
+returns jsonb language sql as $func$
+    select '[]'::jsonb;
+$func$"""
+
+    updates = ",\n".join(
+        f"""updated_{coll.collection_name} as (
+    update {plan.schema_name}.{coll.collection_name} t
+       set \"{coll.geometry_field}\" = measured.footprint
+      from measured
+      cross join invalid
+     where invalid.findings = '[]'::jsonb
+       and measured.collection = '{_quote_key(coll.collection_name)}'
+       and measured.verdict is not null
+       and t.\"{coll.id_field}\" = measured.id
+    returning 1
+)"""
+        for coll in derived_collections
+    )
+    return f"""\
+create or replace function {plan.schema_name}._apply_dirty_footprints(touched jsonb)
+returns jsonb language sql as $func$
+with touched_rows as (
+    select collection, id
+    from jsonb_to_recordset(touched)
+         as t(item_index int, action text, collection text, id uuid)
+), touched_sets as (
+    select collection, array_agg(distinct id order by id) as ids
+    from touched_rows
+    group by collection
+), reverse_surfaces as (
+    select distinct s.collection, s.id
+    from touched_sets t
+    cross join lateral {plan.schema_name}._sources_using(t.collection, t.ids) s
+), dirty_surfaces as (
+    select distinct collection, id from touched_rows
+    union
+    select collection, id from reverse_surfaces
+), measured as (
+    select d.collection,
+           d.id,
+           g.verdict,
+           g.footprint
+    from dirty_surfaces d
+    cross join lateral {plan.schema_name}._footprint_geometry_verdict(d.collection, d.id) g
+), invalid as (
+    select coalesce(jsonb_agg(verdict order by collection, id), '[]'::jsonb) as findings
+    from measured
+    where verdict is not null
+      and (verdict->>'valid')::boolean is false
+),
+{updates}
+select findings
+from invalid;
 $func$"""
 
 
@@ -1414,13 +1535,13 @@ def _fn_create(plan: CollectionPlan) -> str:
         oi_resolve = ""
         id_val = "coalesce((feature->>'id')::uuid, gen_random_uuid())"
     vals = ", ".join(
-        [id_val, _geom_from_feature(t)]
+        [id_val, _geometry_insert_value(plan)]
         + [_prop_read(c) for c in writable]
         + [c.server_write_expr for c in sw]
     )
     validations = [
         *_enum_checks(writable, guarded_by_presence=False),
-        *_geom_checks(t, guarded_by_presence=False),
+        *_geom_checks(plan, guarded_by_presence=False),
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""
     roles = plan.roles
@@ -1480,7 +1601,7 @@ def _fn_upsert(plan: CollectionPlan) -> str:
         oi_resolve = ""
         id_val = "coalesce((feature->>'id')::uuid, gen_random_uuid())"
     vals = ", ".join(
-        [id_val, _geom_from_feature(t)]
+        [id_val, _geometry_insert_value(plan)]
         + [_prop_read(c) for c in writable]
         + [c.server_write_expr for c in sw]
     )
@@ -1491,7 +1612,7 @@ def _fn_upsert(plan: CollectionPlan) -> str:
     set_clause = ",\n      ".join(sets)
     validations = [
         *_enum_checks(writable, guarded_by_presence=False),
-        *_geom_checks(t, guarded_by_presence=False),
+        *_geom_checks(plan, guarded_by_presence=False),
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""
     upsert_guards = _link_upsert_guards(plan.roles)
@@ -1521,14 +1642,14 @@ def _fn_replace(plan: CollectionPlan) -> str:
     roles = plan.roles
     writable = _writable_columns(t)
     sw = _server_write_columns(t)
-    sets = [f'"{t.geometry.name}" = {_geom_from_feature(t)}']
+    sets = [f'"{t.geometry.name}" = {_geometry_replace_value(plan)}']
     sets += [f'"{c.name}" = {_prop_read(c)}' for c in writable]
     sets += [f'"{c.name}" = {c.server_write_expr}' for c in sw]
     sets.append('"updated_at" = now()')
     set_clause = ",\n      ".join(sets)
     validations = [
         *_enum_checks(writable, guarded_by_presence=False),
-        *_geom_checks(t, guarded_by_presence=False),
+        *_geom_checks(plan, guarded_by_presence=False),
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""
     if oi:
@@ -1585,10 +1706,7 @@ def _fn_update(plan: CollectionPlan) -> str:
     roles = plan.roles
     writable = _writable_columns(t)
     sw = _server_write_columns(t)
-    sets = [
-        f"\"{t.geometry.name}\" = case when feature ? 'geometry' "
-        f'then {_geom_from_feature(t)} else "{t.geometry.name}" end'
-    ]
+    sets = [f'"{t.geometry.name}" = {_geometry_update_value(plan)}']
     for c in writable:
         sets.append(
             f"\"{c.name}\" = case when feature->'properties' ? '{_quote_key(c.name)}' "
@@ -1600,7 +1718,7 @@ def _fn_update(plan: CollectionPlan) -> str:
     set_clause = ",\n      ".join(sets)
     validations = [
         *_enum_checks(writable, guarded_by_presence=True),
-        *_geom_checks(t, guarded_by_presence=True),
+        *_geom_checks(plan, guarded_by_presence=True),
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""
     if oi:
@@ -1687,12 +1805,14 @@ def function_statements(plan: SchemaPlan) -> list[str]:
             stmts.append(_fn_associations(coll))
         if coll.derived is not None:
             stmts.append(_fn_footprint_members(coll, coll.derived))
+            stmts.append(_fn_footprint_measure(coll, coll.derived))
             stmts.append(_fn_footprint_structure_verdict(coll, coll.derived))
             stmts.append(_fn_footprint_geometry_verdict(coll, coll.derived))
         for op in coll.functions:
             stmts.append(_BUILDER_BY_OP[op](coll))
     stmts.append(_fn_footprint_structure_verdict_dispatch(plan))
     stmts.append(_fn_footprint_geometry_verdict_dispatch(plan))
+    stmts.append(_fn_apply_dirty_footprints(plan))
     return stmts
 
 

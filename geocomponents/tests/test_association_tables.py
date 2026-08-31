@@ -33,6 +33,7 @@ _POLYGON_GEOM = {
     "type": "MultiPolygon",
     "coordinates": [[[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]],
 }
+_DERIVED_COLLECTIONS = {"surface", "surface2"}
 
 
 # --------------------------------------------------------------------------
@@ -60,11 +61,14 @@ def _txn(conn, *items):
     ).fetchone()[0]
 
 
-def _insert(collection, geom, props):
+def _insert(collection, geom, props, *, keep_geometry=False):
+    feature = {"type": "Feature", "properties": props}
+    if keep_geometry or collection not in _DERIVED_COLLECTIONS:
+        feature["geometry"] = geom
     return {
         "action": "insert",
         "collection": collection,
-        "feature": {"type": "Feature", "geometry": geom, "properties": props},
+        "feature": feature,
     }
 
 
@@ -171,6 +175,18 @@ def test_association_and_role_column_shapes(topology_conn):
     assert _render_column_info(_columns("association")) == _render_column_info(
         _EXPECTED_ASSOC_COLUMNS
     )
+
+
+def test_derived_surface_geometry_columns_are_nullable(topology_conn):
+    rows = topology_conn.execute(
+        "select table_name, is_nullable "
+        "from information_schema.columns "
+        "where table_schema = 'topology' and column_name = 'geometry' "
+        "and table_name in ('surface', 'surface2') "
+        "order by table_name"
+    ).fetchall()
+
+    assert rows == [("surface", "YES"), ("surface2", "YES")]
 
 
 def test_constraints_are_canonical(topology_conn):

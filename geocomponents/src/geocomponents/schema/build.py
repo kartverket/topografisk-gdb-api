@@ -152,7 +152,7 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
         geometry_type=coll.geometry_type,
         srid=coll.srid,
         has_z=coll.has_z,
-        nullable=not coll.geometry_required,  # False when geometry is required
+        nullable=(coll.derived is not None) or (not coll.geometry_required),
     )
     return TablePlan(
         schema=schema,
