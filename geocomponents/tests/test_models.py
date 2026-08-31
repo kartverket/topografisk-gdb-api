@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pytest
 from pydantic import ValidationError
 
@@ -9,6 +11,7 @@ from geocomponents.descriptions.models import (
     CollectionDef,
     DatasetDef,
     FieldDef,
+    GeometryDef,
 )
 
 # ---------------------------------------------------------------------------
@@ -74,6 +77,77 @@ def test_object_field_with_nested_object_parses():
 def test_indexable_on_scalar_field_is_valid():
     fld = FieldDef.model_validate({"name": "f", "type": "string", "indexable": True})
     assert fld.indexable is True
+
+
+@dataclass(frozen=True)
+class DerivedGeometryRejectCase:
+    id: str
+    geometry: dict
+    error_fragment: str
+
+
+DERIVED_GEOMETRY_REJECT_CASES = [
+    DerivedGeometryRejectCase(
+        "unknown-derived-key-is-rejected",
+        {
+            "type": "MultiPolygon",
+            "derived": {
+                "rule": "footprint",
+                "nonesuch": "ignored-never",
+                "one_of": [["boundedByOuter"]],
+            },
+        },
+        "nonesuch",
+    ),
+    DerivedGeometryRejectCase(
+        "one-of-must-not-be-empty",
+        {
+            "type": "MultiPolygon",
+            "derived": {"rule": "footprint", "one_of": []},
+        },
+        "one_of",
+    ),
+    DerivedGeometryRejectCase(
+        "alternatives-must-not-be-empty",
+        {
+            "type": "MultiPolygon",
+            "derived": {"rule": "footprint", "one_of": [[]]},
+        },
+        "one_of",
+    ),
+]
+
+
+def test_geometry_derived_parses_and_normalizes_members():
+    geometry = GeometryDef.model_validate(
+        {
+            "type": "MultiPolygon",
+            "derived": {
+                "rule": "footprint",
+                "one_of": [
+                    [
+                        "boundedByOuter",
+                        {"name": "boundedByFacade", "when": "is_bounding"},
+                    ]
+                ],
+            },
+        }
+    )
+
+    assert geometry.derived is not None
+    assert geometry.derived.rule == "footprint"
+    assert [
+        [(role.name, role.when) for role in alternative]
+        for alternative in geometry.derived.one_of
+    ] == [[("boundedByOuter", None), ("boundedByFacade", "is_bounding")]]
+
+
+@pytest.mark.parametrize(
+    "case", DERIVED_GEOMETRY_REJECT_CASES, ids=lambda case: case.id
+)
+def test_geometry_derived_rejects_invalid_shape(case):
+    with pytest.raises(ValidationError, match=case.error_fragment):
+        GeometryDef.model_validate(case.geometry)
 
 
 # ---------------------------------------------------------------------------

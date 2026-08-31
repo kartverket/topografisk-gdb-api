@@ -113,6 +113,7 @@ def _render_column_info(rows: list[ColumnInfo]) -> str:
 
 _EXPECTED_ROLE_ROWS: list[RoleRow] = [
     RoleRow("surface", "boundedByOuter", "border1"),
+    RoleRow("surface", "boundedByConditional", "border4"),
     RoleRow("surface", "boundedByShared", "border2"),
     RoleRow("surface", "describedByNote", "border3"),
     RoleRow("surface2", "boundedByOuter", "border1"),
@@ -251,6 +252,7 @@ def test_guard_aborts_when_referenced_property_removed(topology_conn, db):
         surface["relationships"] = [
             r for r in surface["relationships"] if r["property"] != "boundedByOuter"
         ]
+        surface["geometry"].pop("derived", None)
         stripped_plan = build_schema_plan(
             resolve_dataset(DatasetDef.model_validate(raw), Commons())
         )

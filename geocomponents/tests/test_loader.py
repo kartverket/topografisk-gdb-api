@@ -1,8 +1,10 @@
 from contextlib import nullcontext
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from geocomponents.descriptions.loader import (
@@ -19,6 +21,9 @@ from geocomponents.descriptions.models import (
 )
 
 DESCRIPTIONS = Path(__file__).resolve().parents[2] / "descriptions"
+TOPOLOGY_FIXTURE = (
+    Path(__file__).resolve().parent / "fixtures" / "topology_fixture.yaml"
+)
 
 
 @dataclass(frozen=True)
@@ -37,6 +42,99 @@ COLLECTION_NAME_CASES = [
     ),
     CollectionNameCase("association-kind-is-allowed", "association_kind", None),
 ]
+
+
+@dataclass(frozen=True)
+class DerivedResolveCase:
+    id: str
+    raw: dict
+    collection_name: str
+    expected: tuple[tuple[tuple[str, str, str | None], ...], ...] | None
+
+
+@dataclass(frozen=True)
+class DerivedRejectCase:
+    id: str
+    raw: dict
+    error_fragment: str
+
+
+def _topology_fixture_raw() -> dict:
+    return yaml.safe_load(TOPOLOGY_FIXTURE.read_text(encoding="utf-8"))
+
+
+def _with_surface_derived(one_of: list[list[object]]) -> dict:
+    raw = deepcopy(_topology_fixture_raw())
+    surface = next(coll for coll in raw["collections"] if coll["name"] == "surface")
+    surface["geometry"]["derived"] = {"rule": "footprint", "one_of": one_of}
+    return raw
+
+
+def _with_border4_when_field(flag_type: str) -> dict:
+    raw = deepcopy(_topology_fixture_raw())
+    border4 = next(coll for coll in raw["collections"] if coll["name"] == "border4")
+    border4["fields"] = [{"name": "is_bounding", "type": flag_type}]
+    return raw
+
+
+DERIVED_RESOLVE_CASES = [
+    DerivedResolveCase(
+        "declared-relationships-resolve",
+        _with_surface_derived([["boundedByOuter", "boundedByShared"]]),
+        "surface",
+        ((("boundedByOuter", "border1", None), ("boundedByShared", "border2", None)),),
+    ),
+    DerivedResolveCase(
+        "when-boolean-field-resolves",
+        _topology_fixture_raw(),
+        "surface",
+        (
+            (("boundedByOuter", "border1", None), ("boundedByShared", "border2", None)),
+            (("boundedByConditional", "border4", "is_bounding"),),
+        ),
+    ),
+    DerivedResolveCase(
+        "derived-is-optional",
+        _topology_fixture_raw(),
+        "surface2",
+        None,
+    ),
+]
+
+
+DERIVED_REJECT_CASES = [
+    DerivedRejectCase(
+        "undeclared-property-is-rejected",
+        _with_surface_derived([["boundedByGhost", "boundedByShared"]]),
+        "boundedByGhost",
+    ),
+    DerivedRejectCase(
+        "unknown-when-field-is-rejected",
+        _with_surface_derived(
+            [
+                [
+                    {"name": "boundedByConditional", "when": "missing_flag"},
+                    "boundedByShared",
+                ]
+            ]
+        ),
+        "missing_flag",
+    ),
+    DerivedRejectCase(
+        "non-boolean-when-field-is-rejected",
+        _with_border4_when_field("string"),
+        "is_bounding",
+    ),
+]
+
+
+def _derived_shape(coll) -> tuple[tuple[tuple[str, str, str | None], ...], ...] | None:
+    if coll.derived is None:
+        return None
+    return tuple(
+        tuple((role.property, role.target, role.when_field) for role in alternative)
+        for alternative in coll.derived.one_of
+    )
 
 
 def test_commons_base_field_is_inherited_by_every_collection():
@@ -87,6 +185,52 @@ def test_relationship_to_unknown_collection_raises():
         }
     )
     with pytest.raises(DescriptionError, match="unknown collection 'ghost'"):
+        resolve_dataset(dataset, Commons())
+
+
+@pytest.mark.parametrize("geometry_type", ["LineString", "Point"])
+def test_footprint_derived_geometry_requires_multipolygon(geometry_type, tmp_path):
+    path = tmp_path / "bad-derived.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "name": "x",
+                "collections": [
+                    {
+                        "name": "surface",
+                        "geometry": {
+                            "type": geometry_type,
+                            "derived": {
+                                "rule": "footprint",
+                                "one_of": [["boundedByOuter"]],
+                            },
+                        },
+                        "relationships": [
+                            {"property": "boundedByOuter", "target": "border"}
+                        ],
+                    },
+                    {"name": "border", "geometry": {"type": "LineString"}},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(DescriptionError, match="MultiPolygon"):
+        load_dataset(path)
+
+
+@pytest.mark.parametrize("case", DERIVED_RESOLVE_CASES, ids=lambda case: case.id)
+def test_collection_derived_resolves(case):
+    resolved = resolve_dataset(DatasetDef.model_validate(case.raw), Commons())
+    coll = next(c for c in resolved.collections if c.name == case.collection_name)
+    assert _derived_shape(coll) == case.expected
+
+
+@pytest.mark.parametrize("case", DERIVED_REJECT_CASES, ids=lambda case: case.id)
+def test_collection_derived_rejects_invalid_resolution(case):
+    dataset = DatasetDef.model_validate(case.raw)
+    with pytest.raises(DescriptionError, match=case.error_fragment):
         resolve_dataset(dataset, Commons())
 
 

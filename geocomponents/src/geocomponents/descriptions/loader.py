@@ -10,6 +10,7 @@ needs to emit YAML that parses into the raw models here.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -24,6 +25,8 @@ from geocomponents.descriptions.models import (
     FieldType,
     ResolvedCollection,
     ResolvedDataset,
+    ResolvedDerivedDef,
+    ResolvedDerivedRole,
     ResolvedField,
     ResolvedRelationship,
 )
@@ -35,6 +38,15 @@ class DescriptionError(ValueError):
 
 
 _RESERVED_COLLECTION_NAMES = frozenset({"association", "association_role"})
+
+
+@dataclass(frozen=True)
+class PreparedCollection:
+    collection: CollectionDef
+    where: str
+    fields: tuple[ResolvedField, ...]
+    upsert_field: str | None
+    upsert_path: str | None
 
 
 def _read_yaml(path: Path) -> dict:
@@ -206,6 +218,79 @@ def _resolved_upsert_field(
     return None
 
 
+def _resolve_relationships(
+    coll: CollectionDef,
+    collection_names: set[str],
+    *,
+    where: str,
+) -> tuple[ResolvedRelationship, ...]:
+    resolved_rels: list[ResolvedRelationship] = []
+    for rel in coll.relationships:
+        if rel.target not in collection_names:
+            raise DescriptionError(
+                f"{where}: relationship '{rel.property}' targets unknown "
+                f"collection '{rel.target}' (cross-dataset refs not allowed)"
+            )
+        resolved_rels.append(ResolvedRelationship(rel.property, rel.target))
+    return tuple(resolved_rels)
+
+
+def _resolve_derived(
+    coll: CollectionDef,
+    relationships: tuple[ResolvedRelationship, ...],
+    resolved_fields_by_collection: dict[str, tuple[ResolvedField, ...]],
+    *,
+    where: str,
+) -> ResolvedDerivedDef | None:
+    derived = coll.geometry.derived
+    if derived is None:
+        return None
+
+    relationships_by_property = {rel.property: rel for rel in relationships}
+    resolved_alternatives: list[tuple[ResolvedDerivedRole, ...]] = []
+    for alternative in derived.one_of:
+        resolved_roles: list[ResolvedDerivedRole] = []
+        for role in alternative:
+            relationship = relationships_by_property.get(role.name)
+            if relationship is None:
+                raise DescriptionError(
+                    f"{where}: derived property '{role.name}' is not a declared "
+                    "relationship"
+                )
+
+            when_field = None
+            if role.when is not None:
+                target_fields = resolved_fields_by_collection[relationship.target]
+                target_field = next(
+                    (field for field in target_fields if field.name == role.when),
+                    None,
+                )
+                if target_field is None:
+                    raise DescriptionError(
+                        f"{where}: derived property '{role.name}' names unknown "
+                        f"when field '{role.when}' on target collection "
+                        f"'{relationship.target}'"
+                    )
+                if target_field.sql_type != "boolean":
+                    raise DescriptionError(
+                        f"{where}: derived property '{role.name}' names non-boolean "
+                        f"when field '{role.when}' on target collection "
+                        f"'{relationship.target}'"
+                    )
+                when_field = target_field.name
+
+            resolved_roles.append(
+                ResolvedDerivedRole(
+                    property=role.name,
+                    target=relationship.target,
+                    when_field=when_field,
+                )
+            )
+        resolved_alternatives.append(tuple(resolved_roles))
+
+    return ResolvedDerivedDef(rule=derived.rule, one_of=tuple(resolved_alternatives))
+
+
 def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
     types = {t.name: t for t in commons.field_types}
     # Dataset-local codelists take precedence over commons codelists.
@@ -220,6 +305,8 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
             f"{sorted(unknown_processes)} (known: {sorted(known_process_ids())})"
         )
 
+    prepared_collections: list[PreparedCollection] = []
+    resolved_fields_by_collection: dict[str, tuple[ResolvedField, ...]] = {}
     resolved_collections: list[ResolvedCollection] = []
     for coll in dataset.collections:
         where = f"dataset '{dataset.name}' / collection '{coll.name}'"
@@ -284,31 +371,47 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
             else None
         )
 
-        resolved_rels: list[ResolvedRelationship] = []
-        for rel in coll.relationships:
-            if rel.target not in collection_names:
-                raise DescriptionError(
-                    f"{where}: relationship '{rel.property}' targets unknown "
-                    f"collection '{rel.target}' (cross-dataset refs not allowed)"
-                )
-            resolved_rels.append(ResolvedRelationship(rel.property, rel.target))
-
-        resolved_collections.append(
-            ResolvedCollection(
-                name=coll.name,
-                title=coll.title or coll.name.replace("_", " ").title(),
-                description=coll.description or "",
-                feature_model=coll.feature_model,
-                geometry_type=coll.geometry.type,
-                srid=coll.geometry.srid,
-                has_z=coll.geometry.has_z,
-                geometry_required=coll.geometry.required,
+        resolved_fields_by_collection[coll.name] = resolved_tuple
+        prepared_collections.append(
+            PreparedCollection(
+                collection=coll,
+                where=where,
                 fields=resolved_tuple,
-                relationships=tuple(resolved_rels),
                 upsert_field=resolved_upsert_field,
                 upsert_path=upsert_path,
-                outward_identifier_path=coll.outward_identifier,
-                server_managed_paths=dict(coll.server_managed),
+            )
+        )
+
+    for prepared in prepared_collections:
+        resolved_rels = _resolve_relationships(
+            prepared.collection,
+            collection_names,
+            where=prepared.where,
+        )
+        resolved_derived = _resolve_derived(
+            prepared.collection,
+            resolved_rels,
+            resolved_fields_by_collection,
+            where=prepared.where,
+        )
+        resolved_collections.append(
+            ResolvedCollection(
+                name=prepared.collection.name,
+                title=prepared.collection.title
+                or prepared.collection.name.replace("_", " ").title(),
+                description=prepared.collection.description or "",
+                feature_model=prepared.collection.feature_model,
+                geometry_type=prepared.collection.geometry.type,
+                srid=prepared.collection.geometry.srid,
+                has_z=prepared.collection.geometry.has_z,
+                geometry_required=prepared.collection.geometry.required,
+                fields=prepared.fields,
+                relationships=resolved_rels,
+                derived=resolved_derived,
+                upsert_field=prepared.upsert_field,
+                upsert_path=prepared.upsert_path,
+                outward_identifier_path=prepared.collection.outward_identifier,
+                server_managed_paths=dict(prepared.collection.server_managed),
             )
         )
 
