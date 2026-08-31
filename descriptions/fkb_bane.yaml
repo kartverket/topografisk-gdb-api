@@ -3,6 +3,7 @@ title: FKB-Bane
 description: FKB-Bane 5.0
 processes:
   - upsert-batch
+  - transaction-batch-upsert
   - import
 
 collections:

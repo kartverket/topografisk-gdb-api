@@ -3,6 +3,7 @@ title: outward_identifier (OI) Contract Test
 description: Fixture for outward-identifier-is-the-id contract tests.
 processes:
   - upsert-batch
+  - transaction-batch-upsert
 
 collections:
   - name: with_oi

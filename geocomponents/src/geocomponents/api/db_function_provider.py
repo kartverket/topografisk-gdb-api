@@ -62,6 +62,14 @@ def _as_feature_list(items) -> list[dict]:
     return [_as_feature_dict(item) for item in items]
 
 
+def _as_object_dict(item, *, name: str) -> dict:
+    if isinstance(item, (bytes, bytearray, str)):
+        item = orjson.loads(item)
+    if not isinstance(item, dict):
+        raise ProviderQueryError(f"{name} must be a JSON object")
+    return item
+
+
 def _example_geometry(geometry_type: str) -> dict:
     """A small valid example geometry so the docs show real coordinates.
 
@@ -257,6 +265,15 @@ class DbFunctionProvider(BaseProvider):
                 (self.dataset, self.collection, orjson.dumps(features).decode()),
             )
             return [str(identifier) for (identifier,) in cur.fetchall()]
+
+    def transaction(self, document) -> dict:
+        payload = _as_object_dict(document, name="transaction document")
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "select ogc.transaction(%s, %s)",
+                (self.dataset, orjson.dumps(payload).decode()),
+            )
+            return cur.fetchone()[0]
 
     def update(self, identifier, item) -> bool:
         # OGC PUT == full replace.

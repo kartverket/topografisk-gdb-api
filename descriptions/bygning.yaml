@@ -3,6 +3,7 @@ title: Bygning
 description: Bygningsobjekter fra FKB-Bygning.
 processes:
   - upsert-batch
+  - transaction-batch-upsert
   - import
 
 collections:

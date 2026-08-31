@@ -158,7 +158,7 @@ def _process_resource(dataset: ResolvedDataset, process_id: str, dsn: str) -> di
             "dataset_title": dataset.title,
         },
     }
-    if process_id == "upsert-batch":
+    if process_id in {"upsert-batch", "transaction-batch-upsert"}:
         provider_defs = {
             coll.name: _collection_resource(dataset.name, coll, dsn)["providers"][0]
             for coll in dataset.collections

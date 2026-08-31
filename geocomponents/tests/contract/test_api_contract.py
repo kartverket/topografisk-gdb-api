@@ -467,6 +467,46 @@ def test_fkb_bane_batch_upsert_process_executes(client):
     assert len(payload["features"]) == 1
 
 
+def test_fkb_bane_transaction_batch_upsert_process_executes(client):
+    fid = str(uuid.UUID(int=0xBA7D))
+    r = client.post(
+        f"{_api('fkb_bane')}/processes/transaction-batch-upsert/execution",
+        content=orjson.dumps(
+            {
+                "inputs": {
+                    "collection": "jernbaneplattformkant",
+                    "features": [
+                        {
+                            "id": fid,
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "MultiLineString",
+                                "coordinates": [[[100020, 7000020], [100030, 7000030]]],
+                            },
+                            "properties": {
+                                "identifikasjon": {
+                                    "lokalid": fid,
+                                    "navnerom": "test",
+                                },
+                                "oppdateringsdato": "2026-08-05T12:00:00Z",
+                                "datafangstdato": "2026-08-05T12:00:00Z",
+                                "kvalitet": {"datafangstmetode": "fot"},
+                                "medium": "T",
+                            },
+                        }
+                    ],
+                }
+            }
+        ).decode(),
+        headers={"content-type": "application/json"},
+    )
+    assert r.status_code == HTTPStatus.OK
+    payload = r.json()
+    assert payload["collection"] == "jernbaneplattformkant"
+    assert payload["total"] == 1
+    assert payload["features"] == [{"id": fid}]
+
+
 # ===========================================================================
 # POST /items media-type discipline (Comment 6)
 # ===========================================================================

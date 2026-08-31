@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from gcimport.app import create_app
 from gcimport.config import Settings
-from gcimport.importer import prepare_document
+from gcimport.importer import USE_TRANSACTION_BATCH_UPSERT, prepare_document
 from gcimport.profiles import ImportProfile
 from gcimport.profiles.bygning import (
     _AREA_SOURCE_OBJTYPES as _BUILDING_AREA_SOURCE_OBJTYPES,
@@ -35,13 +35,25 @@ def _batch_payload(request: httpx2.Request) -> dict[str, Any]:
     return json.loads(request.content)
 
 
+def _expected_batch_process_id() -> str:
+    return (
+        "transaction-batch-upsert" if USE_TRANSACTION_BATCH_UPSERT else "upsert-batch"
+    )
+
+
+def _expected_batch_path(dataset: str) -> str:
+    return f"/datasets/{dataset}/ogc_api/processes/{_expected_batch_process_id()}/execution"
+
+
 def _assert_batch_request(
     request: httpx2.Request,
     *,
     collection: str,
 ) -> dict[str, Any]:
     payload = _batch_payload(request)
-    assert request.url.path.endswith("/processes/upsert-batch/execution")
+    assert request.url.path.endswith(
+        f"/processes/{_expected_batch_process_id()}/execution"
+    )
     assert payload["inputs"]["collection"] == collection
     assert payload["response"] == "raw"
     return payload
@@ -801,8 +813,8 @@ def test_imports_place_and_fallback_geometry() -> None:
         ],
     }
     assert [request.url.path for request in requests] == [
-        "/datasets/fkb_bane/ogc_api/processes/upsert-batch/execution",
-        "/datasets/fkb_bane/ogc_api/processes/upsert-batch/execution",
+        _expected_batch_path("fkb_bane"),
+        _expected_batch_path("fkb_bane"),
     ]
     for request in requests:
         assert request.headers["content-type"] == "application/json"
@@ -873,7 +885,7 @@ def test_imports_batch_same_collection_features() -> None:
         ],
     }
     assert [request.url.path for request in requests] == [
-        "/datasets/fkb_bane/ogc_api/processes/upsert-batch/execution"
+        _expected_batch_path("fkb_bane")
     ]
 
 
@@ -905,12 +917,12 @@ def test_imports_fail_when_batch_route_is_unavailable() -> None:
         "id": "feature-1",
         "reason": (
             "upstream batch upsert endpoint "
-            "/processes/upsert-batch/execution is unavailable "
+            f"/processes/{_expected_batch_process_id()}/execution is unavailable "
             "(HTTP 404); gcimport requires batch mode"
         ),
     }
     assert [request.url.path for request in requests] == [
-        "/datasets/fkb_bane/ogc_api/processes/upsert-batch/execution",
+        _expected_batch_path("fkb_bane"),
     ]
 
 
@@ -1032,7 +1044,7 @@ def test_imports_built_in_bygning_profile_with_multilinestring() -> None:
         "features": [{"collection": "bygning", "id": PLATFORM_UUID}],
     }
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
+        _expected_batch_path("bygning")
     ]
     payload = _assert_batch_request(requests[0], collection="bygning")
     assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiLineString"
@@ -1068,7 +1080,7 @@ def test_imports_built_in_bygning_omrade_profile_with_multipolygon() -> None:
         "features": [{"collection": "bygning_omrade", "id": PLATFORM_UUID}],
     }
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
+        _expected_batch_path("bygning")
     ]
     payload = _assert_batch_request(requests[0], collection="bygning_omrade")
     assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiPolygon"
@@ -1104,7 +1116,7 @@ def test_imports_built_in_bygning_senterlinje_profile_with_multilinestring() -> 
         "features": [{"collection": "bygning_senterlinje", "id": PLATFORM_UUID}],
     }
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
+        _expected_batch_path("bygning")
     ]
     payload = _assert_batch_request(requests[0], collection="bygning_senterlinje")
     assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiLineString"
@@ -1140,7 +1152,7 @@ def test_imports_built_in_bygning_position_profile_with_point() -> None:
         "features": [{"collection": "bygning_posisjon", "id": PLATFORM_UUID}],
     }
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
+        _expected_batch_path("bygning")
     ]
     payload = _assert_batch_request(requests[0], collection="bygning_posisjon")
     assert payload["inputs"]["features"][0]["geometry"]["type"] == "Point"
@@ -1191,7 +1203,7 @@ def test_request_profile_selects_bygning_target_dataset() -> None:
 
     assert response.status_code == 200
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
+        _expected_batch_path("bygning")
     ]
 
 
@@ -1229,7 +1241,7 @@ def test_request_profile_can_import_bygning_area_geojson_through_bygning_profile
 
     assert response.status_code == 200
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
+        _expected_batch_path("bygning")
     ]
 
 
@@ -1262,7 +1274,7 @@ def test_request_profile_can_import_bygning_position_geojson_through_bygning_pro
 
     assert response.status_code == 200
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
+        _expected_batch_path("bygning")
     ]
 
 
@@ -1295,7 +1307,7 @@ def test_request_profile_can_import_bygning_senterlinje_geojson_through_bygning_
 
     assert response.status_code == 200
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
+        _expected_batch_path("bygning")
     ]
 
 
@@ -1336,8 +1348,8 @@ def test_request_profile_can_import_mixed_bygning_geojson() -> None:
 
     assert response.status_code == 200
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/processes/upsert-batch/execution",
-        "/datasets/bygning/ogc_api/processes/upsert-batch/execution",
+        _expected_batch_path("bygning"),
+        _expected_batch_path("bygning"),
     ]
 
 
@@ -1401,7 +1413,7 @@ def test_imports_bygning_geojson_without_falling_back_to_bane() -> None:
 
     assert response.status_code == 200
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
+        _expected_batch_path("bygning")
     ]
     payload = _assert_batch_request(requests[0], collection="bygning")
     assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiLineString"
@@ -1429,7 +1441,7 @@ def test_imports_bygning_omrade_geojson_without_falling_back_to_bane() -> None:
 
     assert response.status_code == 200
     assert [request.url.path for request in requests] == [
-        "/datasets/bygning/ogc_api/processes/upsert-batch/execution"
+        _expected_batch_path("bygning")
     ]
     payload = _assert_batch_request(requests[0], collection="bygning_omrade")
     assert payload["inputs"]["features"][0]["geometry"]["type"] == "MultiPolygon"

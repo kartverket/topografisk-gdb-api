@@ -317,6 +317,38 @@ def test_bygning_batch_upsert_process_roundtrip(db, datasets):
     assert second_item["properties"]["lokalid"] == "building-integration-2"
 
 
+def test_bygning_transaction_batch_upsert_process_roundtrip(db, datasets):
+    client = _client(db, datasets)
+
+    created = client.post(
+        f"{BYGNING_API}/processes/transaction-batch-upsert/execution",
+        content=orjson.dumps(
+            {"inputs": {"collection": "bygning", "features": [BYGNING]}}
+        ).decode(),
+        headers={"content-type": "application/json"},
+    )
+    assert created.status_code == HTTPStatus.OK
+    assert created.json()["features"] == [{"id": BYGNING["id"]}]
+
+    replaced = dict(BYGNING)
+    replaced["properties"] = dict(BYGNING["properties"])
+    replaced["properties"]["informasjon"] = "transaction-updated"
+
+    updated = client.post(
+        f"{BYGNING_API}/processes/transaction-batch-upsert/execution",
+        content=orjson.dumps(
+            {"inputs": {"collection": "bygning", "features": [replaced]}}
+        ).decode(),
+        headers={"content-type": "application/json"},
+    )
+    assert updated.status_code == HTTPStatus.OK
+    assert updated.json()["features"] == [{"id": BYGNING["id"]}]
+
+    item = client.get(f"{BYGNING_API}/collections/bygning/items/{BYGNING['id']}?f=json")
+    assert item.status_code == HTTPStatus.OK
+    assert item.json()["properties"]["informasjon"] == "transaction-updated"
+
+
 def test_bygning_omrade_upsert_roundtrip(db, datasets):
     client = _client(db, datasets)
 

@@ -22,6 +22,17 @@ MIN_LINEAR_RING_POSITIONS = 4
 MIN_POSITION_DIMENSIONS = 2
 MAX_POSITION_DIMENSIONS = 3
 _DUPLICATE_MERGE_IGNORED_PROPERTIES = frozenset({"OBJECTID", "SHAPE_Length"})
+USE_TRANSACTION_BATCH_UPSERT = True
+_LEGACY_BATCH_UPSERT_PROCESS_ID = "upsert-batch"
+_TRANSACTION_BATCH_UPSERT_PROCESS_ID = "transaction-batch-upsert"
+
+
+def _batch_upsert_process_id() -> str:
+    return (
+        _TRANSACTION_BATCH_UPSERT_PROCESS_ID
+        if USE_TRANSACTION_BATCH_UPSERT
+        else _LEGACY_BATCH_UPSERT_PROCESS_ID
+    )
 
 
 @lru_cache(maxsize=32)
@@ -606,7 +617,9 @@ async def _import_feature_batch(
     api_url: str,
 ) -> list[str]:
     collection = indexed_features[0][1].collection
-    url = f"{api_url}/processes/upsert-batch/execution"
+    process_id = _batch_upsert_process_id()
+    endpoint = f"/processes/{process_id}/execution"
+    url = f"{api_url}{endpoint}"
     payload = {
         "inputs": {
             "collection": collection,
@@ -634,7 +647,7 @@ async def _import_feature_batch(
             feature_id=indexed_features[0][1].feature_id,
             reason=(
                 "upstream batch upsert endpoint "
-                f"/processes/upsert-batch/execution is unavailable "
+                f"{endpoint} is unavailable "
                 f"(HTTP {response.status_code}); gcimport requires batch mode"
             ),
         )
