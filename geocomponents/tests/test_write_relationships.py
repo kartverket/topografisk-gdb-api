@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 import psycopg
@@ -18,13 +19,6 @@ from geocomponents.schema.build import build_schema_plan
 
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "topology_fixture.yaml"
 
-# Pre-defined UUID constants for border features; outward identifier must be a uuid.
-_B1A_ID = str(uuid.UUID(int=0xB1A))
-_B1B_ID = str(uuid.UUID(int=0xB1B))
-_B2_ID = str(uuid.UUID(int=0xB20))
-_B1_DISPOSABLE_ID = str(uuid.UUID(int=0xD15))
-_NO_SUCH_ID = str(uuid.UUID(int=0x999))  # valid UUID that matches no border
-
 # Minimal valid geometries for the fixture collections (all SRID 4326, 2D).
 _LINE_GEOM = {"type": "LineString", "coordinates": [[0, 0], [1, 0]]}
 _LINE_GEOM_ALT = {"type": "LineString", "coordinates": [[10, 0], [11, 0]]}
@@ -33,6 +27,25 @@ _POLYGON_GEOM = {
     "type": "MultiPolygon",
     "coordinates": [[[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]],
 }
+
+
+def _new_id():
+    return str(uuid.uuid4())
+
+
+@dataclass(frozen=True)
+class StructuralFailureCase:
+    setup_items: tuple[dict, ...]
+    tx_items: tuple[dict, ...]
+    expected_findings: tuple[dict, ...]
+    expected_present: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
+class StructuralSuccessCase:
+    setup_items: tuple[dict, ...]
+    tx_items: tuple[dict, ...]
+    expected_association_clears: tuple[tuple[str, str], ...] = ()
 
 
 # --------------------------------------------------------------------------
@@ -62,23 +75,25 @@ def borders(topology_conn):
       b2_lokalid   lokalid of border2     (wire key: 'lokalid')
       b3_id        uuid of border3        (wire key: 'id' — no outward identifier)
     """
+    b1a_id, b1b_id = sorted([_new_id(), _new_id()])
+    b2_id = _new_id()
     _txn(
         topology_conn,
-        _insert("border1", _LINE_GEOM, {"identifikasjon": {"lokalid": _B1A_ID}}),
+        _insert("border1", _LINE_GEOM, {"identifikasjon": {"lokalid": b1a_id}}),
     )
     _txn(
         topology_conn,
-        _insert("border1", _LINE_GEOM, {"identifikasjon": {"lokalid": _B1B_ID}}),
+        _insert("border1", _LINE_GEOM, {"identifikasjon": {"lokalid": b1b_id}}),
     )
     _txn(
         topology_conn,
-        _insert("border2", _LINE_GEOM, {"identifikasjon": {"lokalid": _B2_ID}}),
+        _insert("border2", _LINE_GEOM, {"identifikasjon": {"lokalid": b2_id}}),
     )
     b3 = _txn(topology_conn, _insert("border3", _LINE_GEOM, {}))
     return {
-        "b1a_lokalid": _B1A_ID,
-        "b1b_lokalid": _B1B_ID,
-        "b2_lokalid": _B2_ID,
+        "b1a_lokalid": b1a_id,
+        "b1b_lokalid": b1b_id,
+        "b2_lokalid": b2_id,
         "b3_id": b3["items"][0]["id"],
     }
 
@@ -97,11 +112,14 @@ def _txn(conn, *items):
     ).fetchone()[0]
 
 
-def _insert(collection, geom, props):
+def _insert(collection, geom, props, *, fid=None):
+    feature = {"type": "Feature", "geometry": geom, "properties": props}
+    if fid is not None:
+        feature["id"] = fid
     return {
         "action": "insert",
         "collection": collection,
-        "feature": {"type": "Feature", "geometry": geom, "properties": props},
+        "feature": feature,
     }
 
 
@@ -169,9 +187,9 @@ def _association_rows(conn, collection, fid):
 def _sources_using_rows(conn, target_collection, ids):
     """Read reverse users of one or more target ids through the internal helper."""
     return conn.execute(
-        "select collection, id::text "
+        "select collection, id::text, property, target_id::text "
         "from topology._sources_using(%s, %s::uuid[]) "
-        "order by collection, id",
+        "order by collection, id, property, target_id",
         (target_collection, ids),
     ).fetchall()
 
@@ -184,6 +202,270 @@ def _properties(conn, collection, fid):
 def _assert_rejected(report):
     assert report["committed"] is False
     assert report["items"][0]["sqlstate"] == "P0001"
+
+
+def _assert_structure_failure(report, expected_findings):
+    assert report == {
+        "committed": False,
+        "phase": "structure",
+        "reason": None,
+        "items": [],
+        "structure": list(expected_findings),
+        "geometry": [],
+    }
+
+
+def _assert_structure_clean_commit(report, expected_item_count):
+    assert report["committed"] is True
+    assert report["phase"] == "items"
+    assert report["reason"] is None
+    assert len(report["items"]) == expected_item_count
+    assert report["structure"] == []
+    assert report["geometry"] == []
+
+
+def _case_delete_linked_target_rolls_back_with_full_finding():
+    border_id = _new_id()
+    surface_id = _new_id()
+    return StructuralFailureCase(
+        (
+            _insert(
+                "border1",
+                _LINE_GEOM_ALT,
+                {"identifikasjon": {"lokalid": border_id}},
+                fid=border_id,
+            ),
+            _insert(
+                "surface",
+                _POLYGON_GEOM,
+                {"boundedByOuter": [{"featuretype": "border1", "lokalid": border_id}]},
+                fid=surface_id,
+            ),
+        ),
+        (_delete("border1", border_id),),
+        (
+            {
+                "reason": "missing_member",
+                "source_collection": "surface",
+                "source_id": surface_id,
+                "property": "boundedByOuter",
+                "target_collection": "border1",
+                "target_id": border_id,
+                "deleted_by_item": 0,
+            },
+        ),
+        (("border1", border_id), ("surface", surface_id)),
+    )
+
+
+def _case_delete_target_reports_every_source_using_it():
+    border_id = _new_id()
+    surface_id = _new_id()
+    surface2_id = _new_id()
+    return StructuralFailureCase(
+        (
+            _insert(
+                "border1",
+                _LINE_GEOM_ALT_2,
+                {"identifikasjon": {"lokalid": border_id}},
+                fid=border_id,
+            ),
+            _insert(
+                "surface",
+                _POLYGON_GEOM,
+                {"boundedByOuter": [{"featuretype": "border1", "lokalid": border_id}]},
+                fid=surface_id,
+            ),
+            _insert(
+                "surface2",
+                _POLYGON_GEOM,
+                {"boundedByOuter": [{"featuretype": "border1", "lokalid": border_id}]},
+                fid=surface2_id,
+            ),
+        ),
+        (_delete("border1", border_id),),
+        (
+            {
+                "reason": "missing_member",
+                "source_collection": "surface",
+                "source_id": surface_id,
+                "property": "boundedByOuter",
+                "target_collection": "border1",
+                "target_id": border_id,
+                "deleted_by_item": 0,
+            },
+            {
+                "reason": "missing_member",
+                "source_collection": "surface2",
+                "source_id": surface2_id,
+                "property": "boundedByOuter",
+                "target_collection": "border1",
+                "target_id": border_id,
+                "deleted_by_item": 0,
+            },
+        ),
+        (("border1", border_id), ("surface", surface_id), ("surface2", surface2_id)),
+    )
+
+
+def _case_delete_two_targets_collects_findings_across_ids_and_collections():
+    border1_id = _new_id()
+    border3_id = _new_id()
+    surface_id = _new_id()
+    return StructuralFailureCase(
+        (
+            _insert(
+                "border1",
+                _LINE_GEOM,
+                {"identifikasjon": {"lokalid": border1_id}},
+                fid=border1_id,
+            ),
+            _insert("border3", _LINE_GEOM_ALT, {}, fid=border3_id),
+            _insert(
+                "surface",
+                _POLYGON_GEOM,
+                {
+                    "boundedByOuter": [
+                        {"featuretype": "border1", "lokalid": border1_id}
+                    ],
+                    "describedByNote": [{"featuretype": "border3", "id": border3_id}],
+                },
+                fid=surface_id,
+            ),
+        ),
+        (_delete("border1", border1_id), _delete("border3", border3_id)),
+        (
+            {
+                "reason": "missing_member",
+                "source_collection": "surface",
+                "source_id": surface_id,
+                "property": "boundedByOuter",
+                "target_collection": "border1",
+                "target_id": border1_id,
+                "deleted_by_item": 0,
+            },
+            {
+                "reason": "missing_member",
+                "source_collection": "surface",
+                "source_id": surface_id,
+                "property": "describedByNote",
+                "target_collection": "border3",
+                "target_id": border3_id,
+                "deleted_by_item": 1,
+            },
+        ),
+        (("border1", border1_id), ("border3", border3_id), ("surface", surface_id)),
+    )
+
+
+def _case_delete_non_footprint_link_still_reports_missing_member():
+    border_id = _new_id()
+    surface_id = _new_id()
+    return StructuralFailureCase(
+        (
+            _insert("border3", _LINE_GEOM_ALT_2, {}, fid=border_id),
+            _insert(
+                "surface",
+                _POLYGON_GEOM,
+                {"describedByNote": [{"featuretype": "border3", "id": border_id}]},
+                fid=surface_id,
+            ),
+        ),
+        (_delete("border3", border_id),),
+        (
+            {
+                "reason": "missing_member",
+                "source_collection": "surface",
+                "source_id": surface_id,
+                "property": "describedByNote",
+                "target_collection": "border3",
+                "target_id": border_id,
+                "deleted_by_item": 0,
+            },
+        ),
+        (("border3", border_id), ("surface", surface_id)),
+    )
+
+
+def _case_delete_unlinked_target_commits_cleanly():
+    border_id = _new_id()
+    return StructuralSuccessCase(
+        (
+            _insert(
+                "border1",
+                _LINE_GEOM,
+                {"identifikasjon": {"lokalid": border_id}},
+                fid=border_id,
+            ),
+        ),
+        (_delete("border1", border_id),),
+    )
+
+
+def _case_delete_source_removes_its_own_links_before_structural_checks():
+    border_id = _new_id()
+    surface_id = _new_id()
+    return StructuralSuccessCase(
+        (
+            _insert(
+                "border1",
+                _LINE_GEOM_ALT,
+                {"identifikasjon": {"lokalid": border_id}},
+                fid=border_id,
+            ),
+            _insert(
+                "surface",
+                _POLYGON_GEOM,
+                {"boundedByOuter": [{"featuretype": "border1", "lokalid": border_id}]},
+                fid=surface_id,
+            ),
+        ),
+        (_delete("surface", surface_id),),
+        (("surface", surface_id),),
+    )
+
+
+def _case_transaction_with_no_deletes_keeps_structure_empty():
+    return StructuralSuccessCase(
+        (),
+        (_insert("surface", _POLYGON_GEOM, {}, fid=_new_id()),),
+    )
+
+
+STRUCTURAL_FAILURE_CASE_BUILDERS = [
+    pytest.param(
+        _case_delete_linked_target_rolls_back_with_full_finding,
+        id="delete-linked-target-rolls-back-with-full-finding",
+    ),
+    pytest.param(
+        _case_delete_target_reports_every_source_using_it,
+        id="delete-target-reports-every-source-using-it",
+    ),
+    pytest.param(
+        _case_delete_two_targets_collects_findings_across_ids_and_collections,
+        id="delete-two-targets-collects-findings-across-ids-and-collections",
+    ),
+    pytest.param(
+        _case_delete_non_footprint_link_still_reports_missing_member,
+        id="delete-non-footprint-link-still-reports-missing-member",
+    ),
+]
+
+
+STRUCTURAL_SUCCESS_CASE_BUILDERS = [
+    pytest.param(
+        _case_delete_unlinked_target_commits_cleanly,
+        id="delete-unlinked-target-commits-cleanly",
+    ),
+    pytest.param(
+        _case_delete_source_removes_its_own_links_before_structural_checks,
+        id="delete-source-removes-its-own-links-before-structural-checks",
+    ),
+    pytest.param(
+        _case_transaction_with_no_deletes_keeps_structure_empty,
+        id="transaction-with-no-deletes-keeps-structure-empty",
+    ),
+]
 
 
 # Tests
@@ -271,16 +553,17 @@ def test_wrong_identifier_key_is_rejected(topology_conn, borders):
 def test_unknown_target_identifier_is_rejected(topology_conn, borders):
     """An identifier that no target row holds → P0001 (missing_member).
 
-    _NO_SUCH_ID is a valid UUID that no border1 row holds.
+    The generated UUID is valid but no border1 row holds it.
     The item fails and no rows are written.
     """
+    missing_id = _new_id()
     report = _txn(
         topology_conn,
         _insert(
             "surface",
             _POLYGON_GEOM,
             {
-                "boundedByOuter": [{"featuretype": "border1", "lokalid": _NO_SUCH_ID}],
+                "boundedByOuter": [{"featuretype": "border1", "lokalid": missing_id}],
             },
         ),
     )
@@ -537,12 +820,13 @@ def test_delete_target_leaves_inbound_rows_intact(topology_conn, borders):
     """Deleting a target feature does not remove inbound association rows.
 
     There is no FK on target_id by design: a dangling reference must remain
-    reportable by phase 2a (slice C).  This test verifies no cascade was added.
+    reportable by structural checks. This test verifies no cascade was added.
     """
+    disposable_lokalid = _new_id()
     disposable_report = _txn(
         topology_conn,
         _insert(
-            "border1", _LINE_GEOM, {"identifikasjon": {"lokalid": _B1_DISPOSABLE_ID}}
+            "border1", _LINE_GEOM, {"identifikasjon": {"lokalid": disposable_lokalid}}
         ),
     )
     disposable_id = disposable_report["items"][0]["id"]
@@ -554,7 +838,7 @@ def test_delete_target_leaves_inbound_rows_intact(topology_conn, borders):
             _POLYGON_GEOM,
             {
                 "boundedByOuter": [
-                    {"featuretype": "border1", "lokalid": _B1_DISPOSABLE_ID}
+                    {"featuretype": "border1", "lokalid": disposable_lokalid}
                 ],
             },
         ),
@@ -565,7 +849,7 @@ def test_delete_target_leaves_inbound_rows_intact(topology_conn, borders):
 
     got = _properties(topology_conn, "surface", surface_id)
     assert got["boundedByOuter"] == [
-        {"featuretype": "border1", "lokalid": _B1_DISPOSABLE_ID}
+        {"featuretype": "border1", "lokalid": disposable_lokalid}
     ]
 
 
@@ -746,10 +1030,11 @@ def test_associations_returns_one_row_per_link_including_dangling(
     topology_conn, borders
 ):
     """The internal associations helper returns stored rows even after target deletion."""
+    disposable_lokalid = _new_id()
     disposable = _txn(
         topology_conn,
         _insert(
-            "border1", _LINE_GEOM, {"identifikasjon": {"lokalid": _B1_DISPOSABLE_ID}}
+            "border1", _LINE_GEOM, {"identifikasjon": {"lokalid": disposable_lokalid}}
         ),
     )
     report = _txn(
@@ -760,7 +1045,7 @@ def test_associations_returns_one_row_per_link_including_dangling(
             {
                 "boundedByOuter": [
                     {"featuretype": "border1", "lokalid": borders["b1a_lokalid"]},
-                    {"featuretype": "border1", "lokalid": _B1_DISPOSABLE_ID},
+                    {"featuretype": "border1", "lokalid": disposable_lokalid},
                 ]
             },
         ),
@@ -769,10 +1054,14 @@ def test_associations_returns_one_row_per_link_including_dangling(
 
     _txn(topology_conn, _delete("border1", disposable["items"][0]["id"]))
 
-    assert _association_rows(topology_conn, "surface", surface_id) == [
-        ("boundedByOuter", "border1", borders["b1a_lokalid"]),
-        ("boundedByOuter", "border1", _B1_DISPOSABLE_ID),
-    ]
+    expected_rows = sorted(
+        [
+            ("boundedByOuter", "border1", borders["b1a_lokalid"]),
+            ("boundedByOuter", "border1", disposable_lokalid),
+        ],
+        key=lambda row: row[2],
+    )
+    assert _association_rows(topology_conn, "surface", surface_id) == expected_rows
 
 
 def test_sources_using_is_polymorphic_on_source_collection(topology_conn, borders):
@@ -800,8 +1089,8 @@ def test_sources_using_is_polymorphic_on_source_collection(topology_conn, border
     surface2_id = report["items"][2]["id"]
 
     assert _sources_using_rows(topology_conn, "border1", [reverse_id]) == [
-        ("surface", surface_id),
-        ("surface2", surface2_id),
+        ("surface", surface_id, "boundedByOuter", reverse_id),
+        ("surface2", surface2_id, "boundedByOuter", reverse_id),
     ]
 
 
@@ -840,9 +1129,40 @@ def test_sources_using_accepts_many_ids_in_one_call(topology_conn, borders):
         "border1",
         [reverse_a, reverse_b],
     ) == [
-        ("surface", first_id),
-        ("surface2", second_id),
+        ("surface", first_id, "boundedByOuter", reverse_a),
+        ("surface2", second_id, "boundedByOuter", reverse_b),
     ]
+
+
+@pytest.mark.parametrize("case_builder", STRUCTURAL_FAILURE_CASE_BUILDERS)
+def test_structural_checks_missing_member_failures_roll_back_with_findings(
+    topology_conn, case_builder
+):
+    case = case_builder()
+    setup = _txn(topology_conn, *case.setup_items)
+    _assert_structure_clean_commit(setup, len(case.setup_items))
+
+    report = _txn(topology_conn, *case.tx_items)
+
+    _assert_structure_failure(report, case.expected_findings)
+    for collection, fid in case.expected_present:
+        assert _item(topology_conn, collection, fid) is not None
+
+
+@pytest.mark.parametrize("case_builder", STRUCTURAL_SUCCESS_CASE_BUILDERS)
+def test_structural_checks_clean_documents_commit_without_structure_findings(
+    topology_conn, case_builder
+):
+    case = case_builder()
+    if case.setup_items:
+        setup = _txn(topology_conn, *case.setup_items)
+        _assert_structure_clean_commit(setup, len(case.setup_items))
+
+    report = _txn(topology_conn, *case.tx_items)
+
+    _assert_structure_clean_commit(report, len(case.tx_items))
+    for collection, fid in case.expected_association_clears:
+        assert _association_rows(topology_conn, collection, fid) == []
 
 
 def test_upsert_rejects_declared_link_property(db):

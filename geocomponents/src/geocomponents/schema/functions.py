@@ -169,6 +169,8 @@ returns jsonb language plpgsql as $disp$
 declare
     tx_items jsonb := coalesce(document->'transaction', '[]'::jsonb);
     report_items jsonb := '[]'::jsonb;
+    deleted_targets jsonb := '[]'::jsonb;
+    structure_findings jsonb := '[]'::jsonb;
     current_item record;
     current_action text;
     current_collection text;
@@ -176,6 +178,7 @@ declare
     current_feature jsonb;
     current_feature_model text;
     in_item boolean := false;
+    structure_failed boolean := false;
     created_id uuid;
     wrote boolean;
     report_reason text := null;
@@ -255,6 +258,10 @@ begin
                 if not wrote then
                     raise exception 'feature not found: %', current_id using errcode = 'P0001';
                 end if;
+                deleted_targets := deleted_targets || jsonb_build_array(jsonb_build_object(
+                    'item_index', current_item.item_index,
+                    'target_collection', current_collection,
+                    'target_id', current_id));
                 report_items := report_items || jsonb_build_array(jsonb_build_object(
                     'index', current_item.item_index,
                     'action', current_action,
@@ -268,10 +275,64 @@ begin
                     using errcode = 'P0001';
             end if;
         end loop;
+
+        if deleted_targets <> '[]'::jsonb
+           and to_regclass(format('%I.%I', dataset, 'association_role')) is not null then
+            execute format(
+                $q$
+with deleted_rows as (
+    select item_index, target_collection, target_id
+    from jsonb_to_recordset($1)
+         as d(item_index int, target_collection text, target_id uuid)
+), deleted_sets as (
+    select target_collection, array_agg(target_id order by item_index, target_id) as ids
+    from deleted_rows
+    group by target_collection
+), missing as (
+    select s.collection as source_collection,
+           s.id as source_id,
+           s.property,
+           d.target_collection,
+           s.target_id,
+           r.item_index as deleted_by_item
+    from deleted_sets d
+    cross join lateral %1$I._sources_using(d.target_collection, d.ids) s
+    join deleted_rows r
+      on r.target_collection = d.target_collection
+     and r.target_id = s.target_id
+)
+select coalesce(jsonb_agg(jsonb_build_object(
+           'reason', 'missing_member',
+           'source_collection', source_collection,
+           'source_id', source_id::text,
+           'property', property,
+           'target_collection', target_collection,
+           'target_id', target_id::text,
+           'deleted_by_item', deleted_by_item)
+       order by source_collection, source_id, property, target_collection, target_id), '[]'::jsonb)
+from missing
+$q$,
+                dataset)
+                into structure_findings using deleted_targets;
+        end if;
+
+        if structure_findings <> '[]'::jsonb then
+            structure_failed := true;
+            raise exception 'transaction failed structure checks' using errcode = 'P0001';
+        end if;
     exception
         when syntax_error_or_access_rule_violation then
             raise;
         when others then
+            if structure_failed then
+                return jsonb_build_object(
+                    'committed', false,
+                    'phase', 'structure',
+                    'reason', null,
+                    'items', '[]'::jsonb,
+                    'structure', structure_findings,
+                    'geometry', '[]'::jsonb);
+            end if;
             if in_item then
                 report_items := jsonb_build_array(jsonb_build_object(
                     'index', current_item.item_index,
@@ -744,18 +805,19 @@ $func$"""
 def _fn_sources_using(plan: SchemaPlan) -> str:
     return f"""\
 create or replace function {plan.schema_name}._sources_using(target_collection text, ids uuid[])
-returns table (collection text, id uuid)
+returns table (collection text, id uuid, property text, target_id uuid)
 language sql stable as $func$
-    select distinct
-                 a.source_collection as collection,
-                 a.source_id as id
+    select a.source_collection as collection,
+           a.source_id as id,
+           a.property,
+           a.target_id
     from {plan.schema_name}.association a
     join {plan.schema_name}.association_role r
         on r.source_collection = a.source_collection
      and r.property = a.property
     where r.target_collection = _sources_using.target_collection
         and a.target_id = any(ids)
-    order by collection, id;
+    order by collection, id, property, target_id;
 $func$"""
 
 
