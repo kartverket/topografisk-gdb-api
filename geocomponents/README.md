@@ -41,7 +41,7 @@ collections:             # the feature types in this dataset
 > **Naming:** dataset and collection `name`s become raw SQL
 > identifiers, so use **lowercase** letters, digits and underscores only — no
 > hyphens (`fkb-bane` → `fkb_bane`) and no uppercase (`arealressursFlate` →
-> `arealressurs_flate`). This restriction will be lifted later.
+> `arealressurs_flate`).
 
 ### A collection
 
@@ -54,7 +54,7 @@ collections:
     title: Parcels
     description: Land parcels.
     feature_model: simple       # 'simple' (default) = read + edit
-                                # 'topology'         = read-only
+                                # 'topology'         = write through ogc.transaction
     geometry:
       type: MultiPolygon        # shape type (see the list below)
       srid: 4326                # coordinate system (default 4326 = WGS84)
@@ -64,10 +64,12 @@ collections:
         required: true
 ```
 
-- **`feature_model`** — `simple` collections can be read *and* edited
-  (create/update/delete). `topology` collections share geometry between
-  neighbouring features, so they are **read-only** for now; edit requests return
-  `405 Method Not Allowed`.
+- **`feature_model`** — `simple` collections use the single-feature entrypoints
+  (`ogc.feature_create`, `ogc.feature_update`, `ogc.feature_replace`,
+  `ogc.feature_delete`). `topology` collections take part in link and boundary
+  validation, so their writes go through `ogc.transaction`. Direct
+  `ogc.feature_*` writes are rejected for those collections, and the HTTP OGC
+  item-write endpoints therefore remain unavailable for them.
 - **`geometry`** — the shape type and coordinate system. The type is enforced
   exactly: a `MultiPolygon` column rejects a plain `Polygon`. Set `has_z: true`
   when coordinates include height; PostGIS then uses the `*Z` typmod
@@ -133,16 +135,95 @@ including `codelist` references:
 ### Relationships
 
 A relationship links a collection to another collection **in the same dataset**.
-It adds a `<name>_id` column that points at the target:
+Links are declared with a source-side `property` name and a `target`
+collection:
 
 ```yaml
 collections:
   - name: buildings
     geometry: { type: MultiPolygon, srid: 4326 }
     relationships:
-      - name: parcel        # adds a 'parcel_id' column
-        target: parcels     # referencing the 'parcels' collection
+      - property: parcel
+        target: parcels
 ```
+
+geocomponents stores links in one association table per dataset instead of
+adding `<property>_id` columns to feature tables:
+
+- `<dataset>.association` holds the actual rows: source collection, source id,
+  property, target collection, target id.
+- `<dataset>.association_role` is the generated catalogue of declared
+  `property -> target` pairs. Writes are checked against it, so an undeclared
+  property is not writable.
+
+On the wire, a relationship property is always an array of link elements. Each
+element carries `featuretype` plus the target collection's identifier key:
+`id`, or the leaf of its `outward_identifier` path when it declares one.
+
+This is a real transaction item written to a topology collection:
+
+```json
+{
+  "action": "insert",
+  "collection": "surface",
+  "feature": {
+    "type": "Feature",
+    "id": "e50d34e9-65bd-442c-9bb1-9884d9d065fc",
+    "geometry": {
+      "type": "MultiPolygon",
+      "coordinates": [[[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]]
+    },
+    "properties": {
+      "boundedByOuter": [
+        {
+          "featuretype": "border1",
+          "lokalid": "153394d7-c0ef-4444-9c7f-d0f38801a17a"
+        }
+      ],
+      "boundedByShared": [
+        {
+          "featuretype": "border2",
+          "lokalid": "9e9ba4b7-0a33-4738-abc3-493d89c14894"
+        }
+      ]
+    }
+  }
+}
+```
+
+Read back through `ogc.feature_item`, the same feature looks like this:
+
+```json
+{
+  "id": "e50d34e9-65bd-442c-9bb1-9884d9d065fc",
+  "type": "Feature",
+  "geometry": {
+    "type": "MultiPolygon",
+    "coordinates": [[[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]]
+  },
+  "properties": {
+    "created_at": "2026-08-31T14:33:49.842254+00:00",
+    "updated_at": "2026-08-31T14:33:49.842254+00:00",
+    "boundedByOuter": [
+      {
+        "lokalid": "153394d7-c0ef-4444-9c7f-d0f38801a17a",
+        "featuretype": "border1"
+      }
+    ],
+    "boundedByShared": [
+      {
+        "lokalid": "9e9ba4b7-0a33-4738-abc3-493d89c14894",
+        "featuretype": "border2"
+      }
+    ]
+  }
+}
+```
+
+Link writes for `feature_model: topology` collections go through
+`ogc.transaction`. A direct single-feature write such as
+`ogc.feature_create('cadastre', 'blocks', ...)` is rejected with
+`P0001: collection blocks does not support direct write operations`.
 
 ### Fixed columns
 
@@ -160,12 +241,33 @@ plus `created_at`/`updated_at` appear under `properties`.
 Two collection keys hand ownership of field values to the server. Client-supplied
 values for these fields are stripped on write and replaced by the server.
 
-**`outward_identifier`** allows a JSONB sub-field to hold the
-feature's `id` (UUID). On read the server injects `id` into that sub-field;
-on write any client value is discarded:
+**`outward_identifier`** makes a field path the feature's identifier on the
+wire. The path's leaf value is the row id: the client may supply it on insert,
+it is fixed afterwards, and the server projects it back on read:
 
 ```yaml
 outward_identifier: identifikasjon.lokalid
+```
+
+For example, a feature created with id
+`00000000-0000-0000-0000-00000000000a` is read back as:
+
+```json
+{
+  "id": "00000000-0000-0000-0000-00000000000a",
+  "type": "Feature",
+  "geometry": {
+    "type": "LineString",
+    "coordinates": [[10, 55], [11, 56]]
+  },
+  "properties": {
+    "created_at": "2026-08-31T14:34:26.672522+00:00",
+    "updated_at": "2026-08-31T14:34:26.672522+00:00",
+    "identification": {
+      "testoi": "00000000-0000-0000-0000-00000000000a"
+    }
+  }
+}
 ```
 
 **`server_managed`** — a map of paths to tokens:
@@ -220,6 +322,38 @@ longitude/latitude). If you omit `geometry`, it defaults to a `Point`.
 Optional `has_z: true` stores XYZ coordinates (PostGIS `PointZ`,
 `LineStringZ`, …).
 
+Collections can also declare that their geometry is derived from linked member
+features. Today the available rule is `footprint`, which builds a surface from
+linked linework:
+
+```yaml
+geometry:
+  type: MultiPolygon
+  srid: 4326
+  required: false
+  derived:
+    rule: footprint
+    areas: many
+    holes: forbidden
+    one_of:
+      - [boundedByOuter]
+      - [{name: boundedByConditional, when: is_bounding}]
+```
+
+- `rule: footprint` means the collection's boundary is read from linked member
+  geometries.
+- `areas` is required for `footprint`: `one` rejects
+  `multiple_disjoint_areas`; `many` accepts them.
+- `holes` is required for `footprint`: `forbidden` rejects
+  `holes_not_allowed`; `allowed` accepts them.
+- `one_of` lists the allowed role alternatives for the boundary members.
+- `when` on a role names a boolean field on the target feature. That role is
+  included only when the field is true.
+
+`feature_model: topology` and `derived:` are separate declarations. A topology
+collection may use direct geometry writes, derived geometry, or both, depending
+on what the description says today.
+
 ### Processes
 
 `processes` lists named operations (OGC API — Processes) the dataset exposes at
@@ -247,8 +381,8 @@ collections:
 
 The [shared descriptions folder](../descriptions/) is a complete, runnable example:
 `cadastre.yaml` (a `parcels` collection using a code list and a shared type, a
-`buildings` collection with a relationship, and a read-only `blocks` topology
-collection), `hydro.yaml`, `bane.yaml`, `bygning.yaml`, and a shared
+`buildings` collection with a relationship, and a `blocks` topology
+collection), `hydro.yaml`, `fkb_bane.yaml`, `bygning.yaml`, and a shared
 `commons.yaml`.
 
 ## Running it (local)
@@ -360,12 +494,12 @@ atomic insert-or-replace function keyed by that field. The key comes from
 Direct `ogc.feature_*` writes are for simple-feature collections. They consult
 per-dataset capability metadata and refuse `feature_model: topology`
 collections; `ogc.transaction` is the write path for those collections.
-Client-supplied feature ids are honored on transaction inserts, while
-`ogc.feature_create` strips them and generates ids server-side.
+Client-supplied feature ids are honored when the generated write function for a
+collection accepts them.
 
 **Transaction document shape**
 
-`ogc.transaction` currently accepts atomic documents of this form:
+`ogc.transaction` accepts atomic documents of this form:
 
 ```json
 {
@@ -391,8 +525,8 @@ Client-supplied feature ids are honored on transaction inserts, while
 }
 ```
 
-The verb set is closed in this PR: `insert`, `update`, `replace`, `delete`.
-`upsert` is not part of the transaction document yet.
+The verb set is `insert`, `update`, `replace`, `delete`. `upsert` is not part
+of the transaction document.
 
 **Transaction report shape**
 
@@ -403,6 +537,7 @@ The verb set is closed in this PR: `insert`, `update`, `replace`, `delete`.
   "committed": false,
   "phase": "items",
   "reason": null,
+  "sqlstate": null,
   "items": [
     {
       "index": 1,
@@ -419,15 +554,104 @@ The verb set is closed in this PR: `insert`, `update`, `replace`, `delete`.
 }
 ```
 
-`phase` is `items` in this PR. `reason` is a document-level failure message
-for cases such as bad `semantic` or a non-array `transaction`; it is `null`
-for item-level failures and successful transactions. Under atomic semantics, a
-failed transaction reports only the rejected item, because no earlier change is
-visible after the rollback.
+`phase` is `document`, `items`, `structure`, or `geometry`.
 
-`structure` and `geometry` are always-present empty arrays today. Later PRs
-will fill them with verdicts, so callers must not branch on their presence.
-Every item key is always present too, including `id` when it is `null`.
+- `document` means the transaction document itself was rejected before any item
+  ran.
+- `items` means an item failed while the transaction was applying the document.
+- `structure` means the document applied, then the structural validation pass
+  found problems.
+- `geometry` means the structural pass was clean and the geometry pass found
+  problems.
+
+`reason` is the top-level failure message when a pass raises. It is `null` on
+committed reports, item rejections, and findings reports. Top-level `sqlstate`
+is always present: it is the Postgres error code when a pass raises, and `null`
+otherwise. Under atomic semantics, an item-level failure reports only the
+rejected item, because no earlier change is visible after the rollback.
+
+`structure` and `geometry` are always-present arrays. Each pass either leaves
+its array empty or fills it with findings from that pass.
+
+This is a document-level failure from a real call:
+
+```json
+{
+  "items": [],
+  "phase": "document",
+  "reason": "unsupported semantic: bogus",
+  "geometry": [],
+  "sqlstate": "P0001",
+  "committed": false,
+  "structure": []
+}
+```
+
+This is a structural findings report:
+
+```json
+{
+  "items": [],
+  "phase": "structure",
+  "reason": null,
+  "geometry": [],
+  "sqlstate": null,
+  "committed": false,
+  "structure": [
+    {
+      "id": "870a1fad-3b9f-4de5-b2af-2b2cb19eb372",
+      "rule": "footprint",
+      "valid": false,
+      "reason": "conflicting_boundary_roles",
+      "details": {
+        "roles": ["boundedByConditional", "boundedByOuter"]
+      },
+      "members": 2,
+      "included": 2,
+      "collection": "surface"
+    }
+  ]
+}
+```
+
+This is a geometry findings report:
+
+```json
+{
+  "items": [],
+  "phase": "geometry",
+  "reason": null,
+  "geometry": [
+    {
+      "id": "22a57c6c-86ad-4372-be32-5f3063e319a0",
+      "rule": "footprint",
+      "areas": 1,
+      "holes": 0,
+      "valid": false,
+      "reason": "unused_boundary_line",
+      "details": {
+        "unused": [
+          {
+            "id": "1ce4f64d-41ff-4a96-bcb5-c724e420f5b6",
+            "collection": "border1"
+          }
+        ]
+      },
+      "members": 2,
+      "included": 2,
+      "collection": "surface2"
+    }
+  ],
+  "sqlstate": null,
+  "committed": false,
+  "structure": []
+}
+```
+
+The structural finding reasons are `missing_member`,
+`conflicting_boundary_roles`, and `no_boundary`. The geometry finding reasons
+are `nonsimple_boundary`, `boundary_does_not_close`, `unused_boundary_line`,
+`multiple_disjoint_areas`, and `holes_not_allowed`.
 
 You can call them directly:
 
@@ -454,7 +678,7 @@ select ogc.transaction(
 );
 ```
 
-### Not built yet (designed for)
+### Not built yet
 - Importing descriptions from GML/UML models.
 - Emitting events when data changes.
 - Migrations when a description changes an existing table. Until then, operators

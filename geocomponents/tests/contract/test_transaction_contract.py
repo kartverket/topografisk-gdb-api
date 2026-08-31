@@ -102,6 +102,7 @@ def _assert_report_shell(report, *, committed, item_count):
         "committed",
         "phase",
         "reason",
+        "sqlstate",
         "items",
         "structure",
         "geometry",
@@ -109,6 +110,7 @@ def _assert_report_shell(report, *, committed, item_count):
     assert report["committed"] is committed
     assert report["phase"] == "items"
     assert report["reason"] is None
+    assert report["sqlstate"] is None
     assert report["structure"] == []
     assert report["geometry"] == []
     assert len(report["items"]) == item_count

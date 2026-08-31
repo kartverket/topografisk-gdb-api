@@ -320,6 +320,7 @@ def _properties(conn, collection, fid):
 
 def _assert_rejected(report):
     assert report["committed"] is False
+    assert report["sqlstate"] is None
     assert report["items"][0]["sqlstate"] == "P0001"
 
 
@@ -328,6 +329,7 @@ def _assert_structure_failure(report, expected_findings):
         "committed": False,
         "phase": "structure",
         "reason": None,
+        "sqlstate": None,
         "items": [],
         "structure": list(expected_findings),
         "geometry": [],
@@ -339,6 +341,7 @@ def _assert_geometry_failure(report, expected_findings):
         "committed": False,
         "phase": "geometry",
         "reason": None,
+        "sqlstate": None,
         "items": [],
         "structure": [],
         "geometry": list(expected_findings),
@@ -349,6 +352,7 @@ def _assert_structure_clean_commit(report, expected_item_count):
     assert report["committed"] is True
     assert report["phase"] == "items"
     assert report["reason"] is None
+    assert report["sqlstate"] is None
     assert len(report["items"]) == expected_item_count
     assert report["structure"] == []
     assert report["geometry"] == []
@@ -2495,6 +2499,48 @@ def test_geometry_verdict_raise_reports_geometry_phase(db):
             sqlstate="XX000",
             reason_substring="sabotage",
         )
+
+
+def test_transaction_report_always_includes_top_level_sqlstate(db):
+    committed_case = _case_outer_and_shared_are_valid()
+    rejected_id = _new_id()
+    structure_case = _case_outer_and_conditional_true_conflict()
+
+    committed_dataset = committed_case.raw["name"]
+    with _topology_case_conn(db, committed_case.raw) as conn:
+        setup = _txn(conn, *committed_case.setup_items, dataset=committed_dataset)
+        _assert_structure_clean_commit(setup, len(committed_case.setup_items))
+        committed = _txn(conn, *committed_case.tx_items, dataset=committed_dataset)
+        assert committed["sqlstate"] is None
+
+    with _topology_case_conn(db, _case_raw()) as conn:
+        rejected = _txn(
+            conn,
+            _insert(
+                "surface2", _POLYGON_GEOM, _surface2_props(rejected_id), fid=_new_id()
+            ),
+            dataset="topology",
+        )
+        assert "sqlstate" in rejected
+        assert rejected["sqlstate"] is None
+
+    structure_dataset = structure_case.raw["name"]
+    with _topology_case_conn(db, structure_case.raw) as conn:
+        setup = _txn(conn, *structure_case.setup_items, dataset=structure_dataset)
+        _assert_structure_clean_commit(setup, len(structure_case.setup_items))
+        structure = _txn(conn, *structure_case.tx_items, dataset=structure_dataset)
+        assert structure["sqlstate"] is None
+
+    raised_case = _case_outer_and_shared_are_valid()
+    raised_dataset = raised_case.raw["name"]
+    with _topology_case_conn(db, raised_case.raw) as conn:
+        setup = _txn(conn, *raised_case.setup_items, dataset=raised_dataset)
+        _assert_structure_clean_commit(setup, len(raised_case.setup_items))
+        _replace_footprint_verdict_with_raise(
+            conn, raised_dataset, "_surface_footprint_geometry_verdict"
+        )
+        raised = _txn(conn, *raised_case.tx_items, dataset=raised_dataset)
+        assert raised["sqlstate"] == "XX000"
 
 
 @pytest.mark.parametrize("case_builder", FOOTPRINT_GEOMETRY_FAILURE_CASE_BUILDERS)

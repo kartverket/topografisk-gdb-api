@@ -414,6 +414,7 @@ $q$,
                     'committed', false,
                     'phase', 'structure',
                     'reason', null,
+                    'sqlstate', null,
                     'items', '[]'::jsonb,
                     'structure', structure_findings,
                     'geometry', '[]'::jsonb);
@@ -423,6 +424,7 @@ $q$,
                     'committed', false,
                     'phase', 'geometry',
                     'reason', null,
+                    'sqlstate', null,
                     'items', '[]'::jsonb,
                     'structure', '[]'::jsonb,
                     'geometry', geometry_findings);
@@ -444,19 +446,17 @@ $q$,
                 'committed', false,
                 'phase', phase,
                 'reason', report_reason,
+                'sqlstate', case when phase = 'items' then null else sqlstate end,
                 'items', report_items,
                 'structure', '[]'::jsonb,
-                'geometry', '[]'::jsonb)
-                || case
-                    when phase = 'items' then '{{}}'::jsonb
-                    else jsonb_build_object('sqlstate', sqlstate)
-                end;
+                'geometry', '[]'::jsonb);
     end;
 
     return jsonb_build_object(
         'committed', true,
         'phase', 'items',
         'reason', null,
+        'sqlstate', null,
         'items', report_items,
         'structure', '[]'::jsonb,
         'geometry', '[]'::jsonb);
