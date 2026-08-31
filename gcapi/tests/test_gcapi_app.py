@@ -5,7 +5,7 @@ import json
 import httpx2
 from fastapi.testclient import TestClient
 
-from gcapi.app import create_app
+from gcapi.app import AUTH_CACHE_TTL_SECONDS, create_app
 from gcapi.config import Settings
 
 
@@ -17,6 +17,19 @@ def _json_response(
         content=json.dumps(payload).encode("utf-8"),
         headers=headers or {"content-type": "application/json"},
     )
+
+
+def _authorize_or_forward(
+    request: httpx2.Request,
+    *,
+    authorize_url: str,
+    next_handler,
+) -> httpx2.Response:
+    if str(request.url) == authorize_url:
+        assert request.method == "POST"
+        assert json.loads(request.read().decode("utf-8")) == {"client_id": None}
+        return _json_response({"authorized": True, "client_id": None})
+    return next_handler(request)
 
 
 def test_create_app_uses_injected_client() -> None:
@@ -33,13 +46,21 @@ def test_create_app_uses_injected_client() -> None:
         assert response.json() == {"status": "ok", "service": "gcapi"}
         assert app.state.settings == settings
         assert app.state.http_client is client
+        assert app.state.authorization_cache.ttl == AUTH_CACHE_TTL_SECONDS
 
 
 def test_root_redirects_to_datasets() -> None:
-    def handler(request: httpx2.Request) -> httpx2.Response:
+    def downstream(request: httpx2.Request) -> httpx2.Response:
         assert request.method == "GET"
         assert str(request.url) == "http://localhost:8000"
         return _json_response({"service": "geocomponents"})
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return _authorize_or_forward(
+            request,
+            authorize_url="http://localhost:8002/authorize",
+            next_handler=downstream,
+        )
 
     app = create_app(
         settings=Settings(geocomponents_url="http://localhost:8000"),
@@ -58,7 +79,7 @@ def test_root_redirects_to_datasets() -> None:
 def test_proxy_forwards_nested_paths_query_and_json_without_rewriting() -> None:
     seen_requests: list[httpx2.Request] = []
 
-    def handler(request: httpx2.Request) -> httpx2.Response:
+    def downstream(request: httpx2.Request) -> httpx2.Response:
         seen_requests.append(request)
         assert request.method == "GET"
         assert (
@@ -74,6 +95,13 @@ def test_proxy_forwards_nested_paths_query_and_json_without_rewriting() -> None:
                     }
                 ]
             }
+        )
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return _authorize_or_forward(
+            request,
+            authorize_url="http://localhost:8002/authorize",
+            next_handler=downstream,
         )
 
     app = create_app(
@@ -97,7 +125,7 @@ def test_proxy_forwards_nested_paths_query_and_json_without_rewriting() -> None:
 
 
 def test_dataset_import_process_paths_proxy_to_gcjobs_when_configured() -> None:
-    def handler(request: httpx2.Request) -> httpx2.Response:
+    def downstream(request: httpx2.Request) -> httpx2.Response:
         assert request.method == "POST"
         assert (
             str(request.url)
@@ -110,6 +138,13 @@ def test_dataset_import_process_paths_proxy_to_gcjobs_when_configured() -> None:
                 "content-type": "application/json",
                 "Location": "http://gcjobs.test/datasets/cadastre/ogc_api/jobs/job-2",
             },
+        )
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return _authorize_or_forward(
+            request,
+            authorize_url="http://localhost:8002/authorize",
+            next_handler=downstream,
         )
 
     app = create_app(
@@ -136,7 +171,7 @@ def test_dataset_import_process_paths_proxy_to_gcjobs_when_configured() -> None:
 
 
 def test_dataset_job_paths_proxy_to_gcjobs_when_configured() -> None:
-    def handler(request: httpx2.Request) -> httpx2.Response:
+    def downstream(request: httpx2.Request) -> httpx2.Response:
         assert request.method == "GET"
         assert (
             str(request.url)
@@ -153,6 +188,13 @@ def test_dataset_job_paths_proxy_to_gcjobs_when_configured() -> None:
                     }
                 ],
             }
+        )
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return _authorize_or_forward(
+            request,
+            authorize_url="http://localhost:8002/authorize",
+            next_handler=downstream,
         )
 
     app = create_app(
@@ -180,7 +222,7 @@ def test_dataset_job_paths_proxy_to_gcjobs_when_configured() -> None:
 def test_proxy_passes_request_body_and_location_headers_through() -> None:
     body_chunks: list[bytes] = []
 
-    def handler(request: httpx2.Request) -> httpx2.Response:
+    def downstream(request: httpx2.Request) -> httpx2.Response:
         assert request.method == "POST"
         assert str(request.url) == "http://localhost:8000/imports"
         body_chunks.append(request.read())
@@ -191,6 +233,13 @@ def test_proxy_passes_request_body_and_location_headers_through() -> None:
                 "content-type": "application/json",
                 "Location": "http://localhost:8000/imports/feature-1",
             },
+        )
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return _authorize_or_forward(
+            request,
+            authorize_url="http://localhost:8002/authorize",
+            next_handler=downstream,
         )
 
     app = create_app(
@@ -232,3 +281,134 @@ def test_create_app_always_allows_wildcard_cors() -> None:
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "*"
+
+
+def test_proxy_passes_authorization_header_through_without_setting_cookie() -> None:
+    seen_urls: list[str] = []
+
+    def downstream(request: httpx2.Request) -> httpx2.Response:
+        seen_urls.append(str(request.url))
+        assert str(request.url) == "http://geocomponents.test/datasets"
+        assert request.headers["authorization"] == "Bearer api-token"
+        return _json_response({"collections": []})
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return _authorize_or_forward(
+            request,
+            authorize_url="http://localhost:8002/authorize",
+            next_handler=downstream,
+        )
+
+    app = create_app(
+        settings=Settings(
+            geocomponents_url="http://geocomponents.test",
+        ),
+        client=httpx2.AsyncClient(
+            transport=httpx2.MockTransport(handler), trust_env=False
+        ),
+    )
+
+    with TestClient(app) as test_client:
+        response = test_client.get(
+            "/datasets",
+            headers={"authorization": "Bearer api-token"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"collections": []}
+    assert "set-cookie" not in response.headers
+    assert seen_urls == ["http://geocomponents.test/datasets"]
+
+
+def test_authorization_calls_configured_gccore_url() -> None:
+    seen_urls: list[str] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen_urls.append(str(request.url))
+        return _authorize_or_forward(
+            request,
+            authorize_url="http://gccore.test/authorize",
+            next_handler=lambda forwarded: _json_response({"collections": []}),
+        )
+
+    app = create_app(
+        settings=Settings(
+            geocomponents_url="http://geocomponents.test",
+            gccore_url="http://gccore.test",
+        ),
+        client=httpx2.AsyncClient(
+            transport=httpx2.MockTransport(handler), trust_env=False
+        ),
+    )
+
+    with TestClient(app) as test_client:
+        response = test_client.get("/datasets")
+
+    assert response.status_code == 200
+    assert seen_urls[0] == "http://gccore.test/authorize"
+
+
+def test_authorization_uses_ttl_cache_for_same_client_id() -> None:
+    authorize_calls = 0
+    downstream_calls = 0
+
+    def downstream(request: httpx2.Request) -> httpx2.Response:
+        nonlocal downstream_calls
+        downstream_calls += 1
+        return _json_response({"collections": []})
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        nonlocal authorize_calls
+        if str(request.url) == "http://gccore.test/authorize":
+            authorize_calls += 1
+        return _authorize_or_forward(
+            request,
+            authorize_url="http://gccore.test/authorize",
+            next_handler=downstream,
+        )
+
+    app = create_app(
+        settings=Settings(
+            geocomponents_url="http://geocomponents.test",
+            gccore_url="http://gccore.test",
+        ),
+        client=httpx2.AsyncClient(
+            transport=httpx2.MockTransport(handler), trust_env=False
+        ),
+    )
+
+    with TestClient(app) as test_client:
+        first_response = test_client.get("/datasets")
+        second_response = test_client.get("/datasets")
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert authorize_calls == 1
+    assert downstream_calls == 2
+
+
+def test_authorization_failure_returns_problem_response() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        if str(request.url) == "http://gccore.test/authorize":
+            assert request.method == "POST"
+            return _json_response({"authorized": False, "client_id": None})
+        raise AssertionError(
+            "proxy target should not be called when authorization fails"
+        )
+
+    app = create_app(
+        settings=Settings(
+            geocomponents_url="http://geocomponents.test",
+            gccore_url="http://gccore.test",
+        ),
+        client=httpx2.AsyncClient(
+            transport=httpx2.MockTransport(handler), trust_env=False
+        ),
+    )
+
+    with TestClient(app) as test_client:
+        response = test_client.get("/datasets")
+
+    assert response.status_code == 401
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["title"] == "Unauthorized"

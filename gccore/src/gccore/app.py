@@ -30,3 +30,12 @@ def healthz() -> dict[str, object]:
         payload["status"] = "unavailable"
         return JSONResponse(payload, status_code=503)
     return payload
+
+
+@app.post("/authorize")
+def authorize(payload: dict[str, object]) -> dict[str, object]:
+    client_id = payload.get("client_id")
+    return {
+        "authorized": client_id is None,
+        "client_id": client_id,
+    }

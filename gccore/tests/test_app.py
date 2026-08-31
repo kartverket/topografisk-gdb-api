@@ -10,3 +10,12 @@ def test_root_reports_service_identity() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"service": "gccore", "schema": "gc_core"}
+
+
+def test_authorize_accepts_mock_null_client_id() -> None:
+    client = TestClient(app)
+
+    response = client.post("/authorize", json={"client_id": None})
+
+    assert response.status_code == 200
+    assert response.json() == {"authorized": True, "client_id": None}

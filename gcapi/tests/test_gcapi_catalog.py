@@ -19,12 +19,21 @@ def _json_response(
     )
 
 
-def _build_transport() -> httpx2.MockTransport:
+def _build_transport(
+    authorize_payloads: list[dict[str, object]] | None = None,
+) -> httpx2.MockTransport:
     def handler(request: httpx2.Request) -> httpx2.Response:
         url = str(request.url)
         method = request.method
-        if method == "GET" and url == "http://geocomponents.test/collections":
-            return _json_response(
+        response: httpx2.Response | None = None
+        if method == "POST" and url == "http://localhost:8002/authorize":
+            payload = json.loads(request.read().decode("utf-8"))
+            if authorize_payloads is not None:
+                authorize_payloads.append(payload)
+            assert payload == {"client_id": None}
+            response = _json_response({"authorized": True, "client_id": None})
+        elif method == "GET" and url == "http://geocomponents.test/collections":
+            response = _json_response(
                 {
                     "collections": [
                         {
@@ -39,12 +48,12 @@ def _build_transport() -> httpx2.MockTransport:
                     ]
                 }
             )
-        if (
+        elif (
             method == "GET"
             and url
             == "http://geocomponents.test/collections/parcels/items?f=json&limit=1"
         ):
-            return _json_response(
+            response = _json_response(
                 {
                     "type": "FeatureCollection",
                     "links": [
@@ -56,11 +65,11 @@ def _build_transport() -> httpx2.MockTransport:
                     "features": [],
                 }
             )
-        if (
+        elif (
             method == "POST"
             and url == "http://geocomponents.test/collections/parcels/items"
         ):
-            return _json_response(
+            response = _json_response(
                 {"id": "feature-1"},
                 status_code=201,
                 headers={
@@ -68,8 +77,8 @@ def _build_transport() -> httpx2.MockTransport:
                     "Location": "http://geocomponents.test/collections/parcels/items/feature-1",
                 },
             )
-        if method == "GET" and url == "http://geocomponents.test/processes":
-            return _json_response(
+        elif method == "GET" and url == "http://geocomponents.test/processes":
+            response = _json_response(
                 {
                     "processes": [
                         {
@@ -86,8 +95,8 @@ def _build_transport() -> httpx2.MockTransport:
                     ]
                 }
             )
-        if method == "GET" and url == "http://geocomponents.test/processes/import":
-            return _json_response(
+        elif method == "GET" and url == "http://geocomponents.test/processes/import":
+            response = _json_response(
                 {
                     "id": "import",
                     "links": [
@@ -106,24 +115,30 @@ def _build_transport() -> httpx2.MockTransport:
                     ],
                 }
             )
-        if (
+        elif (
             method == "POST"
             and url == "http://geocomponents.test/processes/import/execution"
         ):
-            return _json_response(
+            response = _json_response(
                 {"jobID": "job-2", "status": "accepted"},
                 status_code=201,
                 headers={"Location": "http://geocomponents.test/jobs/job-2"},
             )
-        raise AssertionError(f"Unhandled request: {method} {url}")
+        else:
+            raise AssertionError(f"Unhandled request: {method} {url}")
+
+        return response
 
     return httpx2.MockTransport(handler)
 
 
 def test_gcapi_is_a_generic_passthrough_proxy() -> None:
+    authorize_payloads: list[dict[str, object]] = []
     app = create_app(
         settings=Settings(geocomponents_url="http://geocomponents.test"),
-        client=httpx2.AsyncClient(transport=_build_transport(), trust_env=False),
+        client=httpx2.AsyncClient(
+            transport=_build_transport(authorize_payloads), trust_env=False
+        ),
     )
 
     with TestClient(app) as client:
@@ -173,3 +188,5 @@ def test_gcapi_is_a_generic_passthrough_proxy() -> None:
         )
         assert executed.status_code == 201
         assert executed.headers["location"] == ("http://geocomponents.test/jobs/job-2")
+
+    assert authorize_payloads == [{"client_id": None}]
