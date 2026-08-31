@@ -29,6 +29,8 @@ from geocomponents.schema.plan import (
     CollectionPlan,
     CollectionRolePlan,
     ColumnPlan,
+    DerivedPlan,
+    DerivedRolePlan,
     SchemaPlan,
     TablePlan,
 )
@@ -169,7 +171,7 @@ returns jsonb language plpgsql as $disp$
 declare
     tx_items jsonb := coalesce(document->'transaction', '[]'::jsonb);
     report_items jsonb := '[]'::jsonb;
-    deleted_targets jsonb := '[]'::jsonb;
+    touched_features jsonb := '[]'::jsonb;
     structure_findings jsonb := '[]'::jsonb;
     current_item record;
     current_action text;
@@ -258,10 +260,6 @@ begin
                 if not wrote then
                     raise exception 'feature not found: %', current_id using errcode = 'P0001';
                 end if;
-                deleted_targets := deleted_targets || jsonb_build_array(jsonb_build_object(
-                    'item_index', current_item.item_index,
-                    'target_collection', current_collection,
-                    'target_id', current_id));
                 report_items := report_items || jsonb_build_array(jsonb_build_object(
                     'index', current_item.item_index,
                     'action', current_action,
@@ -274,16 +272,25 @@ begin
                 raise exception 'unknown action: %', coalesce(current_action, '<null>')
                     using errcode = 'P0001';
             end if;
+
+            touched_features := touched_features || jsonb_build_array(jsonb_build_object(
+                'item_index', current_item.item_index,
+                'action', current_action,
+                'collection', current_collection,
+                'id', current_id));
         end loop;
 
-        if deleted_targets <> '[]'::jsonb
-           and to_regclass(format('%I.%I', dataset, 'association_role')) is not null then
+        if touched_features <> '[]'::jsonb then
             execute format(
                 $q$
-with deleted_rows as (
-    select item_index, target_collection, target_id
+with touched_rows as (
+    select item_index, action, collection, id
     from jsonb_to_recordset($1)
-         as d(item_index int, target_collection text, target_id uuid)
+         as t(item_index int, action text, collection text, id uuid)
+), deleted_rows as (
+    select item_index, collection as target_collection, id as target_id
+    from touched_rows
+    where action = 'delete'
 ), deleted_sets as (
     select target_collection, array_agg(target_id order by item_index, target_id) as ids
     from deleted_rows
@@ -313,7 +320,41 @@ select coalesce(jsonb_agg(jsonb_build_object(
 from missing
 $q$,
                 dataset)
-                into structure_findings using deleted_targets;
+                into structure_findings using touched_features;
+        end if;
+
+        if structure_findings = '[]'::jsonb and touched_features <> '[]'::jsonb then
+            execute format(
+                $q$
+with touched_rows as (
+    select collection, id
+    from jsonb_to_recordset($1)
+         as t(item_index int, action text, collection text, id uuid)
+), touched_sets as (
+    select collection, array_agg(distinct id order by id) as ids
+    from touched_rows
+    group by collection
+), reverse_surfaces as (
+    select distinct s.collection, s.id
+    from touched_sets t
+    cross join lateral %1$I._sources_using(t.collection, t.ids) s
+), dirty_surfaces as (
+    select distinct collection, id from touched_rows
+    union
+    select collection, id from reverse_surfaces
+), verdicts as (
+    select d.collection,
+           d.id,
+           %1$I._footprint_verdict(d.collection, d.id) as verdict
+    from dirty_surfaces d
+)
+select coalesce(jsonb_agg(verdict order by collection, id), '[]'::jsonb)
+from verdicts
+where verdict is not null
+  and (verdict->>'valid')::boolean is false
+$q$,
+                dataset)
+                into structure_findings using touched_features;
         end if;
 
         if structure_findings <> '[]'::jsonb then
@@ -803,6 +844,17 @@ $func$"""
 
 
 def _fn_sources_using(plan: SchemaPlan) -> str:
+    if not plan.association_role_rows:
+        return f"""\
+create or replace function {plan.schema_name}._sources_using(target_collection text, ids uuid[])
+returns table (collection text, id uuid, property text, target_id uuid)
+language sql stable as $func$
+    select null::text as collection,
+           null::uuid as id,
+           null::text as property,
+           null::uuid as target_id
+    where false;
+$func$"""
     return f"""\
 create or replace function {plan.schema_name}._sources_using(target_collection text, ids uuid[])
 returns table (collection text, id uuid, property text, target_id uuid)
@@ -818,6 +870,160 @@ language sql stable as $func$
     where r.target_collection = _sources_using.target_collection
         and a.target_id = any(ids)
     order by collection, id, property, target_id;
+$func$"""
+
+
+def _fn_footprint_verdict(plan: CollectionPlan, derived: DerivedPlan) -> str:
+
+    roles_by_property: dict[str, DerivedRolePlan] = {}
+    for alternative in derived.one_of:
+        for role in alternative:
+            roles_by_property.setdefault(role.property, role)
+
+    member_selects = []
+    for role in roles_by_property.values():
+        if role.when_field is None:
+            member_selects.append(
+                "    select a.property, true as included\n"
+                "    from present p\n"
+                f"    join {plan.table.schema}.association a\n"
+                f"      on a.source_collection = '{_quote_key(plan.collection_name)}'\n"
+                "     and a.source_id = p.id\n"
+                f"     and a.property = '{_quote_key(role.property)}'"
+            )
+        else:
+            member_selects.append(
+                "    select a.property, "
+                f'coalesce(t."{role.when_field}", false) as included\n'
+                "    from present p\n"
+                f"    join {plan.table.schema}.association a\n"
+                f"      on a.source_collection = '{_quote_key(plan.collection_name)}'\n"
+                "     and a.source_id = p.id\n"
+                f"     and a.property = '{_quote_key(role.property)}'\n"
+                f'    join {role.target_table} t on t."id" = a.target_id'
+            )
+    members_body = "\n    union all\n".join(member_selects)
+    alternatives = "\n    union all\n".join(
+        "    select array["
+        + ", ".join(f"'{_quote_key(role.property)}'" for role in alternative)
+        + "]::text[] as roles"
+        for alternative in derived.one_of
+    )
+    if derived.required:
+        valid_expr = (
+            "case\n"
+            "                when included = 0 then false\n"
+            "                when valid_subset then true\n"
+            "                else false\n"
+            "            end"
+        )
+        reason_expr = (
+            "case\n"
+            "                when included = 0 then 'no_boundary'\n"
+            "                when valid_subset then null\n"
+            "                else 'conflicting_boundary_roles'\n"
+            "            end"
+        )
+        details_expr = (
+            "case\n"
+            "                when included = 0 then '{}'::jsonb\n"
+            "                when valid_subset then '{}'::jsonb\n"
+            "                else jsonb_build_object('roles', to_jsonb(roles))\n"
+            "            end"
+        )
+    else:
+        valid_expr = (
+            "case\n"
+            "                when valid_subset then true\n"
+            "                else false\n"
+            "            end"
+        )
+        reason_expr = (
+            "case\n"
+            "                when valid_subset then null\n"
+            "                else 'conflicting_boundary_roles'\n"
+            "            end"
+        )
+        details_expr = (
+            "case\n"
+            "                when valid_subset then '{}'::jsonb\n"
+            "                else jsonb_build_object('roles', to_jsonb(roles))\n"
+            "            end"
+        )
+
+    return f"""\
+create or replace function {plan.table.schema}._{plan.collection_name}_footprint_verdict(fid uuid)
+returns jsonb language sql stable as $func$
+with present as (
+    select t."{plan.table.id_column}" as id
+    from {plan.table.qualified} t
+    where t."{plan.table.id_column}" = fid
+), members as (
+{members_body}
+), facts as (
+    select count(*)::int as members,
+           count(*) filter (where included)::int as included
+    from members
+), filtered_roles as (
+    select distinct property
+    from members
+    where included
+), role_set as (
+    select coalesce(array_agg(property order by property), array[]::text[]) as roles
+    from filtered_roles
+), alternatives as (
+{alternatives}
+), checks as (
+    select f.members,
+           f.included,
+           r.roles,
+           exists(select 1 from alternatives a where r.roles <@ a.roles) as valid_subset
+    from facts f
+    cross join role_set r
+)
+select case
+    when exists(select 1 from present) then (
+        select jsonb_build_object(
+            'valid', {valid_expr},
+            'collection', '{_quote_key(plan.collection_name)}',
+            'id', fid::text,
+            'rule', '{_quote_key(derived.rule)}',
+            'reason', {reason_expr},
+            'members', members,
+            'included', included,
+            'details', {details_expr})
+        from checks
+    )
+    else null::jsonb
+end;
+$func$"""
+
+
+def _fn_footprint_verdict_dispatch(plan: SchemaPlan) -> str:
+    derived_collections = [
+        coll for coll in plan.collections if coll.derived is not None
+    ]
+    if not derived_collections:
+        return f"""\
+create or replace function {plan.schema_name}._footprint_verdict(collection text, fid uuid)
+returns jsonb language sql stable as $func$
+    select null::jsonb;
+$func$"""
+
+    branches = "\n".join(
+        f"    when '{_quote_key(coll.collection_name)}' then return {plan.schema_name}._{coll.collection_name}_footprint_verdict(fid);"
+        for coll in derived_collections
+    )
+    return f"""\
+create or replace function {plan.schema_name}._footprint_verdict(collection text, fid uuid)
+returns jsonb language plpgsql stable as $func$
+begin
+  case collection
+{branches}
+    else
+      return null;
+  end case;
+end;
 $func$"""
 
 
@@ -1196,9 +1402,11 @@ _BUILDER_BY_OP = {
 
 def function_statements(plan: SchemaPlan) -> list[str]:
     stmts: list[str] = []
-    if plan.association_role_rows:
-        stmts.append(_fn_sources_using(plan))
+    stmts.append(_fn_sources_using(plan))
+    stmts.append(_fn_footprint_verdict_dispatch(plan))
     for coll in plan.collections:
+        if coll.derived is not None:
+            stmts.append(_fn_footprint_verdict(coll, coll.derived))
         if coll.roles:
             stmts.append(_fn_associations(coll))
         for op in coll.functions:

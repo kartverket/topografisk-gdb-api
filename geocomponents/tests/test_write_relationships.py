@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import uuid
+from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -48,14 +50,49 @@ class StructuralSuccessCase:
     expected_association_clears: tuple[tuple[str, str], ...] = ()
 
 
+@dataclass(frozen=True)
+class FootprintRuleFailureCase:
+    raw: dict
+    setup_items: tuple[dict, ...]
+    tx_items: tuple[dict, ...]
+    expected_findings: tuple[dict, ...]
+    expected_present: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class FootprintRuleSuccessCase:
+    raw: dict
+    setup_items: tuple[dict, ...]
+    tx_items: tuple[dict, ...]
+
+
 # --------------------------------------------------------------------------
 # Fixture: topology schema with tables + functions
 # --------------------------------------------------------------------------
 
 
 def _load_plan():
-    raw = yaml.safe_load(FIXTURE_PATH.read_text(encoding="utf-8"))
+    return _load_plan_from_raw(_topology_fixture_raw())
+
+
+def _topology_fixture_raw() -> dict:
+    return yaml.safe_load(FIXTURE_PATH.read_text(encoding="utf-8"))
+
+
+def _load_plan_from_raw(raw: dict):
     return build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw), Commons()))
+
+
+@contextmanager
+def _topology_case_conn(db: str, raw: dict):
+    with _schema_conn(db, _load_plan_from_raw(raw)) as conn:
+        yield conn
+
+
+def _case_raw() -> dict:
+    raw = deepcopy(_topology_fixture_raw())
+    raw["name"] = f"topology_case_{uuid.uuid4().hex[:8]}"
+    return raw
 
 
 @pytest.fixture(scope="module")
@@ -103,17 +140,28 @@ def borders(topology_conn):
 # --------------------------------------------------------------------------
 
 
-def _txn(conn, *items):
+def _txn(conn, *items, dataset="topology"):
     """Run ogc.transaction('topology', ...) and return the JSON report."""
     doc = {"semantic": "atomic", "transaction": list(items)}
     return conn.execute(
-        "select ogc.transaction('topology', %s::jsonb)",
-        (json.dumps(doc),),
+        "select ogc.transaction(%s, %s::jsonb)",
+        (dataset, json.dumps(doc)),
     ).fetchone()[0]
 
 
 def _insert(collection, geom, props, *, fid=None):
     feature = {"type": "Feature", "geometry": geom, "properties": props}
+    if fid is not None:
+        feature["id"] = fid
+    return {
+        "action": "insert",
+        "collection": collection,
+        "feature": feature,
+    }
+
+
+def _insert_without_geometry(collection, props, *, fid=None):
+    feature = {"type": "Feature", "properties": props}
     if fid is not None:
         feature["id"] = fid
     return {
@@ -147,36 +195,28 @@ def _delete(collection, fid):
     return {"action": "delete", "collection": collection, "id": fid}
 
 
-def _item(conn, collection, fid):
+def _item(conn, collection, fid, *, dataset="topology"):
     """Read one feature through the public OGC function."""
     return conn.execute(
-        "select ogc.feature_item('topology', %s, %s::uuid)",
-        (collection, fid),
+        "select ogc.feature_item(%s, %s, %s::uuid)",
+        (dataset, collection, fid),
     ).fetchone()[0]
 
 
-def _items(conn, collection, lim=1000):
+def _items(conn, collection, lim=1000, *, dataset="topology"):
     """Read a feature collection through the public OGC function."""
     return conn.execute(
-        "select ogc.feature_items('topology', %s, %s, %s, %s, %s)",
-        (collection, None, lim, 0, True),
+        "select ogc.feature_items(%s, %s, %s, %s, %s, %s)",
+        (dataset, collection, None, lim, 0, True),
     ).fetchone()[0]
 
 
-def _association_rows(conn, collection, fid):
+def _association_rows(conn, collection, fid, *, dataset="topology"):
     """Read one collection's stored associations through the internal helper."""
     if collection == "surface":
-        sql = (
-            "select property, target_collection, target_id::text "
-            "from topology._surface_associations(%s::uuid) "
-            "order by property, target_id"
-        )
+        sql = f"select property, target_collection, target_id::text from {dataset}._surface_associations(%s::uuid) order by property, target_id"  # noqa: S608
     elif collection == "surface2":
-        sql = (
-            "select property, target_collection, target_id::text "
-            "from topology._surface2_associations(%s::uuid) "
-            "order by property, target_id"
-        )
+        sql = f"select property, target_collection, target_id::text from {dataset}._surface2_associations(%s::uuid) order by property, target_id"  # noqa: S608
     else:
         raise AssertionError(
             f"unexpected collection for association helper: {collection}"
@@ -184,12 +224,11 @@ def _association_rows(conn, collection, fid):
     return conn.execute(sql, (fid,)).fetchall()
 
 
-def _sources_using_rows(conn, target_collection, ids):
+def _sources_using_rows(conn, target_collection, ids, *, dataset="topology"):
     """Read reverse users of one or more target ids through the internal helper."""
+    sql = f"select collection, id::text, property, target_id::text from {dataset}._sources_using(%s, %s::uuid[]) order by collection, id, property, target_id"  # noqa: S608
     return conn.execute(
-        "select collection, id::text, property, target_id::text "
-        "from topology._sources_using(%s, %s::uuid[]) "
-        "order by collection, id, property, target_id",
+        sql,
         (target_collection, ids),
     ).fetchall()
 
@@ -222,6 +261,21 @@ def _assert_structure_clean_commit(report, expected_item_count):
     assert len(report["items"]) == expected_item_count
     assert report["structure"] == []
     assert report["geometry"] == []
+
+
+def _footprint_finding(collection, fid, reason, *, counts, roles=()):
+    members, included = counts
+    details = {"roles": sorted(roles)} if roles else {}
+    return {
+        "valid": False,
+        "collection": collection,
+        "id": fid,
+        "rule": "footprint",
+        "reason": reason,
+        "members": members,
+        "included": included,
+        "details": details,
+    }
 
 
 def _case_delete_linked_target_rolls_back_with_full_finding():
@@ -360,14 +414,26 @@ def _case_delete_two_targets_collects_findings_across_ids_and_collections():
 
 def _case_delete_non_footprint_link_still_reports_missing_member():
     border_id = _new_id()
+    border1_id = _new_id()
     surface_id = _new_id()
     return StructuralFailureCase(
         (
+            _insert(
+                "border1",
+                _LINE_GEOM,
+                {"identifikasjon": {"lokalid": border1_id}},
+                fid=border1_id,
+            ),
             _insert("border3", _LINE_GEOM_ALT_2, {}, fid=border_id),
             _insert(
                 "surface",
                 _POLYGON_GEOM,
-                {"describedByNote": [{"featuretype": "border3", "id": border_id}]},
+                {
+                    "boundedByOuter": [
+                        {"featuretype": "border1", "lokalid": border1_id}
+                    ],
+                    "describedByNote": [{"featuretype": "border3", "id": border_id}],
+                },
                 fid=surface_id,
             ),
         ),
@@ -428,7 +494,7 @@ def _case_delete_source_removes_its_own_links_before_structural_checks():
 def _case_transaction_with_no_deletes_keeps_structure_empty():
     return StructuralSuccessCase(
         (),
-        (_insert("surface", _POLYGON_GEOM, {}, fid=_new_id()),),
+        (_insert_without_geometry("surface2", {}, fid=_new_id()),),
     )
 
 
@@ -464,6 +530,373 @@ STRUCTURAL_SUCCESS_CASE_BUILDERS = [
     pytest.param(
         _case_transaction_with_no_deletes_keeps_structure_empty,
         id="transaction-with-no-deletes-keeps-structure-empty",
+    ),
+]
+
+
+def _case_outer_and_shared_are_valid():
+    raw = _case_raw()
+    border1_id = _new_id()
+    border2_id = _new_id()
+    surface_id = _new_id()
+    return FootprintRuleSuccessCase(
+        raw,
+        (
+            _insert(
+                "border1",
+                _LINE_GEOM,
+                {"identifikasjon": {"lokalid": border1_id}},
+                fid=border1_id,
+            ),
+            _insert(
+                "border2",
+                _LINE_GEOM,
+                {"identifikasjon": {"lokalid": border2_id}},
+                fid=border2_id,
+            ),
+        ),
+        (
+            _insert(
+                "surface",
+                _POLYGON_GEOM,
+                {
+                    "boundedByOuter": [
+                        {"featuretype": "border1", "lokalid": border1_id}
+                    ],
+                    "boundedByShared": [
+                        {"featuretype": "border2", "lokalid": border2_id}
+                    ],
+                },
+                fid=surface_id,
+            ),
+        ),
+    )
+
+
+def _case_outer_only_is_valid_subset():
+    raw = _case_raw()
+    border1_id = _new_id()
+    surface_id = _new_id()
+    return FootprintRuleSuccessCase(
+        raw,
+        (
+            _insert(
+                "border1",
+                _LINE_GEOM,
+                {"identifikasjon": {"lokalid": border1_id}},
+                fid=border1_id,
+            ),
+        ),
+        (
+            _insert(
+                "surface",
+                _POLYGON_GEOM,
+                {"boundedByOuter": [{"featuretype": "border1", "lokalid": border1_id}]},
+                fid=surface_id,
+            ),
+        ),
+    )
+
+
+def _case_outer_and_conditional_true_conflict():
+    raw = _case_raw()
+    border1_id = _new_id()
+    border4_id = _new_id()
+    surface_id = _new_id()
+    return FootprintRuleFailureCase(
+        raw,
+        (
+            _insert(
+                "border1",
+                _LINE_GEOM,
+                {"identifikasjon": {"lokalid": border1_id}},
+                fid=border1_id,
+            ),
+            _insert("border4", _LINE_GEOM_ALT, {"is_bounding": True}, fid=border4_id),
+        ),
+        (
+            _insert(
+                "surface",
+                _POLYGON_GEOM,
+                {
+                    "boundedByOuter": [
+                        {"featuretype": "border1", "lokalid": border1_id}
+                    ],
+                    "boundedByConditional": [
+                        {"featuretype": "border4", "id": border4_id}
+                    ],
+                },
+                fid=surface_id,
+            ),
+        ),
+        (
+            _footprint_finding(
+                "surface",
+                surface_id,
+                "conflicting_boundary_roles",
+                counts=(2, 2),
+                roles=("boundedByConditional", "boundedByOuter"),
+            ),
+        ),
+        (("border1", border1_id), ("border4", border4_id)),
+    )
+
+
+def _case_outer_and_conditional_false_is_valid():
+    raw = _case_raw()
+    border1_id = _new_id()
+    border4_id = _new_id()
+    surface_id = _new_id()
+    return FootprintRuleSuccessCase(
+        raw,
+        (
+            _insert(
+                "border1",
+                _LINE_GEOM,
+                {"identifikasjon": {"lokalid": border1_id}},
+                fid=border1_id,
+            ),
+            _insert("border4", _LINE_GEOM_ALT, {"is_bounding": False}, fid=border4_id),
+        ),
+        (
+            _insert(
+                "surface",
+                _POLYGON_GEOM,
+                {
+                    "boundedByOuter": [
+                        {"featuretype": "border1", "lokalid": border1_id}
+                    ],
+                    "boundedByConditional": [
+                        {"featuretype": "border4", "id": border4_id}
+                    ],
+                },
+                fid=surface_id,
+            ),
+        ),
+    )
+
+
+def _case_conditional_only_true_is_valid_subset():
+    raw = _case_raw()
+    border4_id = _new_id()
+    surface_id = _new_id()
+    return FootprintRuleSuccessCase(
+        raw,
+        (_insert("border4", _LINE_GEOM_ALT, {"is_bounding": True}, fid=border4_id),),
+        (
+            _insert(
+                "surface",
+                _POLYGON_GEOM,
+                {
+                    "boundedByConditional": [
+                        {"featuretype": "border4", "id": border4_id}
+                    ]
+                },
+                fid=surface_id,
+            ),
+        ),
+    )
+
+
+def _case_conditional_only_false_is_no_boundary():
+    raw = _case_raw()
+    border4_id = _new_id()
+    surface_id = _new_id()
+    return FootprintRuleFailureCase(
+        raw,
+        (_insert("border4", _LINE_GEOM_ALT, {"is_bounding": False}, fid=border4_id),),
+        (
+            _insert(
+                "surface",
+                _POLYGON_GEOM,
+                {
+                    "boundedByConditional": [
+                        {"featuretype": "border4", "id": border4_id}
+                    ]
+                },
+                fid=surface_id,
+            ),
+        ),
+        (_footprint_finding("surface", surface_id, "no_boundary", counts=(1, 0)),),
+        (("border4", border4_id),),
+    )
+
+
+def _case_optional_surface_with_no_links_is_valid():
+    raw = _case_raw()
+    surface_id = _new_id()
+    return FootprintRuleSuccessCase(
+        raw,
+        (),
+        (_insert_without_geometry("surface2", {}, fid=surface_id),),
+    )
+
+
+def _case_described_by_note_only_is_no_boundary():
+    raw = _case_raw()
+    border3_id = _new_id()
+    surface_id = _new_id()
+    return FootprintRuleFailureCase(
+        raw,
+        (_insert("border3", _LINE_GEOM_ALT_2, {}, fid=border3_id),),
+        (
+            _insert(
+                "surface",
+                _POLYGON_GEOM,
+                {"describedByNote": [{"featuretype": "border3", "id": border3_id}]},
+                fid=surface_id,
+            ),
+        ),
+        (_footprint_finding("surface", surface_id, "no_boundary", counts=(0, 0)),),
+        (("border3", border3_id),),
+    )
+
+
+def _case_touching_when_target_rechecks_surface():
+    raw = _case_raw()
+    border1_id = _new_id()
+    border4_id = _new_id()
+    surface_id = _new_id()
+    return FootprintRuleFailureCase(
+        raw,
+        (
+            _insert(
+                "border1",
+                _LINE_GEOM,
+                {"identifikasjon": {"lokalid": border1_id}},
+                fid=border1_id,
+            ),
+            _insert("border4", _LINE_GEOM_ALT, {"is_bounding": False}, fid=border4_id),
+            _insert(
+                "surface",
+                _POLYGON_GEOM,
+                {
+                    "boundedByOuter": [
+                        {"featuretype": "border1", "lokalid": border1_id}
+                    ],
+                    "boundedByConditional": [
+                        {"featuretype": "border4", "id": border4_id}
+                    ],
+                },
+                fid=surface_id,
+            ),
+        ),
+        (_update("border4", border4_id, {"is_bounding": True}),),
+        (
+            _footprint_finding(
+                "surface",
+                surface_id,
+                "conflicting_boundary_roles",
+                counts=(2, 2),
+                roles=("boundedByConditional", "boundedByOuter"),
+            ),
+        ),
+        (("border1", border1_id), ("border4", border4_id), ("surface", surface_id)),
+    )
+
+
+def _case_two_surfaces_both_conflict_are_both_reported():
+    raw = _case_raw()
+    border1_id = _new_id()
+    border4_id = _new_id()
+    surface_a_id, surface_b_id = sorted([_new_id(), _new_id()])
+    return FootprintRuleFailureCase(
+        raw,
+        (
+            _insert(
+                "border1",
+                _LINE_GEOM,
+                {"identifikasjon": {"lokalid": border1_id}},
+                fid=border1_id,
+            ),
+            _insert("border4", _LINE_GEOM_ALT, {"is_bounding": True}, fid=border4_id),
+        ),
+        (
+            _insert(
+                "surface",
+                _POLYGON_GEOM,
+                {
+                    "boundedByOuter": [
+                        {"featuretype": "border1", "lokalid": border1_id}
+                    ],
+                    "boundedByConditional": [
+                        {"featuretype": "border4", "id": border4_id}
+                    ],
+                },
+                fid=surface_a_id,
+            ),
+            _insert(
+                "surface",
+                _POLYGON_GEOM,
+                {
+                    "boundedByOuter": [
+                        {"featuretype": "border1", "lokalid": border1_id}
+                    ],
+                    "boundedByConditional": [
+                        {"featuretype": "border4", "id": border4_id}
+                    ],
+                },
+                fid=surface_b_id,
+            ),
+        ),
+        (
+            _footprint_finding(
+                "surface",
+                surface_a_id,
+                "conflicting_boundary_roles",
+                counts=(2, 2),
+                roles=("boundedByConditional", "boundedByOuter"),
+            ),
+            _footprint_finding(
+                "surface",
+                surface_b_id,
+                "conflicting_boundary_roles",
+                counts=(2, 2),
+                roles=("boundedByConditional", "boundedByOuter"),
+            ),
+        ),
+        (("border1", border1_id), ("border4", border4_id)),
+    )
+
+
+FOOTPRINT_RULE_FAILURE_CASE_BUILDERS = [
+    pytest.param(
+        _case_outer_and_conditional_true_conflict,
+        id="outer-and-conditional-true-conflict",
+    ),
+    pytest.param(
+        _case_conditional_only_false_is_no_boundary,
+        id="conditional-only-false-no-boundary",
+    ),
+    pytest.param(
+        _case_described_by_note_only_is_no_boundary,
+        id="described-by-note-only-no-boundary",
+    ),
+    pytest.param(
+        _case_touching_when_target_rechecks_surface,
+        id="touching-when-target-rechecks-surface",
+    ),
+    pytest.param(
+        _case_two_surfaces_both_conflict_are_both_reported,
+        id="two-surfaces-both-conflict-reported",
+    ),
+]
+
+
+FOOTPRINT_RULE_SUCCESS_CASE_BUILDERS = [
+    pytest.param(_case_outer_and_shared_are_valid, id="outer-and-shared-valid"),
+    pytest.param(_case_outer_only_is_valid_subset, id="outer-only-valid-subset"),
+    pytest.param(
+        _case_outer_and_conditional_false_is_valid,
+        id="outer-and-conditional-false-valid",
+    ),
+    pytest.param(
+        _case_conditional_only_true_is_valid_subset,
+        id="conditional-only-true-valid-subset",
+    ),
+    pytest.param(
+        _case_optional_surface_with_no_links_is_valid,
+        id="optional-surface-no-links-valid",
     ),
 ]
 
@@ -626,6 +1059,9 @@ def test_create_no_oi_target_by_uuid(topology_conn, borders):
             "surface",
             _POLYGON_GEOM,
             {
+                "boundedByOuter": [
+                    {"featuretype": "border1", "lokalid": borders["b1a_lokalid"]}
+                ],
                 "describedByNote": [{"featuretype": "border3", "id": borders["b3_id"]}],
             },
         ),
@@ -685,12 +1121,10 @@ def test_read_uses_declared_featuretype(topology_conn, borders):
 
 def test_property_with_no_links_is_absent_on_read(topology_conn):
     """A declared property with no links is omitted rather than returned as []."""
-    report = _txn(topology_conn, _insert("surface", _POLYGON_GEOM, {}))
+    report = _txn(topology_conn, _insert_without_geometry("surface2", {}))
 
-    got = _properties(topology_conn, "surface", report["items"][0]["id"])
+    got = _properties(topology_conn, "surface2", report["items"][0]["id"])
     assert "boundedByOuter" not in got
-    assert "boundedByShared" not in got
-    assert "describedByNote" not in got
 
 
 def test_update_leaves_unnamed_properties_intact(topology_conn, borders):
@@ -774,7 +1208,7 @@ def test_empty_array_clears_that_property(topology_conn, borders):
     create_report = _txn(
         topology_conn,
         _insert(
-            "surface",
+            "surface2",
             _POLYGON_GEOM,
             {
                 "boundedByOuter": [
@@ -785,9 +1219,9 @@ def test_empty_array_clears_that_property(topology_conn, borders):
     )
     surface_id = create_report["items"][0]["id"]
 
-    _txn(topology_conn, _update("surface", surface_id, {"boundedByOuter": []}))
+    _txn(topology_conn, _update("surface2", surface_id, {"boundedByOuter": []}))
 
-    got = _properties(topology_conn, "surface", surface_id)
+    got = _properties(topology_conn, "surface2", surface_id)
     assert "boundedByOuter" not in got
 
 
@@ -1004,7 +1438,12 @@ def test_feature_items_returns_links_for_multiple_features(topology_conn, border
         _insert(
             "surface",
             _POLYGON_GEOM,
-            {"describedByNote": [{"featuretype": "border3", "id": borders["b3_id"]}]},
+            {
+                "boundedByOuter": [
+                    {"featuretype": "border1", "lokalid": borders["b1b_lokalid"]}
+                ],
+                "describedByNote": [{"featuretype": "border3", "id": borders["b3_id"]}],
+            },
         ),
     )
 
@@ -1012,6 +1451,9 @@ def test_feature_items_returns_links_for_multiple_features(topology_conn, border
     by_id = {str(feature["id"]): feature for feature in features}
     assert by_id[first["items"][0]["id"]]["properties"]["boundedByOuter"] == [
         {"featuretype": "border1", "lokalid": borders["b1a_lokalid"]}
+    ]
+    assert by_id[second["items"][0]["id"]]["properties"]["boundedByOuter"] == [
+        {"featuretype": "border1", "lokalid": borders["b1b_lokalid"]}
     ]
     assert by_id[second["items"][0]["id"]]["properties"]["describedByNote"] == [
         {"featuretype": "border3", "id": borders["b3_id"]}
@@ -1163,6 +1605,38 @@ def test_structural_checks_clean_documents_commit_without_structure_findings(
     _assert_structure_clean_commit(report, len(case.tx_items))
     for collection, fid in case.expected_association_clears:
         assert _association_rows(topology_conn, collection, fid) == []
+
+
+@pytest.mark.parametrize("case_builder", FOOTPRINT_RULE_FAILURE_CASE_BUILDERS)
+def test_structural_checks_one_of_and_when_failures_roll_back_with_findings(
+    db, case_builder
+):
+    case = case_builder()
+    dataset = case.raw["name"]
+    with _topology_case_conn(db, case.raw) as conn:
+        if case.setup_items:
+            setup = _txn(conn, *case.setup_items, dataset=dataset)
+            _assert_structure_clean_commit(setup, len(case.setup_items))
+
+        report = _txn(conn, *case.tx_items, dataset=dataset)
+
+        _assert_structure_failure(report, case.expected_findings)
+        for collection, fid in case.expected_present:
+            assert _item(conn, collection, fid, dataset=dataset) is not None
+
+
+@pytest.mark.parametrize("case_builder", FOOTPRINT_RULE_SUCCESS_CASE_BUILDERS)
+def test_structural_checks_one_of_and_when_valid_cases_commit_cleanly(db, case_builder):
+    case = case_builder()
+    dataset = case.raw["name"]
+    with _topology_case_conn(db, case.raw) as conn:
+        if case.setup_items:
+            setup = _txn(conn, *case.setup_items, dataset=dataset)
+            _assert_structure_clean_commit(setup, len(case.setup_items))
+
+        report = _txn(conn, *case.tx_items, dataset=dataset)
+
+        _assert_structure_clean_commit(report, len(case.tx_items))
 
 
 def test_upsert_rejects_declared_link_property(db):

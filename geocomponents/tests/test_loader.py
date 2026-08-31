@@ -94,10 +94,10 @@ DERIVED_RESOLVE_CASES = [
         ),
     ),
     DerivedResolveCase(
-        "derived-is-optional",
+        "surface2-optional-derived-resolves",
         _topology_fixture_raw(),
         "surface2",
-        None,
+        ((("boundedByOuter", "border1", None),),),
     ),
 ]
 

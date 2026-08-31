@@ -25,6 +25,8 @@ from geocomponents.schema.plan import (
     CollectionPlan,
     CollectionRolePlan,
     ColumnPlan,
+    DerivedPlan,
+    DerivedRolePlan,
     ForeignKeyPlan,
     GeometryColumnPlan,
     IndexPlan,
@@ -180,11 +182,34 @@ def _build_role(
     )
 
 
+def _build_derived(coll: ResolvedCollection, schema: str) -> DerivedPlan | None:
+    if coll.derived is None:
+        return None
+    one_of = tuple(
+        tuple(
+            DerivedRolePlan(
+                property=role.property,
+                target_collection=role.target,
+                target_table=f"{schema}.{role.target}",
+                when_field=role.when_field,
+            )
+            for role in alternative
+        )
+        for alternative in coll.derived.one_of
+    )
+    return DerivedPlan(
+        rule=coll.derived.rule,
+        required=coll.geometry_required,
+        one_of=one_of,
+    )
+
+
 def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
     """Turn a resolved dataset into a ``SchemaPlan`` -- the tables, columns,
     geometries, foreign keys, and function names it needs.
     """
     schema = dataset.name
+    coll_by_name = {c.name: c for c in dataset.collections}
     collections: list[CollectionPlan] = []
     for coll in dataset.collections:
         table = _build_table(schema, coll)
@@ -192,7 +217,6 @@ def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
         if coll.supports_upsert:
             ops += (UPSERT_OP,)
         functions = {op: internal_function(schema, coll.name, op) for op in ops}
-        coll_by_name = {c.name: c for c in dataset.collections}
         roles = tuple(
             _build_role(rel, schema, coll_by_name[rel.target])
             for rel in coll.relationships
@@ -206,6 +230,7 @@ def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
                 upsert_field=coll.upsert_field,
                 upsert_path=coll.upsert_path,
                 roles=roles,
+                derived=_build_derived(coll, schema),
             )
         )
     role_rows = [

@@ -32,6 +32,11 @@ collections:
     geometry:
       type: MultiPolygon
       srid: 4326
+      required: false
+      derived:
+        rule: footprint
+        one_of:
+          - [boundedByOuter]
     relationships:
       - property: boundedByOuter
         target: border1

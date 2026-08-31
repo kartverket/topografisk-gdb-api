@@ -68,6 +68,25 @@ class CollectionRolePlan:
 
 
 @dataclass(frozen=True)
+class DerivedRolePlan:
+    """One derived-footprint role baked into generated SQL constants."""
+
+    property: str
+    target_collection: str
+    target_table: str
+    when_field: str | None = None
+
+
+@dataclass(frozen=True)
+class DerivedPlan:
+    """Everything the footprint-verdict generator needs for one collection."""
+
+    rule: str
+    required: bool
+    one_of: tuple[tuple[DerivedRolePlan, ...], ...]
+
+
+@dataclass(frozen=True)
 class IndexPlan:
     """One index to emit after the table DDL."""
 
@@ -155,6 +174,7 @@ class CollectionPlan:
     upsert_field: str | None = None
     upsert_path: str | None = None
     roles: tuple[CollectionRolePlan, ...] = ()
+    derived: DerivedPlan | None = None
 
     @property
     def id_field(self) -> str:
