@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from geocomponents.descriptions.models import DerivedAreas, DerivedHoles
+
 # Operations split by capability: reads exist for every collection; the
 # generator emits write functions for every collection, while the public
 # dispatch layer decides which collections expose direct Part 4 CRUD.
@@ -83,6 +85,8 @@ class DerivedPlan:
 
     rule: str
     required: bool
+    areas: DerivedAreas
+    holes: DerivedHoles
     one_of: tuple[tuple[DerivedRolePlan, ...], ...]
 
 

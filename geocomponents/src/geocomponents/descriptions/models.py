@@ -17,6 +17,7 @@ PostgreSQL type here, but the concept (a column with a type) is generic.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
@@ -151,6 +152,16 @@ DerivedRule = Literal["footprint"]
 RelationshipPropertyName = Annotated[str, StringConstraints(min_length=1)]
 
 
+class DerivedAreas(StrEnum):
+    ONE = "one"
+    MANY = "many"
+
+
+class DerivedHoles(StrEnum):
+    ALLOWED = "allowed"
+    FORBIDDEN = "forbidden"
+
+
 class DerivedRoleDef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -169,6 +180,8 @@ class DerivedDef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     rule: DerivedRule
+    areas: DerivedAreas
+    holes: DerivedHoles
     one_of: list[list[DerivedRoleDef]]
 
     @model_validator(mode="after")
@@ -309,6 +322,8 @@ class ResolvedDerivedRole:
 @dataclass(frozen=True)
 class ResolvedDerivedDef:
     rule: str
+    areas: DerivedAreas
+    holes: DerivedHoles
     one_of: tuple[tuple[ResolvedDerivedRole, ...], ...]
 
 

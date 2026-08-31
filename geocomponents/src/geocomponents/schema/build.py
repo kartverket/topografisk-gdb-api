@@ -200,6 +200,8 @@ def _build_derived(coll: ResolvedCollection, schema: str) -> DerivedPlan | None:
     return DerivedPlan(
         rule=coll.derived.rule,
         required=coll.geometry_required,
+        areas=coll.derived.areas,
+        holes=coll.derived.holes,
         one_of=one_of,
     )
 

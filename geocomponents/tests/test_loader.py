@@ -49,7 +49,9 @@ class DerivedResolveCase:
     id: str
     raw: dict
     collection_name: str
-    expected: tuple[tuple[tuple[str, str, str | None], ...], ...] | None
+    expected: (
+        tuple[str, str, tuple[tuple[tuple[str, str, str | None], ...], ...]] | None
+    )
 
 
 @dataclass(frozen=True)
@@ -63,10 +65,20 @@ def _topology_fixture_raw() -> dict:
     return yaml.safe_load(TOPOLOGY_FIXTURE.read_text(encoding="utf-8"))
 
 
-def _with_surface_derived(one_of: list[list[object]]) -> dict:
+def _with_surface_derived(
+    one_of: list[list[object]],
+    *,
+    areas: str | None = "one",
+    holes: str | None = "allowed",
+) -> dict:
     raw = deepcopy(_topology_fixture_raw())
     surface = next(coll for coll in raw["collections"] if coll["name"] == "surface")
-    surface["geometry"]["derived"] = {"rule": "footprint", "one_of": one_of}
+    derived = {"rule": "footprint", "one_of": one_of}
+    if areas is not None:
+        derived["areas"] = areas
+    if holes is not None:
+        derived["holes"] = holes
+    surface["geometry"]["derived"] = derived
     return raw
 
 
@@ -77,32 +89,91 @@ def _with_border4_when_field(flag_type: str) -> dict:
     return raw
 
 
+def _without_derived_shape(collection_name: str) -> dict:
+    raw = deepcopy(_topology_fixture_raw())
+    collection = next(
+        coll for coll in raw["collections"] if coll["name"] == collection_name
+    )
+    del collection["geometry"]["derived"]["areas"]
+    del collection["geometry"]["derived"]["holes"]
+    return raw
+
+
 DERIVED_RESOLVE_CASES = [
     DerivedResolveCase(
-        "declared-relationships-resolve",
-        _with_surface_derived([["boundedByOuter", "boundedByShared"]]),
-        "surface",
-        ((("boundedByOuter", "border1", None), ("boundedByShared", "border2", None)),),
-    ),
-    DerivedResolveCase(
-        "when-boolean-field-resolves",
-        _topology_fixture_raw(),
+        "areas-one-and-holes-allowed-resolve",
+        _with_surface_derived(
+            [["boundedByOuter", "boundedByShared"]],
+            areas="one",
+            holes="allowed",
+        ),
         "surface",
         (
-            (("boundedByOuter", "border1", None), ("boundedByShared", "border2", None)),
-            (("boundedByConditional", "border4", "is_bounding"),),
+            "one",
+            "allowed",
+            (
+                (
+                    ("boundedByOuter", "border1", None),
+                    ("boundedByShared", "border2", None),
+                ),
+            ),
         ),
     ),
     DerivedResolveCase(
-        "surface2-optional-derived-resolves",
+        "areas-many-and-holes-forbidden-resolve",
+        _with_surface_derived(
+            [["boundedByOuter", "boundedByShared"]],
+            areas="many",
+            holes="forbidden",
+        ),
+        "surface",
+        (
+            "many",
+            "forbidden",
+            (
+                (
+                    ("boundedByOuter", "border1", None),
+                    ("boundedByShared", "border2", None),
+                ),
+            ),
+        ),
+    ),
+    DerivedResolveCase(
+        "fixture-surface-explicit-areas-and-holes-resolve",
+        _topology_fixture_raw(),
+        "surface",
+        (
+            "one",
+            "allowed",
+            (
+                (
+                    ("boundedByOuter", "border1", None),
+                    ("boundedByShared", "border2", None),
+                ),
+                (("boundedByConditional", "border4", "is_bounding"),),
+            ),
+        ),
+    ),
+    DerivedResolveCase(
+        "fixture-surface2-explicit-areas-and-holes-resolve",
         _topology_fixture_raw(),
         "surface2",
-        ((("boundedByOuter", "border1", None),),),
+        ("many", "forbidden", ((("boundedByOuter", "border1", None),),)),
     ),
 ]
 
 
 DERIVED_REJECT_CASES = [
+    DerivedRejectCase(
+        "omitted-areas-and-holes-on-required-surface-are-rejected",
+        _without_derived_shape("surface"),
+        "areas",
+    ),
+    DerivedRejectCase(
+        "omitted-areas-and-holes-on-optional-surface-are-rejected",
+        _without_derived_shape("surface2"),
+        "areas",
+    ),
     DerivedRejectCase(
         "undeclared-property-is-rejected",
         _with_surface_derived([["boundedByGhost", "boundedByShared"]]),
@@ -128,12 +199,18 @@ DERIVED_REJECT_CASES = [
 ]
 
 
-def _derived_shape(coll) -> tuple[tuple[tuple[str, str, str | None], ...], ...] | None:
+def _derived_shape(
+    coll,
+) -> tuple[str, str, tuple[tuple[tuple[str, str, str | None], ...], ...]] | None:
     if coll.derived is None:
         return None
-    return tuple(
-        tuple((role.property, role.target, role.when_field) for role in alternative)
-        for alternative in coll.derived.one_of
+    return (
+        coll.derived.areas.value,
+        coll.derived.holes.value,
+        tuple(
+            tuple((role.property, role.target, role.when_field) for role in alternative)
+            for alternative in coll.derived.one_of
+        ),
     )
 
 
@@ -202,6 +279,8 @@ def test_footprint_derived_geometry_requires_multipolygon(geometry_type, tmp_pat
                             "type": geometry_type,
                             "derived": {
                                 "rule": "footprint",
+                                "areas": "one",
+                                "holes": "allowed",
                                 "one_of": [["boundedByOuter"]],
                             },
                         },
@@ -229,8 +308,13 @@ def test_collection_derived_resolves(case):
 
 @pytest.mark.parametrize("case", DERIVED_REJECT_CASES, ids=lambda case: case.id)
 def test_collection_derived_rejects_invalid_resolution(case):
-    dataset = DatasetDef.model_validate(case.raw)
-    with pytest.raises(DescriptionError, match=case.error_fragment):
+    expectation = (
+        pytest.raises(ValidationError, match=case.error_fragment)
+        if case.error_fragment in {"areas", "holes"}
+        else pytest.raises(DescriptionError, match=case.error_fragment)
+    )
+    with expectation:
+        dataset = DatasetDef.model_validate(case.raw)
         resolve_dataset(dataset, Commons())
 
 

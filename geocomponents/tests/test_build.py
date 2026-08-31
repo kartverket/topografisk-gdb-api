@@ -4,8 +4,12 @@ import pytest
 
 from geocomponents.descriptions.loader import load_resolved_datasets
 from geocomponents.descriptions.models import (
+    DerivedAreas,
+    DerivedHoles,
     ResolvedCollection,
     ResolvedDataset,
+    ResolvedDerivedDef,
+    ResolvedDerivedRole,
     ResolvedField,
 )
 from geocomponents.schema import postgis
@@ -21,6 +25,8 @@ def _make_dataset(
     fields: list[ResolvedField] | None = None,
     server_managed_paths: dict[str, str] | None = None,
     outward_identifier_path: str | None = None,
+    geometry_type: str = "Point",
+    derived: ResolvedDerivedDef | None = None,
 ) -> ResolvedDataset:
     """Minimal dataset fixture for build tests."""
     return ResolvedDataset(
@@ -33,15 +39,51 @@ def _make_dataset(
                 title="C",
                 description="",
                 feature_model="simple",
-                geometry_type="Point",
+                geometry_type=geometry_type,
                 srid=4258,
                 fields=tuple(fields or []),
                 relationships=(),
+                derived=derived,
                 server_managed_paths=server_managed_paths or {},
                 outward_identifier_path=outward_identifier_path,
             ),
         ),
     )
+
+
+@pytest.mark.parametrize(
+    ("areas", "holes"),
+    [
+        (DerivedAreas.ONE, DerivedHoles.ALLOWED),
+        (DerivedAreas.MANY, DerivedHoles.FORBIDDEN),
+    ],
+    ids=["areas-one-holes-allowed", "areas-many-holes-forbidden"],
+)
+def test_derived_plan_carries_areas_and_holes(areas, holes):
+    ds = _make_dataset(
+        geometry_type="MultiPolygon",
+        derived=ResolvedDerivedDef(
+            rule="footprint",
+            areas=areas,
+            holes=holes,
+            one_of=((ResolvedDerivedRole("boundedByOuter", "border"),),),
+        ),
+    )
+
+    plan = build_schema_plan(ds)
+    derived = plan.collections[0].derived
+
+    assert derived is not None
+    assert derived.rule == "footprint"
+    assert derived.areas is areas
+    assert derived.holes is holes
+    assert len(derived.one_of) == 1
+    assert len(derived.one_of[0]) == 1
+    role = derived.one_of[0][0]
+    assert role.property == "boundedByOuter"
+    assert role.target_collection == "border"
+    assert role.target_table == "x.border"
+    assert role.when_field is None
 
 
 def _cadastre_plan():

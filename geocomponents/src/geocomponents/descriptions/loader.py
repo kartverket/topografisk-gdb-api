@@ -288,7 +288,12 @@ def _resolve_derived(
             )
         resolved_alternatives.append(tuple(resolved_roles))
 
-    return ResolvedDerivedDef(rule=derived.rule, one_of=tuple(resolved_alternatives))
+    return ResolvedDerivedDef(
+        rule=derived.rule,
+        areas=derived.areas,
+        holes=derived.holes,
+        one_of=tuple(resolved_alternatives),
+    )
 
 
 def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:

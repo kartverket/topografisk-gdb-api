@@ -12,6 +12,8 @@ collections:
       srid: 4326
       derived:
         rule: footprint
+        areas: one
+        holes: allowed
         one_of:
           - [boundedByOuter, boundedByShared]
           - [{name: boundedByConditional, when: is_bounding}]
@@ -35,6 +37,8 @@ collections:
       required: false
       derived:
         rule: footprint
+        areas: many
+        holes: forbidden
         one_of:
           - [boundedByOuter]
     relationships:

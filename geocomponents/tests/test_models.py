@@ -10,6 +10,8 @@ from pydantic import ValidationError
 from geocomponents.descriptions.models import (
     CollectionDef,
     DatasetDef,
+    DerivedAreas,
+    DerivedHoles,
     FieldDef,
     GeometryDef,
 )
@@ -115,6 +117,66 @@ DERIVED_GEOMETRY_REJECT_CASES = [
         },
         "one_of",
     ),
+    DerivedGeometryRejectCase(
+        "areas-must-be-one-or-many",
+        {
+            "type": "MultiPolygon",
+            "derived": {
+                "rule": "footprint",
+                "areas": "two",
+                "one_of": [["boundedByOuter"]],
+            },
+        },
+        "two",
+    ),
+    DerivedGeometryRejectCase(
+        "holes-must-be-allowed-or-forbidden",
+        {
+            "type": "MultiPolygon",
+            "derived": {
+                "rule": "footprint",
+                "holes": "maybe",
+                "one_of": [["boundedByOuter"]],
+            },
+        },
+        "maybe",
+    ),
+    DerivedGeometryRejectCase(
+        "areas-and-holes-require-rule",
+        {
+            "type": "MultiPolygon",
+            "derived": {
+                "areas": "one",
+                "holes": "allowed",
+                "one_of": [["boundedByOuter"]],
+            },
+        },
+        "rule",
+    ),
+    DerivedGeometryRejectCase(
+        "areas-is-required",
+        {
+            "type": "MultiPolygon",
+            "derived": {
+                "rule": "footprint",
+                "holes": "allowed",
+                "one_of": [["boundedByOuter"]],
+            },
+        },
+        "areas",
+    ),
+    DerivedGeometryRejectCase(
+        "holes-is-required",
+        {
+            "type": "MultiPolygon",
+            "derived": {
+                "rule": "footprint",
+                "areas": "one",
+                "one_of": [["boundedByOuter"]],
+            },
+        },
+        "holes",
+    ),
 ]
 
 
@@ -124,6 +186,8 @@ def test_geometry_derived_parses_and_normalizes_members():
             "type": "MultiPolygon",
             "derived": {
                 "rule": "footprint",
+                "areas": "many",
+                "holes": "allowed",
                 "one_of": [
                     [
                         "boundedByOuter",
@@ -136,10 +200,30 @@ def test_geometry_derived_parses_and_normalizes_members():
 
     assert geometry.derived is not None
     assert geometry.derived.rule == "footprint"
+    assert geometry.derived.areas is DerivedAreas.MANY
+    assert geometry.derived.holes is DerivedHoles.ALLOWED
     assert [
         [(role.name, role.when) for role in alternative]
         for alternative in geometry.derived.one_of
     ] == [[("boundedByOuter", None), ("boundedByFacade", "is_bounding")]]
+
+
+def test_geometry_derived_parses_explicit_areas_and_holes():
+    geometry = GeometryDef.model_validate(
+        {
+            "type": "MultiPolygon",
+            "derived": {
+                "rule": "footprint",
+                "areas": "one",
+                "holes": "forbidden",
+                "one_of": [["boundedByOuter"]],
+            },
+        }
+    )
+
+    assert geometry.derived is not None
+    assert geometry.derived.areas is DerivedAreas.ONE
+    assert geometry.derived.holes is DerivedHoles.FORBIDDEN
 
 
 @pytest.mark.parametrize(
