@@ -25,6 +25,10 @@ from geocomponents.schema.build import build_schema_plan
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "topology_fixture.yaml"
 _BORDER_ID = str(uuid.UUID(int=0xB1A))
 _LINE_GEOM = {"type": "LineString", "coordinates": [[0, 0], [1, 0]]}
+_OUTER_RING_GEOM = {
+    "type": "LineString",
+    "coordinates": [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]],
+}
 _POLYGON_GEOM = {
     "type": "MultiPolygon",
     "coordinates": [[[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]],
@@ -229,7 +233,11 @@ def test_guard_aborts_when_referenced_property_removed(topology_conn, db):
     target_id = None
     target_report = _txn(
         topology_conn,
-        _insert("border1", _LINE_GEOM, {"identifikasjon": {"lokalid": _BORDER_ID}}),
+        _insert(
+            "border1",
+            _OUTER_RING_GEOM,
+            {"identifikasjon": {"lokalid": _BORDER_ID}},
+        ),
     )
     assert target_report["committed"] is True
     target_id = target_report["items"][0]["id"]

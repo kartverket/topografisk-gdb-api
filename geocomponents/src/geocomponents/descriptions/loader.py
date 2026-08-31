@@ -238,6 +238,7 @@ def _resolve_relationships(
 def _resolve_derived(
     coll: CollectionDef,
     relationships: tuple[ResolvedRelationship, ...],
+    collections_by_name: dict[str, CollectionDef],
     resolved_fields_by_collection: dict[str, tuple[ResolvedField, ...]],
     *,
     where: str,
@@ -256,6 +257,21 @@ def _resolve_derived(
                 raise DescriptionError(
                     f"{where}: derived property '{role.name}' is not a declared "
                     "relationship"
+                )
+
+            target_collection = collections_by_name[relationship.target]
+            if target_collection.geometry.type not in {"LineString", "MultiLineString"}:
+                raise DescriptionError(
+                    f"{where}: derived property '{role.name}' targets collection "
+                    f"'{relationship.target}' with geometry type "
+                    f"'{target_collection.geometry.type}' (expected LineString or "
+                    "MultiLineString)"
+                )
+            if target_collection.geometry.srid != coll.geometry.srid:
+                raise DescriptionError(
+                    f"{where}: derived property '{role.name}' targets collection "
+                    f"'{relationship.target}' with SRID {target_collection.geometry.srid} "
+                    f"but the surface geometry uses SRID {coll.geometry.srid}"
                 )
 
             when_field = None
@@ -302,6 +318,7 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
     codelists: dict[str, CodeList] = {c.name: c for c in commons.code_lists}
     codelists.update({c.name: c for c in dataset.codelists})
     collection_names = {c.name for c in dataset.collections}
+    collections_by_name = {c.name: c for c in dataset.collections}
 
     unknown_processes = set(dataset.processes) - known_process_ids()
     if unknown_processes:
@@ -396,6 +413,7 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
         resolved_derived = _resolve_derived(
             prepared.collection,
             resolved_rels,
+            collections_by_name,
             resolved_fields_by_collection,
             where=prepared.where,
         )

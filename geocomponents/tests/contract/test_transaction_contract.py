@@ -154,12 +154,14 @@ def _assert_document_level_rejection(report):
         "committed",
         "phase",
         "reason",
+        "sqlstate",
         "items",
         "structure",
         "geometry",
     }
     assert report["committed"] is False
-    assert report["phase"] == "items"
+    assert report["phase"] == "document"
+    assert report["sqlstate"] == "P0001"
     assert report["items"] == []
     assert report["structure"] == []
     assert report["geometry"] == []

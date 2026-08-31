@@ -89,6 +89,23 @@ def _with_border4_when_field(flag_type: str) -> dict:
     return raw
 
 
+def _with_target_geometry(
+    collection_name: str,
+    *,
+    geometry_type: str | None = None,
+    srid: int | None = None,
+) -> dict:
+    raw = deepcopy(_topology_fixture_raw())
+    target = next(
+        coll for coll in raw["collections"] if coll["name"] == collection_name
+    )
+    if geometry_type is not None:
+        target["geometry"]["type"] = geometry_type
+    if srid is not None:
+        target["geometry"]["srid"] = srid
+    return raw
+
+
 def _without_derived_shape(collection_name: str) -> dict:
     raw = deepcopy(_topology_fixture_raw())
     collection = next(
@@ -195,6 +212,16 @@ DERIVED_REJECT_CASES = [
         "non-boolean-when-field-is-rejected",
         _with_border4_when_field("string"),
         "is_bounding",
+    ),
+    DerivedRejectCase(
+        "non-line-target-geometry-is-rejected",
+        _with_target_geometry("border1", geometry_type="Point"),
+        "Point",
+    ),
+    DerivedRejectCase(
+        "target-srid-mismatch-is-rejected",
+        _with_target_geometry("border1", srid=3857),
+        "3857",
     ),
 ]
 

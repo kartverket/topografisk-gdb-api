@@ -107,7 +107,7 @@ _BOWTIE_POLY = {
     "coordinates": [[[0, 0], [2, 2], [2, 0], [0, 2], [0, 0]]],
 }
 
-# ST_IsValid=False, ST_IsSimple=True — caught by validity only (case 6)
+# ST_IsValid=False, ST_IsSimple=True — caught by validity only
 _EDGE_MPOLY = {
     "type": "MultiPolygon",
     "coordinates": [

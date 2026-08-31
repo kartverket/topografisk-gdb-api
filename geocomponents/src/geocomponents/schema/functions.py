@@ -173,14 +173,16 @@ declare
     report_items jsonb := '[]'::jsonb;
     touched_features jsonb := '[]'::jsonb;
     structure_findings jsonb := '[]'::jsonb;
+    geometry_findings jsonb := '[]'::jsonb;
     current_item record;
     current_action text;
     current_collection text;
     current_id text;
     current_feature jsonb;
     current_feature_model text;
-    in_item boolean := false;
+    phase text := 'document';
     structure_failed boolean := false;
+    geometry_failed boolean := false;
     created_id uuid;
     wrote boolean;
     report_reason text := null;
@@ -200,7 +202,7 @@ begin
             select ordinality - 1 as item_index, value as item
             from jsonb_array_elements(tx_items) with ordinality
         loop
-            in_item := true;
+            phase := 'items';
             current_action := current_item.item->>'action';
             current_collection := current_item.item->>'collection';
             current_feature := current_item.item->'feature';
@@ -281,6 +283,7 @@ begin
         end loop;
 
         if touched_features <> '[]'::jsonb then
+            phase := 'structure';
             execute format(
                 $q$
 with touched_rows as (
@@ -324,6 +327,7 @@ $q$,
         end if;
 
         if structure_findings = '[]'::jsonb and touched_features <> '[]'::jsonb then
+            phase := 'structure';
             execute format(
                 $q$
 with touched_rows as (
@@ -345,7 +349,7 @@ with touched_rows as (
 ), verdicts as (
     select d.collection,
            d.id,
-           %1$I._footprint_verdict(d.collection, d.id) as verdict
+           %1$I._footprint_structure_verdict(d.collection, d.id) as verdict
     from dirty_surfaces d
 )
 select coalesce(jsonb_agg(verdict order by collection, id), '[]'::jsonb)
@@ -361,6 +365,46 @@ $q$,
             structure_failed := true;
             raise exception 'transaction failed structure checks' using errcode = 'P0001';
         end if;
+
+        if touched_features <> '[]'::jsonb then
+            phase := 'geometry';
+            execute format(
+                $q$
+with touched_rows as (
+    select collection, id
+    from jsonb_to_recordset($1)
+         as t(item_index int, action text, collection text, id uuid)
+), touched_sets as (
+    select collection, array_agg(distinct id order by id) as ids
+    from touched_rows
+    group by collection
+), reverse_surfaces as (
+    select distinct s.collection, s.id
+    from touched_sets t
+    cross join lateral %1$I._sources_using(t.collection, t.ids) s
+), dirty_surfaces as (
+    select distinct collection, id from touched_rows
+    union
+    select collection, id from reverse_surfaces
+), verdicts as (
+    select d.collection,
+           d.id,
+           %1$I._footprint_geometry_verdict(d.collection, d.id) as verdict
+    from dirty_surfaces d
+)
+select coalesce(jsonb_agg(verdict order by collection, id), '[]'::jsonb)
+from verdicts
+where verdict is not null
+  and (verdict->>'valid')::boolean is false
+$q$,
+                dataset)
+                into geometry_findings using touched_features;
+        end if;
+
+        if geometry_findings <> '[]'::jsonb then
+            geometry_failed := true;
+            raise exception 'transaction failed geometry checks' using errcode = 'P0001';
+        end if;
     exception
         when syntax_error_or_access_rule_violation then
             raise;
@@ -374,7 +418,16 @@ $q$,
                     'structure', structure_findings,
                     'geometry', '[]'::jsonb);
             end if;
-            if in_item then
+            if geometry_failed then
+                return jsonb_build_object(
+                    'committed', false,
+                    'phase', 'geometry',
+                    'reason', null,
+                    'items', '[]'::jsonb,
+                    'structure', '[]'::jsonb,
+                    'geometry', geometry_findings);
+            end if;
+            if phase = 'items' then
                 report_items := jsonb_build_array(jsonb_build_object(
                     'index', current_item.item_index,
                     'action', current_action,
@@ -389,11 +442,15 @@ $q$,
             end if;
             return jsonb_build_object(
                 'committed', false,
-                'phase', 'items',
+                'phase', phase,
                 'reason', report_reason,
                 'items', report_items,
                 'structure', '[]'::jsonb,
-                'geometry', '[]'::jsonb);
+                'geometry', '[]'::jsonb)
+                || case
+                    when phase = 'items' then '{{}}'::jsonb
+                    else jsonb_build_object('sqlstate', sqlstate)
+                end;
     end;
 
     return jsonb_build_object(
@@ -873,12 +930,49 @@ language sql stable as $func$
 $func$"""
 
 
-def _fn_footprint_verdict(plan: CollectionPlan, derived: DerivedPlan) -> str:
-
+def _derived_roles(derived: DerivedPlan) -> tuple[DerivedRolePlan, ...]:
     roles_by_property: dict[str, DerivedRolePlan] = {}
     for alternative in derived.one_of:
         for role in alternative:
             roles_by_property.setdefault(role.property, role)
+    return tuple(roles_by_property.values())
+
+
+def _fn_footprint_members(plan: CollectionPlan, derived: DerivedPlan) -> str:
+    selects = []
+    for role in _derived_roles(derived):
+        included_expr = (
+            "true"
+            if role.when_field is None
+            else f'coalesce(t."{role.when_field}", false)'
+        )
+        selects.append(
+            "    select a.property,\n"
+            "           a.target_collection,\n"
+            "           a.target_id,\n"
+            f"           {included_expr} as included,\n"
+            '           t."geometry" as geom\n'
+            f"    from {plan.table.schema}._{plan.collection_name}_associations(fid) a\n"
+            f'    left join {role.target_table} t on t."id" = a.target_id\n'
+            f"    where a.property = '{_quote_key(role.property)}'"
+        )
+    body = "\n    union all\n".join(selects) + "\n    order by property, target_id"
+    return f"""\
+create or replace function {plan.table.schema}._{plan.collection_name}_footprint_members(fid uuid)
+returns table (
+    property text,
+    target_collection text,
+    target_id uuid,
+    included boolean,
+    geom geometry)
+language sql stable as $func$
+{body};
+$func$"""
+
+
+def _fn_footprint_structure_verdict(plan: CollectionPlan, derived: DerivedPlan) -> str:
+
+    roles_by_property = {role.property: role for role in _derived_roles(derived)}
 
     member_selects = []
     for role in roles_by_property.values():
@@ -952,7 +1046,7 @@ def _fn_footprint_verdict(plan: CollectionPlan, derived: DerivedPlan) -> str:
         )
 
     return f"""\
-create or replace function {plan.table.schema}._{plan.collection_name}_footprint_verdict(fid uuid)
+create or replace function {plan.table.schema}._{plan.collection_name}_footprint_structure_verdict(fid uuid)
 returns jsonb language sql stable as $func$
 with present as (
     select t."{plan.table.id_column}" as id
@@ -999,23 +1093,208 @@ end;
 $func$"""
 
 
-def _fn_footprint_verdict_dispatch(plan: SchemaPlan) -> str:
+def _fn_footprint_structure_verdict_dispatch(plan: SchemaPlan) -> str:
     derived_collections = [
         coll for coll in plan.collections if coll.derived is not None
     ]
     if not derived_collections:
         return f"""\
-create or replace function {plan.schema_name}._footprint_verdict(collection text, fid uuid)
+create or replace function {plan.schema_name}._footprint_structure_verdict(collection text, fid uuid)
 returns jsonb language sql stable as $func$
     select null::jsonb;
 $func$"""
 
     branches = "\n".join(
-        f"    when '{_quote_key(coll.collection_name)}' then return {plan.schema_name}._{coll.collection_name}_footprint_verdict(fid);"
+        f"    when '{_quote_key(coll.collection_name)}' then return {plan.schema_name}._{coll.collection_name}_footprint_structure_verdict(fid);"
         for coll in derived_collections
     )
     return f"""\
-create or replace function {plan.schema_name}._footprint_verdict(collection text, fid uuid)
+create or replace function {plan.schema_name}._footprint_structure_verdict(collection text, fid uuid)
+returns jsonb language plpgsql stable as $func$
+begin
+  case collection
+{branches}
+    else
+      return null;
+  end case;
+end;
+$func$"""
+
+
+def _fn_footprint_geometry_verdict(plan: CollectionPlan, derived: DerivedPlan) -> str:
+    areas_restricted = derived.areas == "one"
+    holes_restricted = derived.holes == "forbidden"
+    areas_check = (
+        f"""    if (facts).areas > 1 then
+        return jsonb_build_object(
+            'valid', false,
+            'collection', '{_quote_key(plan.collection_name)}',
+            'id', fid::text,
+            'rule', '{_quote_key(derived.rule)}',
+            'reason', 'multiple_disjoint_areas',
+            'members', member_count,
+            'included', included_count,
+            'areas', (facts).areas,
+            'holes', (facts).holes,
+            'details', jsonb_build_object('areas', (facts).areas));
+    end if;
+"""
+        if areas_restricted
+        else ""
+    )
+    holes_check = (
+        f"""    if (facts).holes > 0 then
+        return jsonb_build_object(
+            'valid', false,
+            'collection', '{_quote_key(plan.collection_name)}',
+            'id', fid::text,
+            'rule', '{_quote_key(derived.rule)}',
+            'reason', 'holes_not_allowed',
+            'members', member_count,
+            'included', included_count,
+            'areas', (facts).areas,
+            'holes', (facts).holes,
+            'details', jsonb_build_object('holes', (facts).holes));
+    end if;
+"""
+        if holes_restricted
+        else ""
+    )
+    return f"""\
+create or replace function {plan.table.schema}._{plan.collection_name}_footprint_geometry_verdict(fid uuid)
+returns jsonb language plpgsql stable as $func$
+declare
+    member_count int := 0;
+    included_count int := 0;
+    linework geometry;
+    facts topogdb.footprint_facts;
+    unused jsonb := '[]'::jsonb;
+begin
+    if not exists(
+        select 1
+        from {plan.table.qualified} t
+        where t."{plan.table.id_column}" = fid
+    ) then
+        return null;
+    end if;
+
+    select count(*)::int,
+           count(*) filter (where included)::int
+    into member_count, included_count
+    from {plan.table.schema}._{plan.collection_name}_footprint_members(fid);
+
+    if included_count = 0 then
+        return jsonb_build_object(
+            'valid', true,
+            'collection', '{_quote_key(plan.collection_name)}',
+            'id', fid::text,
+            'rule', '{_quote_key(derived.rule)}',
+            'reason', null,
+            'members', member_count,
+            'included', included_count,
+            'areas', 0,
+            'holes', 0,
+            'details', '{{}}'::jsonb);
+    end if;
+
+    select ST_Collect(part.geom)
+    into linework
+    from (
+                select (ST_Dump(m.geom)).geom as geom
+        from {plan.table.schema}._{plan.collection_name}_footprint_members(fid) m
+        where m.included
+          and m.geom is not null
+    ) part;
+
+    if not ST_IsSimple(linework) then
+        return jsonb_build_object(
+            'valid', false,
+            'collection', '{_quote_key(plan.collection_name)}',
+            'id', fid::text,
+            'rule', '{_quote_key(derived.rule)}',
+            'reason', 'nonsimple_boundary',
+            'members', member_count,
+            'included', included_count,
+            'areas', 0,
+            'holes', 0,
+            'details', '{{}}'::jsonb);
+    end if;
+
+    facts := topogdb.build_footprint(linework);
+
+    if (facts).footprint is null or ST_IsEmpty((facts).footprint) then
+        return jsonb_build_object(
+            'valid', false,
+            'collection', '{_quote_key(plan.collection_name)}',
+            'id', fid::text,
+            'rule', '{_quote_key(derived.rule)}',
+            'reason', 'boundary_does_not_close',
+            'members', member_count,
+            'included', included_count,
+            'areas', (facts).areas,
+            'holes', (facts).holes,
+            'details', '{{}}'::jsonb);
+    end if;
+
+    if not (facts).curves_all_used then
+        select coalesce(
+            jsonb_agg(
+                jsonb_build_object(
+                    'collection', target_collection,
+                    'id', target_id::text)
+                order by target_collection, target_id),
+            '[]'::jsonb)
+        into unused
+        from {plan.table.schema}._{plan.collection_name}_footprint_members(fid)
+        where included
+          and geom is not null
+          and not ST_CoveredBy(ST_Force2D(geom), ST_Boundary((facts).footprint));
+
+        return jsonb_build_object(
+            'valid', false,
+            'collection', '{_quote_key(plan.collection_name)}',
+            'id', fid::text,
+            'rule', '{_quote_key(derived.rule)}',
+            'reason', 'unused_boundary_line',
+            'members', member_count,
+            'included', included_count,
+            'areas', (facts).areas,
+            'holes', (facts).holes,
+            'details', jsonb_build_object('unused', unused));
+    end if;
+{areas_check}{holes_check}
+    return jsonb_build_object(
+        'valid', true,
+        'collection', '{_quote_key(plan.collection_name)}',
+        'id', fid::text,
+        'rule', '{_quote_key(derived.rule)}',
+        'reason', null,
+        'members', member_count,
+        'included', included_count,
+        'areas', (facts).areas,
+        'holes', (facts).holes,
+        'details', '{{}}'::jsonb);
+end;
+$func$"""
+
+
+def _fn_footprint_geometry_verdict_dispatch(plan: SchemaPlan) -> str:
+    derived_collections = [
+        coll for coll in plan.collections if coll.derived is not None
+    ]
+    if not derived_collections:
+        return f"""\
+create or replace function {plan.schema_name}._footprint_geometry_verdict(collection text, fid uuid)
+returns jsonb language sql stable as $func$
+    select null::jsonb;
+$func$"""
+
+    branches = "\n".join(
+        f"    when '{_quote_key(coll.collection_name)}' then return {plan.schema_name}._{coll.collection_name}_footprint_geometry_verdict(fid);"
+        for coll in derived_collections
+    )
+    return f"""\
+create or replace function {plan.schema_name}._footprint_geometry_verdict(collection text, fid uuid)
 returns jsonb language plpgsql stable as $func$
 begin
   case collection
@@ -1403,14 +1682,17 @@ _BUILDER_BY_OP = {
 def function_statements(plan: SchemaPlan) -> list[str]:
     stmts: list[str] = []
     stmts.append(_fn_sources_using(plan))
-    stmts.append(_fn_footprint_verdict_dispatch(plan))
     for coll in plan.collections:
-        if coll.derived is not None:
-            stmts.append(_fn_footprint_verdict(coll, coll.derived))
         if coll.roles:
             stmts.append(_fn_associations(coll))
+        if coll.derived is not None:
+            stmts.append(_fn_footprint_members(coll, coll.derived))
+            stmts.append(_fn_footprint_structure_verdict(coll, coll.derived))
+            stmts.append(_fn_footprint_geometry_verdict(coll, coll.derived))
         for op in coll.functions:
             stmts.append(_BUILDER_BY_OP[op](coll))
+    stmts.append(_fn_footprint_structure_verdict_dispatch(plan))
+    stmts.append(_fn_footprint_geometry_verdict_dispatch(plan))
     return stmts
 
 
