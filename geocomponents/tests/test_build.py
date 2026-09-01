@@ -1,8 +1,6 @@
-from pathlib import Path
-
 import pytest
+from fixtures.description_cache import resolved_dataset
 
-from geocomponents.descriptions.loader import load_resolved_datasets
 from geocomponents.descriptions.models import (
     DerivedAreas,
     DerivedHoles,
@@ -16,7 +14,6 @@ from geocomponents.schema import postgis
 from geocomponents.schema.build import build_schema_plan
 from geocomponents.schema.plan import OPERATIONS, READ_OPS
 
-DESCRIPTIONS = Path(__file__).resolve().parents[2] / "descriptions"
 WGS84_SRID = 4326
 
 
@@ -106,22 +103,15 @@ def test_derived_geometry_column_is_nullable_in_plan_even_when_required():
 
 
 def _cadastre_plan():
-    cad = next(d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "cadastre")
-    return build_schema_plan(cad)
+    return build_schema_plan(resolved_dataset("cadastre"))
 
 
 def _fkb_bane_plan():
-    fkb_bane = next(
-        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "fkb_bane"
-    )
-    return build_schema_plan(fkb_bane)
+    return build_schema_plan(resolved_dataset("fkb_bane"))
 
 
 def _bygning_plan():
-    bygning = next(
-        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bygning"
-    )
-    return build_schema_plan(bygning)
+    return build_schema_plan(resolved_dataset("bygning"))
 
 
 def test_dataset_maps_to_schema_and_collections_to_tables():

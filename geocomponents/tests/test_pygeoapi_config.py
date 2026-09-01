@@ -1,8 +1,8 @@
 import importlib
-from pathlib import Path
 
 import psycopg.errors
 import pytest
+from fixtures.description_cache import resolved_dataset
 from pygeoapi.process.base import ProcessorExecuteError
 
 from geocomponents.api.db_function_provider import (
@@ -15,17 +15,14 @@ from geocomponents.api.pygeoapi_provider import (
     _json_type,
     build_config,
 )
-from geocomponents.descriptions.loader import load_resolved_datasets
 from geocomponents.descriptions.models import ResolvedField
 from geocomponents.processes.registry import PROCESS_REGISTRY
 
-DESCRIPTIONS = Path(__file__).resolve().parents[2] / "descriptions"
 PUBLIC_URL = "http://example.org/datasets/cadastre/ogc_api"
 
 
 def _config():
-    cad = next(d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "cadastre")
-    return build_config(cad, PUBLIC_URL, dsn="postgresql://x")
+    return build_config(resolved_dataset("cadastre"), PUBLIC_URL, dsn="postgresql://x")
 
 
 def test_resources_are_collections_plus_declared_processes():
@@ -36,9 +33,7 @@ def test_resources_are_collections_plus_declared_processes():
 
 
 def test_fkb_bane_config_exposes_batch_upsert_process():
-    fkb_bane = next(
-        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "fkb_bane"
-    )
+    fkb_bane = resolved_dataset("fkb_bane")
     cfg = build_config(
         fkb_bane,
         "http://example.org/datasets/fkb_bane/ogc_api",
@@ -53,9 +48,7 @@ def test_fkb_bane_config_exposes_batch_upsert_process():
 
 
 def test_fkb_bane_config_exposes_import_process_shell():
-    fkb_bane = next(
-        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "fkb_bane"
-    )
+    fkb_bane = resolved_dataset("fkb_bane")
     cfg = build_config(
         fkb_bane,
         "http://example.org/datasets/fkb_bane/ogc_api",
@@ -70,9 +63,7 @@ def test_fkb_bane_config_exposes_import_process_shell():
 
 
 def test_bygning_config_exposes_batch_upsert_process():
-    bygning = next(
-        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bygning"
-    )
+    bygning = resolved_dataset("bygning")
     cfg = build_config(
         bygning,
         "http://example.org/datasets/bygning/ogc_api",
@@ -120,7 +111,7 @@ def test_import_processor_matches_gcjobs_shell_metadata_and_is_not_executable():
 
 
 def test_processes_are_only_the_declared_ones():
-    hydro = next(d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "hydro")
+    hydro = resolved_dataset("hydro")
     cfg = build_config(hydro, PUBLIC_URL, dsn="postgresql://x")
     # hydro declares no processes.
     assert all(r["type"] != "process" for r in cfg["resources"].values())
@@ -151,9 +142,7 @@ def test_server_url_is_the_mount_url_for_correct_links():
 
 
 def test_bygning_config_exposes_editable_multilinestring_collection():
-    bygning = next(
-        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bygning"
-    )
+    bygning = resolved_dataset("bygning")
     cfg = build_config(
         bygning,
         "http://example.org/datasets/bygning/ogc_api",
@@ -173,9 +162,7 @@ def test_bygning_config_exposes_editable_multilinestring_collection():
 
 
 def test_bygning_config_exposes_editable_multipolygon_collection():
-    bygning = next(
-        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bygning"
-    )
+    bygning = resolved_dataset("bygning")
     cfg = build_config(
         bygning,
         "http://example.org/datasets/bygning/ogc_api",
@@ -195,9 +182,7 @@ def test_bygning_config_exposes_editable_multipolygon_collection():
 
 
 def test_bygning_config_exposes_editable_centerline_collection():
-    bygning = next(
-        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bygning"
-    )
+    bygning = resolved_dataset("bygning")
     cfg = build_config(
         bygning,
         "http://example.org/datasets/bygning/ogc_api",
@@ -217,9 +202,7 @@ def test_bygning_config_exposes_editable_centerline_collection():
 
 
 def test_bygning_config_exposes_editable_point_collection():
-    bygning = next(
-        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bygning"
-    )
+    bygning = resolved_dataset("bygning")
     cfg = build_config(
         bygning,
         "http://example.org/datasets/bygning/ogc_api",
@@ -239,9 +222,7 @@ def test_bygning_config_exposes_editable_point_collection():
 
 
 def test_fkb_bane_config_exposes_derived_eksternpeker_upsert_field():
-    fkb_bane = next(
-        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "fkb_bane"
-    )
+    fkb_bane = resolved_dataset("fkb_bane")
     cfg = build_config(
         fkb_bane,
         "http://example.org/datasets/fkb_bane/ogc_api",

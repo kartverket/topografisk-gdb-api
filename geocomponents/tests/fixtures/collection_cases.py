@@ -6,13 +6,12 @@ Shared inputs come from the resolved YAML declarations in descriptions/.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
-from geocomponents.descriptions.loader import load_resolved_datasets
+from fixtures.description_cache import resolved_datasets
+
 from geocomponents.descriptions.models import ResolvedCollection, ResolvedDataset
 
-DESCRIPTIONS_DIR = Path(__file__).resolve().parents[3] / "descriptions"
-DATASETS: list[ResolvedDataset] = load_resolved_datasets(DESCRIPTIONS_DIR)
+DATASETS: tuple[ResolvedDataset, ...] = resolved_datasets()
 
 
 @dataclass(frozen=True)

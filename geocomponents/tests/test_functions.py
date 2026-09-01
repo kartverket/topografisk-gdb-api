@@ -1,8 +1,9 @@
 from pathlib import Path
 
 import yaml
+from fixtures.description_cache import resolved_dataset
 
-from geocomponents.descriptions.loader import load_resolved_datasets, resolve_dataset
+from geocomponents.descriptions.loader import resolve_dataset
 from geocomponents.descriptions.models import (
     Commons,
     DatasetDef,
@@ -33,15 +34,13 @@ from geocomponents.schema.plan import (
     internal_function,
 )
 
-DESCRIPTIONS = Path(__file__).resolve().parents[2] / "descriptions"
 TOPOLOGY_FIXTURE = (
     Path(__file__).resolve().parent / "fixtures" / "topology_fixture.yaml"
 )
 
 
 def _plan(name="cadastre"):
-    d = next(x for x in load_resolved_datasets(DESCRIPTIONS) if x.name == name)
-    return build_schema_plan(d)
+    return build_schema_plan(resolved_dataset(name))
 
 
 def _synthetic_plan(

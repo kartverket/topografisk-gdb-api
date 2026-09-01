@@ -10,17 +10,14 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
-from pathlib import Path
 
 import psycopg
 import pytest
+from fixtures.description_cache import resolved_datasets
 
 from geocomponents.config import database_dsn
-from geocomponents.descriptions.loader import load_resolved_datasets
 from geocomponents.schema import functions, postgis
 from geocomponents.schema.build import build_schema_plan
-
-DESCRIPTIONS_DIR = Path(__file__).resolve().parents[2] / "descriptions"
 
 # Host-run tests target the local compose DB unless DB_* is already set (e.g. in
 # CI). This lives in the test harness so production config stays fail-loud.
@@ -35,28 +32,29 @@ def _test_dsn() -> str:
 
 
 @contextmanager
-def _schema_conn(db: str, plan, *, with_functions: bool = True):
-    """Drop schema, apply plan, yield an autocommit connection; drop schema on exit."""
-    setup = psycopg.connect(db, autocommit=False)
+def _schema_conn(
+    db: str, plan, *, with_functions: bool = True, drop_on_exit: bool = True
+):
+    """Drop schema, apply plan, yield an autocommit connection; optionally drop on exit."""
+    conn = psycopg.connect(db, autocommit=False)
     try:
-        with setup.transaction():
-            setup.execute(f"drop schema if exists {plan.schema_name} cascade")
-        postgis.apply_tables(setup, plan)
+        with conn.transaction():
+            conn.execute(f"drop schema if exists {plan.schema_name} cascade")
+        postgis.apply_tables(conn, plan)
         if with_functions:
-            functions.apply_functions(setup, plan)
-    finally:
-        setup.close()
-    conn = psycopg.connect(db, autocommit=True)
-    try:
+            functions.apply_functions(conn, plan)
+        conn.autocommit = True
         yield conn
     finally:
-        conn.execute(f"drop schema if exists {plan.schema_name} cascade")
-        conn.close()
+        if not conn.closed:
+            if drop_on_exit:
+                conn.execute(f"drop schema if exists {plan.schema_name} cascade")
+            conn.close()
 
 
 @pytest.fixture(scope="session")
 def datasets():
-    return load_resolved_datasets(DESCRIPTIONS_DIR)
+    return resolved_datasets()
 
 
 @pytest.fixture(scope="session")

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 
 import psycopg
@@ -166,12 +168,17 @@ class FootprintGeometrySuccessCase:
 # --------------------------------------------------------------------------
 
 
+@cache
+def _topology_fixture_seed() -> dict:
+    return yaml.safe_load(FIXTURE_PATH.read_text(encoding="utf-8"))
+
+
 def _load_plan():
     return _load_plan_from_raw(_topology_fixture_raw_without_bounds())
 
 
 def _topology_fixture_raw() -> dict:
-    return yaml.safe_load(FIXTURE_PATH.read_text(encoding="utf-8"))
+    return deepcopy(_topology_fixture_seed())
 
 
 def _topology_fixture_raw_without_bounds() -> dict:
@@ -185,9 +192,100 @@ def _load_plan_from_raw(raw: dict):
     return build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw), Commons()))
 
 
+def _case_schema_key(raw: dict) -> str:
+    keyed = deepcopy(raw)
+    keyed.pop("name", None)
+    canonical = json.dumps(keyed, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _schema_case_raw(raw: dict, schema_name: str) -> dict:
+    case_raw = deepcopy(raw)
+    case_raw["name"] = schema_name
+    return case_raw
+
+
+@dataclass(frozen=True)
+class _TopologyCaseSchema:
+    schema_name: str
+    truncate_tables: tuple[str, ...]
+
+
+class _TopologyCaseSchemaPool:
+    def __init__(self, db: str):
+        self._db = db
+        self._entries: dict[str, _TopologyCaseSchema] = {}
+
+    def schema_name(self, raw: dict) -> str:
+        return self._entry(raw).schema_name
+
+    @contextmanager
+    def connect(self, raw: dict, *, fresh: bool = False):
+        if fresh:
+            with _schema_conn(self._db, _load_plan_from_raw(raw)) as conn:
+                yield conn
+            return
+
+        entry = self._entry(raw)
+        conn = psycopg.connect(self._db, autocommit=True)
+        try:
+            if entry.truncate_tables:
+                conn.execute(
+                    f"truncate table {', '.join(entry.truncate_tables)} restart identity"
+                )
+            yield conn
+        finally:
+            conn.close()
+
+    def close(self) -> None:
+        if not self._entries:
+            return
+        conn = psycopg.connect(self._db, autocommit=True)
+        try:
+            for entry in self._entries.values():
+                conn.execute(f"drop schema if exists {entry.schema_name} cascade")
+        finally:
+            conn.close()
+
+    def _entry(self, raw: dict) -> _TopologyCaseSchema:
+        key = _case_schema_key(raw)
+        entry = self._entries.get(key)
+        if entry is not None:
+            return entry
+
+        schema_name = f"topology_case_{key[:12]}"
+        plan = _load_plan_from_raw(_schema_case_raw(raw, schema_name))
+        truncate_tables = tuple(coll.table.qualified for coll in plan.collections)
+        if plan.association_role_rows:
+            truncate_tables += (f"{schema_name}.association",)
+        with _schema_conn(self._db, plan, drop_on_exit=False):
+            pass
+        entry = _TopologyCaseSchema(
+            schema_name=schema_name,
+            truncate_tables=truncate_tables,
+        )
+        self._entries[key] = entry
+        return entry
+
+
+@pytest.fixture(scope="session")
+def topology_case_schemas(db):
+    pool = _TopologyCaseSchemaPool(db)
+    try:
+        yield pool
+    finally:
+        pool.close()
+
+
+def _case_dataset(topology_case_schemas: _TopologyCaseSchemaPool, raw: dict) -> str:
+    return topology_case_schemas.schema_name(raw)
+
+
 @contextmanager
-def _topology_case_conn(db: str, raw: dict):
-    with _schema_conn(db, _load_plan_from_raw(raw)) as conn:
+def _topology_case_conn(
+    topology_case_schemas: _TopologyCaseSchemaPool, raw: dict, *, fresh: bool = False
+):
+    with topology_case_schemas.connect(raw, fresh=fresh) as conn:
         yield conn
 
 
@@ -2621,10 +2719,10 @@ def test_optional_boundary_with_no_members_stores_null_geometry(topology_conn):
     assert part_count is None
 
 
-def test_disjoint_rings_surface_stores_two_part_multipolygon(db):
+def test_disjoint_rings_surface_stores_two_part_multipolygon(db, topology_case_schemas):
     case = _case_disjoint_rings_allowed_on_surface2()
-    dataset = case.raw["name"]
-    with _topology_case_conn(db, case.raw) as conn:
+    dataset = _case_dataset(topology_case_schemas, case.raw)
+    with _topology_case_conn(topology_case_schemas, case.raw) as conn:
         setup = _txn(conn, *case.setup_items, dataset=dataset)
         _assert_structure_clean_commit(setup, len(case.setup_items))
 
@@ -2643,10 +2741,10 @@ def test_disjoint_rings_surface_stores_two_part_multipolygon(db):
         )
 
 
-def test_three_collection_ring_stores_built_geometry(db):
+def test_three_collection_ring_stores_built_geometry(db, topology_case_schemas):
     case = _case_three_collection_ring_is_valid()
-    dataset = case.raw["name"]
-    with _topology_case_conn(db, case.raw) as conn:
+    dataset = _case_dataset(topology_case_schemas, case.raw)
+    with _topology_case_conn(topology_case_schemas, case.raw) as conn:
         setup = _txn(conn, *case.setup_items, dataset=dataset)
         _assert_structure_clean_commit(setup, len(case.setup_items))
 
@@ -3139,11 +3237,11 @@ def test_structural_checks_clean_documents_commit_without_structure_findings(
 
 @pytest.mark.parametrize("case_builder", FOOTPRINT_RULE_FAILURE_CASE_BUILDERS)
 def test_structural_checks_one_of_and_when_failures_roll_back_with_findings(
-    db, case_builder
+    db, topology_case_schemas, case_builder
 ):
     case = case_builder()
-    dataset = case.raw["name"]
-    with _topology_case_conn(db, case.raw) as conn:
+    dataset = _case_dataset(topology_case_schemas, case.raw)
+    with _topology_case_conn(topology_case_schemas, case.raw) as conn:
         if case.setup_items:
             setup = _txn(conn, *case.setup_items, dataset=dataset)
             _assert_structure_clean_commit(setup, len(case.setup_items))
@@ -3156,10 +3254,12 @@ def test_structural_checks_one_of_and_when_failures_roll_back_with_findings(
 
 
 @pytest.mark.parametrize("case_builder", FOOTPRINT_RULE_SUCCESS_CASE_BUILDERS)
-def test_structural_checks_one_of_and_when_valid_cases_commit_cleanly(db, case_builder):
+def test_structural_checks_one_of_and_when_valid_cases_commit_cleanly(
+    db, topology_case_schemas, case_builder
+):
     case = case_builder()
-    dataset = case.raw["name"]
-    with _topology_case_conn(db, case.raw) as conn:
+    dataset = _case_dataset(topology_case_schemas, case.raw)
+    with _topology_case_conn(topology_case_schemas, case.raw) as conn:
         if case.setup_items:
             setup = _txn(conn, *case.setup_items, dataset=dataset)
             _assert_structure_clean_commit(setup, len(case.setup_items))
@@ -3193,12 +3293,13 @@ $f$
 
 def test_collection_footprint_members_keeps_one_row_per_association_when_target_missing(
     db,
+    topology_case_schemas,
 ):
     raw, setup_items, surface_item, missing_target_id, surface_id = (
         _case_members_dispatch_keeps_one_row_per_association_when_target_missing()
     )
-    dataset = raw["name"]
-    with _topology_case_conn(db, raw) as conn:
+    dataset = _case_dataset(topology_case_schemas, raw)
+    with _topology_case_conn(topology_case_schemas, raw) as conn:
         setup = _txn(conn, *setup_items, dataset=dataset)
         _assert_structure_clean_commit(setup, len(setup_items))
         surface = _txn(conn, surface_item, dataset=dataset)
@@ -3239,10 +3340,12 @@ def test_collection_footprint_members_keeps_one_row_per_association_when_target_
 
 
 @pytest.mark.parametrize("case_builder", BOUNDS_FAILURE_CASE_BUILDERS)
-def test_member_bounds_failures_roll_back_with_findings(db, case_builder):
+def test_member_bounds_failures_roll_back_with_findings(
+    db, topology_case_schemas, case_builder
+):
     case = case_builder()
-    dataset = case.raw["name"]
-    with _topology_case_conn(db, case.raw) as conn:
+    dataset = _case_dataset(topology_case_schemas, case.raw)
+    with _topology_case_conn(topology_case_schemas, case.raw) as conn:
         if case.setup_items:
             setup = _txn(conn, *case.setup_items, dataset=dataset)
             _assert_structure_clean_commit(setup, len(case.setup_items))
@@ -3255,10 +3358,12 @@ def test_member_bounds_failures_roll_back_with_findings(db, case_builder):
 
 
 @pytest.mark.parametrize("case_builder", BOUNDS_SUCCESS_CASE_BUILDERS)
-def test_member_bounds_valid_cases_commit_cleanly(db, case_builder):
+def test_member_bounds_valid_cases_commit_cleanly(
+    db, topology_case_schemas, case_builder
+):
     case = case_builder()
-    dataset = case.raw["name"]
-    with _topology_case_conn(db, case.raw) as conn:
+    dataset = _case_dataset(topology_case_schemas, case.raw)
+    with _topology_case_conn(topology_case_schemas, case.raw) as conn:
         if case.setup_items:
             setup = _txn(conn, *case.setup_items, dataset=dataset)
             _assert_structure_clean_commit(setup, len(case.setup_items))
@@ -3268,10 +3373,12 @@ def test_member_bounds_valid_cases_commit_cleanly(db, case_builder):
         _assert_structure_clean_commit(report, len(case.tx_items))
 
 
-def test_structure_findings_omit_unmeasured_area_and_hole_counts(db):
+def test_structure_findings_omit_unmeasured_area_and_hole_counts(
+    db, topology_case_schemas
+):
     case = _case_outer_and_conditional_true_conflict()
-    dataset = case.raw["name"]
-    with _topology_case_conn(db, case.raw) as conn:
+    dataset = _case_dataset(topology_case_schemas, case.raw)
+    with _topology_case_conn(topology_case_schemas, case.raw) as conn:
         setup = _txn(conn, *case.setup_items, dataset=dataset)
         _assert_structure_clean_commit(setup, len(case.setup_items))
 
@@ -3293,10 +3400,10 @@ def test_document_errors_report_document_phase(topology_conn):
     )
 
 
-def test_structure_verdict_raise_reports_structure_phase(db):
+def test_structure_verdict_raise_reports_structure_phase(db, topology_case_schemas):
     case = _case_outer_and_shared_are_valid()
     dataset = case.raw["name"]
-    with _topology_case_conn(db, case.raw) as conn:
+    with _topology_case_conn(topology_case_schemas, case.raw, fresh=True) as conn:
         setup = _txn(conn, *case.setup_items, dataset=dataset)
         _assert_structure_clean_commit(setup, len(case.setup_items))
         _replace_footprint_verdict_with_raise(
@@ -3313,10 +3420,10 @@ def test_structure_verdict_raise_reports_structure_phase(db):
         )
 
 
-def test_geometry_verdict_raise_reports_geometry_phase(db):
+def test_geometry_verdict_raise_reports_geometry_phase(db, topology_case_schemas):
     case = _case_outer_and_shared_are_valid()
     dataset = case.raw["name"]
-    with _topology_case_conn(db, case.raw) as conn:
+    with _topology_case_conn(topology_case_schemas, case.raw, fresh=True) as conn:
         setup = _txn(conn, *case.setup_items, dataset=dataset)
         _assert_structure_clean_commit(setup, len(case.setup_items))
         _replace_footprint_verdict_with_raise(
@@ -3333,19 +3440,23 @@ def test_geometry_verdict_raise_reports_geometry_phase(db):
         )
 
 
-def test_transaction_report_always_includes_top_level_sqlstate(db):
+def test_transaction_report_always_includes_top_level_sqlstate(
+    db, topology_case_schemas
+):
     committed_case = _case_outer_and_shared_are_valid()
     rejected_id = _new_id()
     structure_case = _case_outer_and_conditional_true_conflict()
 
-    committed_dataset = committed_case.raw["name"]
-    with _topology_case_conn(db, committed_case.raw) as conn:
+    committed_dataset = _case_dataset(topology_case_schemas, committed_case.raw)
+    with _topology_case_conn(topology_case_schemas, committed_case.raw) as conn:
         setup = _txn(conn, *committed_case.setup_items, dataset=committed_dataset)
         _assert_structure_clean_commit(setup, len(committed_case.setup_items))
         committed = _txn(conn, *committed_case.tx_items, dataset=committed_dataset)
         assert committed["sqlstate"] is None
 
-    with _topology_case_conn(db, _case_raw()) as conn:
+    rejected_raw = _case_raw()
+    with _topology_case_conn(topology_case_schemas, rejected_raw) as conn:
+        rejected_dataset = _case_dataset(topology_case_schemas, rejected_raw)
         rejected = _txn(
             conn,
             _insert(
@@ -3355,13 +3466,13 @@ def test_transaction_report_always_includes_top_level_sqlstate(db):
                 fid=_new_id(),
                 keep_geometry=True,
             ),
-            dataset="topology",
+            dataset=rejected_dataset,
         )
         assert "sqlstate" in rejected
         assert rejected["sqlstate"] is None
 
-    structure_dataset = structure_case.raw["name"]
-    with _topology_case_conn(db, structure_case.raw) as conn:
+    structure_dataset = _case_dataset(topology_case_schemas, structure_case.raw)
+    with _topology_case_conn(topology_case_schemas, structure_case.raw) as conn:
         setup = _txn(conn, *structure_case.setup_items, dataset=structure_dataset)
         _assert_structure_clean_commit(setup, len(structure_case.setup_items))
         structure = _txn(conn, *structure_case.tx_items, dataset=structure_dataset)
@@ -3369,7 +3480,9 @@ def test_transaction_report_always_includes_top_level_sqlstate(db):
 
     raised_case = _case_outer_and_shared_are_valid()
     raised_dataset = raised_case.raw["name"]
-    with _topology_case_conn(db, raised_case.raw) as conn:
+    with _topology_case_conn(
+        topology_case_schemas, raised_case.raw, fresh=True
+    ) as conn:
         setup = _txn(conn, *raised_case.setup_items, dataset=raised_dataset)
         _assert_structure_clean_commit(setup, len(raised_case.setup_items))
         _replace_footprint_verdict_with_raise(
@@ -3380,10 +3493,12 @@ def test_transaction_report_always_includes_top_level_sqlstate(db):
 
 
 @pytest.mark.parametrize("case_builder", FOOTPRINT_GEOMETRY_FAILURE_CASE_BUILDERS)
-def test_geometry_checks_roll_back_with_findings(db, case_builder):
+def test_geometry_checks_roll_back_with_findings(
+    db, topology_case_schemas, case_builder
+):
     case = case_builder()
-    dataset = case.raw["name"]
-    with _topology_case_conn(db, case.raw) as conn:
+    dataset = _case_dataset(topology_case_schemas, case.raw)
+    with _topology_case_conn(topology_case_schemas, case.raw) as conn:
         if case.setup_items:
             setup = _txn(conn, *case.setup_items, dataset=dataset)
             _assert_structure_clean_commit(setup, len(case.setup_items))
@@ -3398,10 +3513,12 @@ def test_geometry_checks_roll_back_with_findings(db, case_builder):
 
 
 @pytest.mark.parametrize("case_builder", FOOTPRINT_GEOMETRY_SUCCESS_CASE_BUILDERS)
-def test_geometry_checks_valid_cases_commit_cleanly(db, case_builder):
+def test_geometry_checks_valid_cases_commit_cleanly(
+    db, topology_case_schemas, case_builder
+):
     case = case_builder()
-    dataset = case.raw["name"]
-    with _topology_case_conn(db, case.raw) as conn:
+    dataset = _case_dataset(topology_case_schemas, case.raw)
+    with _topology_case_conn(topology_case_schemas, case.raw) as conn:
         if case.setup_items:
             setup = _txn(conn, *case.setup_items, dataset=dataset)
             _assert_structure_clean_commit(setup, len(case.setup_items))
@@ -3411,10 +3528,10 @@ def test_geometry_checks_valid_cases_commit_cleanly(db, case_builder):
         _assert_structure_clean_commit(report, len(case.tx_items))
 
 
-def test_structure_phase_gates_geometry_phase(db):
+def test_structure_phase_gates_geometry_phase(db, topology_case_schemas):
     case = _case_structure_gate_blocks_geometry()
-    dataset = case.raw["name"]
-    with _topology_case_conn(db, case.raw) as conn:
+    dataset = _case_dataset(topology_case_schemas, case.raw)
+    with _topology_case_conn(topology_case_schemas, case.raw) as conn:
         setup = _txn(conn, *case.setup_items, dataset=dataset)
         _assert_structure_clean_commit(setup, len(case.setup_items))
 
@@ -3423,6 +3540,104 @@ def test_structure_phase_gates_geometry_phase(db):
         _assert_structure_failure(report, case.expected_findings)
         for collection, fid in case.expected_present:
             assert _item(conn, collection, fid, dataset=dataset) is not None
+
+
+def test_case_schema_is_reused_and_cleaned_between_cases(topology_case_schemas):
+    first_raw = _case_raw()
+    second_raw = _case_raw()
+    first_dataset = _case_dataset(topology_case_schemas, first_raw)
+    second_dataset = _case_dataset(topology_case_schemas, second_raw)
+    border_lokalid = _new_id()
+
+    assert first_dataset == second_dataset
+
+    with _topology_case_conn(topology_case_schemas, first_raw) as conn:
+        setup = _txn(
+            conn,
+            _insert(
+                "border1",
+                _OUTER_RING_GEOM,
+                {"identifikasjon": {"lokalid": border_lokalid}},
+            ),
+            dataset=first_dataset,
+        )
+        _assert_structure_clean_commit(setup, 1)
+
+        created = _txn(
+            conn,
+            _insert_without_geometry("surface2", _surface2_props(border_lokalid)),
+            dataset=first_dataset,
+        )
+        _assert_structure_clean_commit(created, 1)
+        surface_id = created["items"][0]["id"]
+        assert _item(conn, "surface2", surface_id, dataset=first_dataset) is not None
+
+    with _topology_case_conn(topology_case_schemas, second_raw) as conn:
+        assert _item(conn, "surface2", surface_id, dataset=second_dataset) is None
+
+
+def test_case_schema_cleaning_preserves_catalogue_rows(topology_case_schemas):
+    raw = _case_raw()
+    dataset = _case_dataset(topology_case_schemas, raw)
+    border_lokalid = _new_id()
+
+    with _topology_case_conn(topology_case_schemas, raw) as conn:
+        seeded = _txn(
+            conn,
+            _insert(
+                "border1",
+                _OUTER_RING_GEOM,
+                {"identifikasjon": {"lokalid": border_lokalid}},
+            ),
+            dataset=dataset,
+        )
+        _assert_structure_clean_commit(seeded, 1)
+
+    with _topology_case_conn(topology_case_schemas, raw) as conn:
+        capability = conn.execute(
+            psycopg.sql.SQL(
+                "select feature_model from {}.collection_capability where collection = 'surface2'"
+            ).format(psycopg.sql.Identifier(dataset))
+        ).fetchone()
+        role_count = conn.execute(
+            psycopg.sql.SQL("select count(*) from {}.association_role").format(
+                psycopg.sql.Identifier(dataset)
+            )
+        ).fetchone()[0]
+
+        assert capability == ("topology",)
+        assert role_count > 0
+
+        setup = _txn(
+            conn,
+            _insert(
+                "border1",
+                _OUTER_RING_GEOM,
+                {"identifikasjon": {"lokalid": border_lokalid}},
+            ),
+            dataset=dataset,
+        )
+        _assert_structure_clean_commit(setup, 1)
+
+        linked = _txn(
+            conn,
+            _insert_without_geometry("surface2", _surface2_props(border_lokalid)),
+            dataset=dataset,
+        )
+        _assert_structure_clean_commit(linked, 1)
+
+        with pytest.raises(
+            psycopg.errors.RaiseException,
+            match="does not support direct write operations",
+        ):
+            conn.execute(
+                "select ogc.feature_create(%s, %s, %s::jsonb)",
+                (
+                    dataset,
+                    "surface2",
+                    json.dumps({"type": "Feature", "properties": {}}),
+                ),
+            )
 
 
 def test_upsert_rejects_declared_link_property(db):
