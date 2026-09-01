@@ -229,6 +229,7 @@ def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
                 feature_model=coll.feature_model,
                 table=table,
                 functions=functions,
+                bounds=coll.bounds,
                 upsert_field=coll.upsert_field,
                 upsert_path=coll.upsert_path,
                 roles=roles,

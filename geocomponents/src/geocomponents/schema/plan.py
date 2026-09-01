@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from geocomponents.descriptions.models import DerivedAreas, DerivedHoles
+from geocomponents.descriptions.models import BoundsValue, DerivedAreas, DerivedHoles
 
 # Operations split by capability: reads exist for every collection; the
 # generator emits write functions for every collection, while the public
@@ -175,6 +175,7 @@ class CollectionPlan:
     feature_model: str
     table: TablePlan
     functions: dict[str, str]  # operation -> internal function name (private)
+    bounds: BoundsValue | None = None
     upsert_field: str | None = None
     upsert_path: str | None = None
     roles: tuple[CollectionRolePlan, ...] = ()

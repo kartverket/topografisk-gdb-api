@@ -53,6 +53,7 @@ GeometryType = Literal[
 #                 is unsafe here and will arrive later via processes + the OGC
 #                 Features Part 11 (Transactions) draft.
 FeatureModel = Literal["simple", "topology"]
+BoundsValue = Literal[1, 2]
 
 
 # Names flowing into generated SQL are validated at parse time so authoring
@@ -102,6 +103,8 @@ class FieldDef(BaseModel):
     For ``type: object``, ``fields`` must be non-empty and defines the
     nested sub-fields (stored as JSONB at arbitrary depth).
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     name: SafeIdentifier
     type: str | None = None
@@ -196,6 +199,8 @@ class DerivedDef(BaseModel):
 
 
 class GeometryDef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     type: GeometryType = "Point"
     srid: int = 4326
     has_z: bool = False
@@ -230,10 +235,13 @@ class RelationshipDef(BaseModel):
 
 
 class CollectionDef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: SafeIdentifier
     title: str | None = None
     description: str | None = None
     feature_model: FeatureModel = "simple"
+    bounds: BoundsValue | None = None
     geometry: GeometryDef = Field(default_factory=GeometryDef)
     fields: list[FieldDef] = Field(default_factory=list)
     relationships: list[RelationshipDef] = Field(default_factory=list)
@@ -276,6 +284,8 @@ class Commons(BaseModel):
 
 
 class DatasetDef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: SafeIdentifier
     title: str | None = None
     description: str | None = None
@@ -342,6 +352,7 @@ class ResolvedCollection:
     upsert_path: str | None = None
     has_z: bool = False
     geometry_required: bool = True
+    bounds: BoundsValue | None = None
     # Dot-path to the outward-identifier sub-field (e.g. "identifikasjon.lokalid").
     outward_identifier_path: str | None = None
     # Server-managed dot-paths -> token values (mirrors CollectionDef.server_managed).

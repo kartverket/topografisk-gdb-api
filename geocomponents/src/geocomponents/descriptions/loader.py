@@ -38,6 +38,7 @@ class DescriptionError(ValueError):
 
 
 _RESERVED_COLLECTION_NAMES = frozenset({"association", "association_role"})
+_LINE_GEOMETRY_TYPES = frozenset({"LineString", "MultiLineString"})
 
 
 @dataclass(frozen=True)
@@ -260,7 +261,7 @@ def _resolve_derived(
                 )
 
             target_collection = collections_by_name[relationship.target]
-            if target_collection.geometry.type not in {"LineString", "MultiLineString"}:
+            if target_collection.geometry.type not in _LINE_GEOMETRY_TYPES:
                 raise DescriptionError(
                     f"{where}: derived property '{role.name}' targets collection "
                     f"'{relationship.target}' with geometry type "
@@ -312,11 +313,33 @@ def _resolve_derived(
     )
 
 
+def _validate_bounds(
+    coll: CollectionDef,
+    targeted_collections: set[str],
+    *,
+    where: str,
+) -> None:
+    if coll.bounds is None:
+        return
+    if coll.name not in targeted_collections:
+        raise DescriptionError(
+            f"{where}: bounds declared on untargeted collection '{coll.name}'"
+        )
+    if coll.geometry.type not in _LINE_GEOMETRY_TYPES:
+        raise DescriptionError(
+            f"{where}: bounds requires geometry type LineString or "
+            f"MultiLineString (got '{coll.geometry.type}')"
+        )
+
+
 def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
     types = {t.name: t for t in commons.field_types}
     # Dataset-local codelists take precedence over commons codelists.
     codelists: dict[str, CodeList] = {c.name: c for c in commons.code_lists}
     codelists.update({c.name: c for c in dataset.codelists})
+    targeted_collections = {
+        rel.target for coll in dataset.collections for rel in coll.relationships
+    }
     collection_names = {c.name for c in dataset.collections}
     collections_by_name = {c.name: c for c in dataset.collections}
 
@@ -405,6 +428,11 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
         )
 
     for prepared in prepared_collections:
+        _validate_bounds(
+            prepared.collection,
+            targeted_collections,
+            where=prepared.where,
+        )
         resolved_rels = _resolve_relationships(
             prepared.collection,
             collection_names,
@@ -424,6 +452,7 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
                 or prepared.collection.name.replace("_", " ").title(),
                 description=prepared.collection.description or "",
                 feature_model=prepared.collection.feature_model,
+                bounds=prepared.collection.bounds,
                 geometry_type=prepared.collection.geometry.type,
                 srid=prepared.collection.geometry.srid,
                 has_z=prepared.collection.geometry.has_z,
