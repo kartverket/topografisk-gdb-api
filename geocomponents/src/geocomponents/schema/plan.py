@@ -91,6 +91,17 @@ class DerivedPlan:
 
 
 @dataclass(frozen=True)
+class FootprintOwnerRolePlan:
+    """One source-side role that counts as a footprint owner for bounds."""
+
+    source_collection: str
+    property: str
+    target_collection: str
+    target_table: str
+    when_field: str | None = None
+
+
+@dataclass(frozen=True)
 class IndexPlan:
     """One index to emit after the table DDL."""
 
@@ -180,6 +191,7 @@ class CollectionPlan:
     upsert_path: str | None = None
     roles: tuple[CollectionRolePlan, ...] = ()
     derived: DerivedPlan | None = None
+    footprint_owner_roles: tuple[FootprintOwnerRolePlan, ...] = ()
 
     @property
     def id_field(self) -> str:

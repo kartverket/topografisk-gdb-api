@@ -43,6 +43,8 @@ _DERIVED_COLLECTIONS = {"surface", "surface2"}
 
 def _load_topology_plan():
     raw = yaml.safe_load(FIXTURE_PATH.read_text(encoding="utf-8"))
+    for coll in raw["collections"]:
+        coll.pop("bounds", None)
     return build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw), Commons()))
 
 

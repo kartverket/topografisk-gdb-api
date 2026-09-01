@@ -31,6 +31,7 @@ from geocomponents.schema.plan import (
     ColumnPlan,
     DerivedPlan,
     DerivedRolePlan,
+    FootprintOwnerRolePlan,
     SchemaPlan,
     TablePlan,
 )
@@ -172,7 +173,11 @@ declare
     tx_items jsonb := coalesce(document->'transaction', '[]'::jsonb);
     report_items jsonb := '[]'::jsonb;
     touched_features jsonb := '[]'::jsonb;
+    dirty_member_curves jsonb := '[]'::jsonb;
     structure_findings jsonb := '[]'::jsonb;
+    missing_findings jsonb := '[]'::jsonb;
+    footprint_findings jsonb := '[]'::jsonb;
+    bounds_findings jsonb := '[]'::jsonb;
     geometry_findings jsonb := '[]'::jsonb;
     current_item record;
     current_action text;
@@ -180,6 +185,7 @@ declare
     current_id text;
     current_feature jsonb;
     current_feature_model text;
+    current_targets jsonb := '[]'::jsonb;
     phase text := 'document';
     structure_failed boolean := false;
     geometry_failed boolean := false;
@@ -214,6 +220,23 @@ begin
             current_feature_model := {s}._collection_feature_model(dataset, current_collection);
             if current_feature_model is null then
                 raise exception 'unknown collection: %', current_collection using errcode = 'P0001';
+            end if;
+
+            if current_action <> 'insert' then
+                execute format(
+                    $q$
+select coalesce(
+           jsonb_agg(
+               jsonb_build_object(
+                   'collection', target_collection,
+                   'id', target_id::text)
+               order by target_collection, target_id),
+           '[]'::jsonb)
+from %1$I._targets_from_sources($1, $2)
+$q$,
+                    dataset)
+                    into current_targets using current_collection, array[current_id::uuid];
+                dirty_member_curves := dirty_member_curves || current_targets;
             end if;
 
             if current_action = 'insert' then
@@ -280,6 +303,25 @@ begin
                 'action', current_action,
                 'collection', current_collection,
                 'id', current_id));
+            dirty_member_curves := dirty_member_curves || jsonb_build_array(jsonb_build_object(
+                'collection', current_collection,
+                'id', current_id));
+            if current_action <> 'delete' then
+                execute format(
+                    $q$
+select coalesce(
+           jsonb_agg(
+               jsonb_build_object(
+                   'collection', target_collection,
+                   'id', target_id::text)
+               order by target_collection, target_id),
+           '[]'::jsonb)
+from %1$I._targets_from_sources($1, $2)
+$q$,
+                    dataset)
+                    into current_targets using current_collection, array[current_id::uuid];
+                dirty_member_curves := dirty_member_curves || current_targets;
+            end if;
         end loop;
 
         if touched_features <> '[]'::jsonb then
@@ -323,11 +365,7 @@ select coalesce(jsonb_agg(jsonb_build_object(
 from missing
 $q$,
                 dataset)
-                into structure_findings using touched_features;
-        end if;
-
-        if structure_findings = '[]'::jsonb and touched_features <> '[]'::jsonb then
-            phase := 'structure';
+                into missing_findings using touched_features;
             execute format(
                 $q$
 with touched_rows as (
@@ -358,7 +396,30 @@ where verdict is not null
   and (verdict->>'valid')::boolean is false
 $q$,
                 dataset)
-                into structure_findings using touched_features;
+                into footprint_findings using touched_features;
+            execute format(
+                $q$
+with dirty_rows as (
+    select collection, id
+    from jsonb_to_recordset($1)
+         as t(collection text, id uuid)
+), dirty_sets as (
+    select collection, array_agg(distinct id order by id) as ids
+    from dirty_rows
+    group by collection
+), findings as (
+    select d.collection,
+           (finding.value->>'id')::uuid as id,
+           finding.value as finding
+    from dirty_sets d
+    cross join lateral jsonb_array_elements(%1$I._check_member_bounds(d.collection, d.ids)) as finding(value)
+)
+select coalesce(jsonb_agg(finding order by collection, id), '[]'::jsonb)
+from findings
+$q$,
+                dataset)
+                into bounds_findings using dirty_member_curves;
+            structure_findings := missing_findings || footprint_findings || bounds_findings;
         end if;
 
         if structure_findings <> '[]'::jsonb then
@@ -942,12 +1003,142 @@ language sql stable as $func$
 $func$"""
 
 
+def _fn_targets_from_sources(plan: SchemaPlan) -> str:
+    if not plan.association_role_rows:
+        return f"""\
+create or replace function {plan.schema_name}._targets_from_sources(source_collection text, ids uuid[])
+returns table (collection text, id uuid, property text, target_collection text, target_id uuid)
+language sql stable as $func$
+    select null::text as collection,
+           null::uuid as id,
+           null::text as property,
+           null::text as target_collection,
+           null::uuid as target_id
+    where false;
+$func$"""
+    return f"""\
+create or replace function {plan.schema_name}._targets_from_sources(source_collection text, ids uuid[])
+returns table (collection text, id uuid, property text, target_collection text, target_id uuid)
+language sql stable as $func$
+    select a.source_collection as collection,
+           a.source_id as id,
+           a.property,
+           r.target_collection,
+           a.target_id
+    from {plan.schema_name}.association a
+    join {plan.schema_name}.association_role r
+        on r.source_collection = a.source_collection
+     and r.property = a.property
+    where a.source_collection = _targets_from_sources.source_collection
+      and a.source_id = any(ids)
+    order by collection, id, property, target_collection, target_id;
+$func$"""
+
+
 def _derived_roles(derived: DerivedPlan) -> tuple[DerivedRolePlan, ...]:
     roles_by_property: dict[str, DerivedRolePlan] = {}
     for alternative in derived.one_of:
         for role in alternative:
             roles_by_property.setdefault(role.property, role)
     return tuple(roles_by_property.values())
+
+
+def _owner_rows_body(roles: tuple[FootprintOwnerRolePlan, ...]) -> str:
+    if not roles:
+        return (
+            "            select null::text as owner_collection, null::uuid as owner_id\n"
+            "            where false"
+        )
+
+    selects = []
+    for role in roles:
+        included_expr = (
+            "true"
+            if role.when_field is None
+            else f'coalesce(t."{role.when_field}", false)'
+        )
+        selects.append(
+            "            select "
+            f"'{_quote_key(role.source_collection)}'::text as owner_collection, "
+            "a.source_id as owner_id\n"
+            f"            from {role.target_table} t\n"
+            f"            join {role.target_table.rsplit('.', 1)[0]}.association a\n"
+            '              on a.target_id = t."id"\n'
+            f"             and a.source_collection = '{_quote_key(role.source_collection)}'\n"
+            f"             and a.property = '{_quote_key(role.property)}'\n"
+            '            where t."id" = p.id\n'
+            f"              and {included_expr}"
+        )
+    return "\n            union all\n".join(selects)
+
+
+def _fn_check_member_bounds(plan: SchemaPlan) -> str:
+    bounded_collections = tuple(
+        coll for coll in plan.collections if coll.bounds is not None
+    )
+    if not bounded_collections:
+        return f"""\
+create or replace function {plan.schema_name}._check_member_bounds(target_collection text, ids uuid[])
+returns jsonb
+language sql stable as $func$
+    select '[]'::jsonb;
+$func$"""
+
+    statements = []
+    for coll in bounded_collections:
+        owner_roles = tuple(
+            role
+            for source in plan.collections
+            for role in source.footprint_owner_roles
+            if role.target_collection == coll.collection_name
+        )
+        statements.append(
+            "    select "
+            f"'{_quote_key(coll.collection_name)}'::text as collection,\n"
+            "           p.id,\n"
+            "           jsonb_build_object(\n"
+            "               'reason', 'member_bounds_violated',\n"
+            f"               'collection', '{_quote_key(coll.collection_name)}',\n"
+            "               'id', p.id::text,\n"
+            f"               'expected', {coll.bounds},\n"
+            "               'actual', counts.actual,\n"
+            "               'owners', counts.owners) as finding\n"
+            "    from (\n"
+            f'        select t."id"\n'
+            f"        from {coll.table.qualified} t\n"
+            f"        where _check_member_bounds.target_collection = '{_quote_key(coll.collection_name)}'\n"
+            '          and t."id" = any(ids)\n'
+            "    ) p\n"
+            "    left join lateral (\n"
+            "        select count(*)::int as actual,\n"
+            "               coalesce(\n"
+            "                   jsonb_agg(\n"
+            "                       jsonb_build_object(\n"
+            "                           'collection', owner_collection,\n"
+            "                           'id', owner_id::text)\n"
+            "                       order by owner_collection, owner_id),\n"
+            "                   '[]'::jsonb) as owners\n"
+            "        from (\n"
+            "            select distinct owner_collection, owner_id\n"
+            "            from (\n"
+            f"{_owner_rows_body(owner_roles)}\n"
+            "            ) owner_rows\n"
+            "        ) deduped\n"
+            "    ) counts on true\n"
+            f"    where counts.actual <> {coll.bounds}"
+        )
+
+    body = "\n    union all\n".join(statements)
+    return f"""\
+create or replace function {plan.schema_name}._check_member_bounds(target_collection text, ids uuid[])
+returns jsonb
+language sql stable as $func$
+with findings as (
+{body}
+)
+select coalesce(jsonb_agg(finding order by collection, id), '[]'::jsonb)
+from findings;
+$func$"""
 
 
 def _fn_footprint_members(plan: CollectionPlan, derived: DerivedPlan) -> str:
@@ -1800,6 +1991,8 @@ _BUILDER_BY_OP = {
 def function_statements(plan: SchemaPlan) -> list[str]:
     stmts: list[str] = []
     stmts.append(_fn_sources_using(plan))
+    stmts.append(_fn_targets_from_sources(plan))
+    stmts.append(_fn_check_member_bounds(plan))
     for coll in plan.collections:
         if coll.roles:
             stmts.append(_fn_associations(coll))

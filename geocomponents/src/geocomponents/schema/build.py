@@ -27,6 +27,7 @@ from geocomponents.schema.plan import (
     ColumnPlan,
     DerivedPlan,
     DerivedRolePlan,
+    FootprintOwnerRolePlan,
     ForeignKeyPlan,
     GeometryColumnPlan,
     IndexPlan,
@@ -206,6 +207,28 @@ def _build_derived(coll: ResolvedCollection, schema: str) -> DerivedPlan | None:
     )
 
 
+def _build_footprint_owner_roles(
+    coll: ResolvedCollection, schema: str
+) -> tuple[FootprintOwnerRolePlan, ...]:
+    if coll.derived is None or coll.derived.rule != "footprint":
+        return ()
+
+    roles_by_property: dict[str, FootprintOwnerRolePlan] = {}
+    for alternative in coll.derived.one_of:
+        for role in alternative:
+            roles_by_property.setdefault(
+                role.property,
+                FootprintOwnerRolePlan(
+                    source_collection=coll.name,
+                    property=role.property,
+                    target_collection=role.target,
+                    target_table=f"{schema}.{role.target}",
+                    when_field=role.when_field,
+                ),
+            )
+    return tuple(roles_by_property.values())
+
+
 def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
     """Turn a resolved dataset into a ``SchemaPlan`` -- the tables, columns,
     geometries, foreign keys, and function names it needs.
@@ -234,6 +257,7 @@ def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
                 upsert_path=coll.upsert_path,
                 roles=roles,
                 derived=_build_derived(coll, schema),
+                footprint_owner_roles=_build_footprint_owner_roles(coll, schema),
             )
         )
     role_rows = [
