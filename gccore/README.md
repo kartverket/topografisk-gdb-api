@@ -26,6 +26,8 @@ docker compose up --build db gccore-migrate gccore
 - `GET /` returns the service and schema identity
 - `GET /healthz` checks that the shared database is reachable and reports the
   current Alembic revision if migrations have been applied
+- `POST /authorize` accepts the current mock `{"client_id": null}` payload and
+  returns a hardcoded authorization result for `gcapi`
 
 ## Development
 

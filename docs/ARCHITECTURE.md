@@ -1,6 +1,6 @@
 # System architecture
 
-Current overview of **topografisk-gdb-api** as implemented in this workspace: YAML-described topographic datasets become PostGIS schemas and OGC API - Features services through `geocomponents`. `gcapi` is the canonical public boundary, but it is now a thin reverse proxy rather than a discovery/rewrite facade. Most paths proxy straight to `geocomponents`; dataset-scoped import execution paths under `/datasets/{dataset}/ogc_api/processes/import...` and dataset-scoped job paths under `/datasets/{dataset}/ogc_api/jobs...` proxy to `gcjobs`. `gcapi` does not synthesize OpenAPI, discover collections, or rewrite upstream JSON/link payloads. `gcimport` validates and transforms uploaded FeatureCollections, upserts them through the generated OGC API, and appends import lifecycle events to a Redis Stream. `gcjobs` discovers datasets from the shared descriptions at startup, accepts import requests from `gcapi` through dataset-scoped OGC routes, proxies them to `gcimport` in the background, consumes those lifecycle events through a Redis consumer group, persists them, and exposes dataset-local import-status APIs. `gcjobs` also emits public dataset/job URLs from `GCJOBS_API_BASE_URL`, which is pointed at `gcapi` in local browser-facing deployments. `gccore` is a small FastAPI service with health checks and Alembic-managed tables in the shared `gc_core` schema. `gcmapview` remains a developer frontend for inspection, editing of the Cadastre example dataset, and import testing through `gcapi`.
+Current overview of **topografisk-gdb-api** as implemented in this workspace: YAML-described topographic datasets become PostGIS schemas and OGC API - Features services through `geocomponents`. `gcapi` is the canonical public boundary and a thin reverse proxy rather than a discovery/rewrite facade, but it is still responsible for checking authorization with `gccore` before proxying browser-facing traffic. Most paths proxy straight to `geocomponents`; dataset-scoped import execution paths under `/datasets/{dataset}/ogc_api/processes/import...` and dataset-scoped job paths under `/datasets/{dataset}/ogc_api/jobs...` proxy to `gcjobs`. `gcapi` does not synthesize OpenAPI, discover collections, or rewrite upstream JSON/link payloads. `gcimport` validates and transforms uploaded FeatureCollections, upserts them through the generated OGC API, and appends import lifecycle events to a Redis Stream. `gcjobs` discovers datasets from the shared descriptions at startup, accepts import requests from `gcapi` through dataset-scoped OGC routes, proxies them to `gcimport` in the background, consumes those lifecycle events through a Redis consumer group, persists them, and exposes dataset-local import-status APIs. `gcjobs` also emits public dataset/job URLs from `GCJOBS_API_BASE_URL`, which is pointed at `gcapi` in local browser-facing deployments. `gccore` is the authorization and core-service dependency for `gcapi`, alongside its health checks and Alembic-managed tables in the shared `gc_core` schema. `gcmapview` remains a developer frontend for inspection, editing of the Cadastre example dataset, and import testing through `gcapi`.
 
 The tracked runtime in this repo is now centered on HTTP, PostgreSQL/PostGIS, and Redis. For the current POC there is one event flow only: `gcimport` appends import events to a Redis Stream, `gcjobs` consumes and acknowledges them through a consumer group, and `gcjobs` PostgreSQL is the durable source of truth for import tracking.
 
@@ -12,7 +12,7 @@ For package-level detail see [geocomponents/README.md](../geocomponents/README.m
 
 ```mermaid
 flowchart TB
-  User["Developer / browser"]
+  User["👤"]
   FE["gcmapview<br/>Vite + React + MapLibre"]
   GCAPI["gcapi<br/>FastAPI thin reverse proxy"]
   IMP["gcimport<br/>FastAPI importer"]
@@ -23,20 +23,17 @@ flowchart TB
   DB[("PostgreSQL / PostGIS")]
   JOBDB[("gcjobs PostgreSQL schema")]
   COREDB[("gccore PostgreSQL schema")]
-  BASE["Kartverket WMTS raster basemaps<br/>topo / toporaster / topograatone"]
-  TERRAIN["AWS Terrain Tiles<br/>raster-dem for 3D terrain"]
 
   User --> FE
   FE -->|collections / processes / jobs| GCAPI
-  FE -->|raster tiles| BASE
-  FE -->|terrain DEM| TERRAIN
+  GCAPI -->|authorize request| CORE
   GCAPI -->|features + sync processes| API
   GCAPI -->|import execution + job status| JOBS
   JOBS -->|proxy /imports| IMP
   IMP -->|batch upsert process over HTTP| API
   IMP -->|append import events| REDIS
   REDIS -->|consumer group + persist| JOBS
-  API -->|ogc.feature_* dispatch| DB
+  API --> DB
   JOBS --> JOBDB
   CORE -->|health + core tables| COREDB
 ```
@@ -46,10 +43,10 @@ flowchart TB
 | Package | Role now |
 |---------|----------|
 | [geocomponents/](../geocomponents/) | Description-driven engine: YAML loader, schema generator, OGC API provider, and gateway |
-| [gcapi/](../gcapi/) | Thin FastAPI edge proxy exposing the browser-facing OGC surface over `geocomponents` and `gcjobs` |
+| [gcapi/](../gcapi/) | Thin FastAPI edge proxy exposing the browser-facing OGC surface over `geocomponents` and `gcjobs`, with authorization delegated to `gccore` |
 | [gcimport/](../gcimport/) | Profile-driven synchronous importer for JSON-FG and classic GeoJSON uploads plus import-event emission |
 | [gcmapview/](../gcmapview/) | Local Vite/React developer map viewer and import UI |
-| [gccore/](../gccore/) | Small FastAPI service with `/` and `/healthz`, plus Alembic-managed tables in schema `gc_core` |
+| [gccore/](../gccore/) | Small FastAPI core service that backs `gcapi` authorization decisions and owns `/`, `/healthz`, and Alembic-managed tables in schema `gc_core` |
 | [gcjobs/](../gcjobs/) | Lightweight jobs/status service: accepts imports asynchronously, consumes Redis Stream import events, persists run history, and exposes current/history APIs |
 | [nibio/](../nibio/) | AR5 / topology reference material, not part of the live runtime |
 
@@ -78,6 +75,7 @@ flowchart TB
 
     DB --> MIG --> API
     API --> GCAPI
+    CORE --> GCAPI
     API --> IMP
     DB --> CORE
     DB --> JOBS
@@ -88,7 +86,9 @@ flowchart TB
   end
 
   FEDEV -->|GCAPI_API_URL| GCAPI
-  GCAPI -->|proxy dataset import execute + job paths| JOBS
+  GCAPI -->|authorize, then proxy| JOBS
+  GCAPI -->|authorize, then proxy| API
+  GCAPI -->|authorization check| CORE
   JOBS -->|proxy /imports| IMP
   IMP -->|HTTP /processes/upsert-batch/execution| API
   IMP -->|append import events| REDIS
@@ -101,11 +101,64 @@ Notes:
 
 - `make docker-up` serves `gcmapview` from the container at `http://localhost:8080`; `make frontend-run` serves the same UI from Vite at `http://localhost:5173`.
 - Both frontend modes should target `gcapi` on `http://localhost:8004` through `/datasets/{dataset}/ogc_api/...` for collections, processes, jobs, and import execution.
+- `gcapi` depends on `gccore` for authorization of browser-facing requests before it proxies to `geocomponents` or `gcjobs`.
 - `gcimport` listens on port `8001` locally but is called internally by `gcjobs`, not directly by the browser-facing import UI.
 - Local compose sets `GCJOBS_API_BASE_URL=http://localhost:8004` so `gcjobs` returns browser-facing job URLs on the `gcapi` origin even though the service itself is exposed on `:8003`.
-- `geocomponents` on `:8000` and `gcjobs` on `:8003` remain host-exposed for diagnostics, contract testing, and service-local inspection, but not for browser use.
+- `geocomponents` on `:8000`, `gcjobs` on `:8003`, and `gccore` on `:8002` remain host-exposed for diagnostics, contract testing, and service-local inspection, but not for direct browser use.
 - `migrate` is the local analog of the production `apply-schema` job.
-- `gccore` is available locally on `http://localhost:8002` and reports service health plus Alembic revision state.
+- `gccore` is available locally on `http://localhost:8002`, serves `POST /authorize` for `gcapi`, and reports service health plus Alembic revision state through `/healthz`.
+
+---
+
+## gcapi component view
+
+`gcapi` is intentionally narrow in the current codebase. It is a FastAPI composition root around four concerns only: configuration, request authorization, upstream selection, and byte-preserving proxy transport.
+
+```mermaid
+flowchart LR
+  CLIENT["Browser / client"] --> ROUTES["gcapi routes<br/>/healthz<br/>/<proxy_path>"]
+  ROUTES --> AUTH["authorization middleware"]
+  AUTH --> CACHE["TTL cache<br/>client_id:*<br/>600s / 1024 entries"]
+  AUTH --> CORE["POST {GCAPI_GCCORE_URL}/authorize<br/>body: client_id = null"]
+  ROUTES --> PICK["upstream selector<br/>gcjobs regex vs default"]
+  PICK --> GEO["GCAPI_GEOCOMPONENTS_URL"]
+  PICK --> JOBS["GCAPI_GCJOBS_URL"]
+  GEO --> PROXY["proxy_request()<br/>method + path + query + headers + body"]
+  JOBS --> PROXY
+```
+
+Current responsibilities:
+
+- expose only one local non-proxy endpoint: `GET /healthz`
+- skip authorization only for `OPTIONS` requests and `/healthz`
+- call `POST {GCAPI_GCCORE_URL}/authorize` for every other request using the current placeholder client context `{"client_id": null}`
+- cache successful authorization decisions in process for 10 minutes with a `client_id`-derived key to avoid repeated `gccore` round-trips
+- route `/datasets/{dataset}/ogc_api/processes/import...` and `/datasets/{dataset}/ogc_api/jobs...` to `gcjobs` when `GCAPI_GCJOBS_URL` is configured
+- proxy every other path to `geocomponents` using the incoming method, path, query string, headers, and body without response rewriting
+- expose proxy-relevant response headers to browsers through CORS: `Location`, `Link`, `ETag`, `Content-Crs`, `Preference-Applied`
+
+## gccore component view
+
+`gccore` is a small FastAPI core service. In the current implementation it has three public routes, derives shared-database connectivity from `DB_*` variables, and owns Alembic-managed tables in schema `gc_core`.
+
+```mermaid
+flowchart LR
+  REQ["gcapi or operator"] --> APP["gccore app<br/>/ /healthz /authorize"]
+  APP --> ROOT["GET /<br/>service + schema identity"]
+  APP --> AUTH["POST /authorize<br/>mock policy"]
+  APP --> HEALTH["GET /healthz"]
+  HEALTH --> DBCHK["db.health_status()<br/>schema exists?<br/>alembic version table?<br/>current revision?"]
+  DBCFG["DB_* env"] --> DBCHK
+  DBCHK --> DB["shared PostgreSQL"]
+```
+
+Current responsibilities:
+
+- return service identity from `GET /` as `{"service": "gccore", "schema": "gc_core"}`
+- report database-backed health from `GET /healthz`, including schema presence and current Alembic revision when reachable
+- return `503` from `/healthz` when the database is misconfigured or unavailable
+- own the `gc_core` schema and its Alembic migration history in the shared PostgreSQL database
+- implement the current mock authorization seam for `gcapi`: `POST /authorize` authorizes only when `client_id` is `null` and echoes the provided client identifier
 
 ---
 
@@ -284,19 +337,47 @@ Current map behavior:
 
 ## Data flows
 
+### Authorization flow
+
+In the current implementation, every browser-facing request enters through `gcapi`. `OPTIONS` and `/healthz` are exempt; every other request triggers a `gccore` authorization check before any upstream proxy hop to `geocomponents` or `gcjobs`.
+
+```mermaid
+sequenceDiagram
+  participant C as Browser / client
+  participant A as gcapi
+  participant CORE as gccore
+  participant UP as geocomponents or gcjobs
+
+  C->>A: request /datasets/{dataset}/ogc_api/...
+  A->>CORE: authorization check
+  alt authorized
+    CORE-->>A: authorized
+    A->>UP: proxied request
+    UP-->>A: upstream response
+    A-->>C: proxied response
+  else denied
+    CORE-->>A: denied
+    A-->>C: authorization failure
+  end
+```
+
 ### Import flow
 
 ```mermaid
 sequenceDiagram
   participant U as Uploader
   participant A as gcapi
+  participant C as gccore
   participant J as gcjobs
   participant I as gcimport
+  participant R as Redis
   participant G as geocomponents
   participant DB as PostGIS
   participant JDB as gc_jobs schema
 
   U->>A: POST /datasets/{dataset}/ogc_api/processes/import/execution
+  A->>C: authorize request
+  C-->>A: authorized
   A->>J: POST /datasets/{dataset}/ogc_api/processes/import/execution
   J->>JDB: record import.accepted
   J-->>A: 201 Created + Location: {GCJOBS_API_BASE_URL}/datasets/{dataset}/ogc_api/jobs/{jobID}
@@ -322,6 +403,8 @@ sequenceDiagram
   R->>J: batch/completed events
   J->>JDB: update run + append event
   U->>A: GET /datasets/{dataset}/ogc_api/jobs/{id}
+  A->>C: authorize request
+  C-->>A: authorized
   A->>J: GET /datasets/{dataset}/ogc_api/jobs/{id}
   J-->>A: statusInfo
   A-->>U: OGC statusInfo
@@ -335,12 +418,15 @@ This is the specific import-message path as it exists in the current POC: `gcapi
 sequenceDiagram
   participant FE as Frontend / uploader
   participant A as gcapi
+  participant C as gccore
   participant J as gcjobs
   participant I as gcimport
   participant R as Redis
   participant JDB as gc_jobs PostgreSQL
 
   FE->>A: POST /datasets/{dataset}/ogc_api/processes/import/execution
+  A->>C: authorize request
+  C-->>A: authorized
   A->>J: POST /datasets/{dataset}/ogc_api/processes/import/execution
   J->>JDB: store import.accepted
   J-->>A: 201 Created + Location: {GCJOBS_API_BASE_URL}/datasets/{dataset}/ogc_api/jobs/{jobID}
@@ -364,6 +450,8 @@ sequenceDiagram
   R-->>J: consume completed.succeeded|completed.failed
   J->>JDB: mark terminal state
   FE->>A: GET /datasets/{dataset}/ogc_api/jobs or /datasets/{dataset}/ogc_api/jobs/{id}
+  A->>C: authorize request
+  C-->>A: authorized
   A->>J: GET /datasets/{dataset}/ogc_api/jobs or /datasets/{dataset}/ogc_api/jobs/{id}
   J-->>A: current status / job list
   A-->>FE: statusInfo/jobList
@@ -394,13 +482,13 @@ Frontend rendering specifics that matter architecturally:
 - 3D derived geometry is computed in browser code rather than persisted server-side.
 - The map background is not OpenStreetMap; users can switch between Kartverket `topo`, `toporaster`, and `topograatone`, or disable the background entirely.
 - Terrain-aware and Z-adjusted rendering are visualization concerns in `gcmapview`; source data stays authoritative in the API/database.
-- Import progress is not pushed to the browser from Redis; the browser polls `gcapi` job resources, and `gcapi` in turn reads durable import state from `gcjobs`.
+- Import progress is not pushed to the browser from Redis; the browser polls `gcapi` job resources, `gcapi` first checks authorization with `gccore`, and then reads durable import state from `gcjobs`.
 
 ---
 
 ## Production topology
 
-Production deployment documented in this repo still applies primarily to `geocomponents`: the engine image is deployed from a separate apps repo, dataset descriptions are mounted at runtime, and schema application is run as a separate one-shot job before the serving application. The newer `gcjobs` and Redis-backed import-tracking path is implemented in this workspace, but its deployment shape is still evolving and is not yet documented here as a production-standard topology.
+Production deployment documented in this repo still applies primarily to `geocomponents`: the engine image is deployed from a separate apps repo, dataset descriptions are mounted at runtime, and schema application is run as a separate one-shot job before the serving application. The newer `gcjobs` and Redis-backed import-tracking path is implemented in this workspace, but its deployment shape is still evolving and is not yet documented here as a production-standard topology. The current `gcapi` implementation expects a reachable `gccore` deployment for authorization before requests reach those downstream services.
 
 ```mermaid
 flowchart LR
@@ -434,7 +522,6 @@ Operational points:
 | Frontend | Vite, React Router, MapLibre GL, Zustand, Tailwind |
 | Geometry / CRS | PostGIS, pyproj, proj4 |
 | Data formats | OGC API - Features, GeoJSON, JSON-FG |
-
 ---
 
 ## Architectural invariants
@@ -444,5 +531,6 @@ Operational points:
 3. **`gcimport` is profile-driven and synchronous in the current codebase**. It validates first, then imports in collection batches through the OGC API batch process while emitting lifecycle events to Redis.
 4. **`gcmapview` owns visualization-only concerns** such as client reprojection, 2D/3D switching, terrain handling, and derived elevated geometry.
 5. **`gcjobs` owns durable import-tracking state in the current POC**. It accepts internal import requests from `gcapi` immediately and persists event-derived state in PostgreSQL.
-6. **`gcapi` is the only backend the browser should call** for feature access, process execution, job status, and job results. `gcjobs` should emit browser-facing job URLs through `GCJOBS_API_BASE_URL` so those links stay on the `gcapi` origin.
-7. **Only `geocomponents` has a stable production deployment description in this repo today**. `gcmapview` is local/dev-focused, and the newer `gcapi`/`gcjobs`/Redis topology is tracked in code but not yet fully described as production infrastructure.
+6. **`gcapi` is the only backend the browser should call** for feature access, process execution, job status, and job results, and it authorizes those requests through `gccore` before proxying them. `gcjobs` should emit browser-facing job URLs through `GCJOBS_API_BASE_URL` so those links stay on the `gcapi` origin.
+7. **`gccore` is the authorization dependency for `gcapi` at the public edge**. The edge proxy may stay thin, but authorization policy should be centralized in `gccore` rather than duplicated in frontend clients or downstream dataset services.
+8. **Only `geocomponents` has a stable production deployment description in this repo today**. `gcmapview` is local/dev-focused, and the newer `gcapi`/`gcjobs`/Redis topology is tracked in code but not yet fully described as production infrastructure.

@@ -8,6 +8,7 @@ SERVICE_NAME = "gcapi"
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 5.0
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 30.0
 DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+DEFAULT_GCCORE_URL = "http://localhost:8002"
 
 
 def _parse_positive_float(env_name: str, default: float) -> float:
@@ -69,6 +70,7 @@ def _optional_url(env_name: str) -> str | None:
 class Settings:
     geocomponents_url: str
     gcjobs_url: str | None = None
+    gccore_url: str = DEFAULT_GCCORE_URL
     request_timeout_seconds: float = DEFAULT_REQUEST_TIMEOUT_SECONDS
     connect_timeout_seconds: float = DEFAULT_CONNECT_TIMEOUT_SECONDS
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
@@ -78,6 +80,7 @@ class Settings:
         return cls(
             geocomponents_url=_required_url("GCAPI_GEOCOMPONENTS_URL"),
             gcjobs_url=_optional_url("GCAPI_GCJOBS_URL"),
+            gccore_url=_optional_url("GCAPI_GCCORE_URL") or DEFAULT_GCCORE_URL,
             request_timeout_seconds=_parse_positive_float(
                 "GCAPI_REQUEST_TIMEOUT_SECONDS",
                 DEFAULT_REQUEST_TIMEOUT_SECONDS,

@@ -78,6 +78,7 @@ services:
       GCAPI_PUBLIC_URL: http://localhost:8004
       GCAPI_GEOCOMPONENTS_URL: http://api:8000
       GCAPI_GCJOBS_URL: http://gcjobs:8000
+      GCAPI_GCCORE_URL: http://gccore:8000
     ports:
       - "8004:8000"
     volumes:
