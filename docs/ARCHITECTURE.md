@@ -119,7 +119,7 @@ flowchart LR
   CLIENT["Browser / client"] --> ROUTES["gcapi routes<br/>/healthz<br/>/<proxy_path>"]
   ROUTES --> AUTH["authorization middleware"]
   AUTH --> CACHE["TTL cache<br/>client_id:*<br/>600s / 1024 entries"]
-  AUTH --> CORE["POST {GCAPI_GCCORE_URL}/authorize<br/>{\"client_id\": null}"]
+  AUTH --> CORE["POST {GCAPI_GCCORE_URL}/authorize<br/>body: client_id = null"]
   ROUTES --> PICK["upstream selector<br/>gcjobs regex vs default"]
   PICK --> GEO["GCAPI_GEOCOMPONENTS_URL"]
   PICK --> JOBS["GCAPI_GCJOBS_URL"]
