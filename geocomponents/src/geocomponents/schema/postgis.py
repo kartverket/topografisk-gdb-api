@@ -112,6 +112,47 @@ def _upsert_index_ddl(plan: CollectionPlan) -> str | None:
     return None
 
 
+def _change_trigger_function_ddl(plan: CollectionPlan) -> str:
+    table = plan.table
+    function_name = f"_{plan.collection_name}_record_change"
+    dataset = _quote_literal(table.schema)
+    collection = _quote_literal(plan.collection_name)
+    identifier = table.id_column
+    geometry = table.geometry.name
+    srid = table.geometry.srid
+    return f"""\
+create or replace function {table.schema}.{function_name}()
+returns trigger language plpgsql as $trigger$
+begin
+    if TG_OP = 'INSERT' then
+        perform geocomponents_event.record_change(
+            '{dataset}', '{collection}', 'create', NEW."{identifier}",
+            null, NEW."{geometry}", {srid});
+        return NEW;
+    elsif TG_OP = 'UPDATE' then
+        perform geocomponents_event.record_change(
+            '{dataset}', '{collection}', 'update', NEW."{identifier}",
+            OLD."{geometry}", NEW."{geometry}", {srid});
+        return NEW;
+    end if;
+    perform geocomponents_event.record_change(
+        '{dataset}', '{collection}', 'delete', OLD."{identifier}",
+        OLD."{geometry}", null, {srid});
+    return OLD;
+end;
+$trigger$"""
+
+
+def _change_trigger_ddl(plan: CollectionPlan) -> str:
+    table = plan.table
+    trigger_name = f"{plan.collection_name}_record_change"
+    function_name = f"_{plan.collection_name}_record_change"
+    return f"""\
+create or replace trigger "{trigger_name}"
+after insert or update or delete on {table.qualified}
+for each row execute function {table.schema}.{function_name}()"""
+
+
 def _collection_capability_table_ddl(plan: SchemaPlan) -> str:
     return (
         f"create table if not exists {plan.schema_name}.collection_capability ("
@@ -264,6 +305,8 @@ def table_statements(plan: SchemaPlan) -> list[str]:
         stmts.extend(_extra_index_ddl(coll.collection_name, coll.table))
         if upsert_index := _upsert_index_ddl(coll):
             stmts.append(upsert_index)
+        stmts.append(_change_trigger_function_ddl(coll))
+        stmts.append(_change_trigger_ddl(coll))
     for coll in plan.collections:
         stmts.extend(_fk_ddl(coll.table))
     return stmts

@@ -13,6 +13,7 @@ from geocomponents.schema.functions import (
     _properties_object,
     _quote_key,
     dispatch_statements,
+    event_schema_statements,
     function_statements,
 )
 from geocomponents.schema.plan import (
@@ -73,6 +74,17 @@ def test_dispatch_exposes_all_feature_entrypoints_taking_dataset_and_collection(
     assert "function ogc.transaction(" in sql
     # The fixed entrypoints route by OGC identifiers, not physical names.
     assert "dataset text, collection text" in sql
+
+
+def test_event_schema_statements_are_non_destructive_on_reapplication():
+    sql = "\n".join(event_schema_statements()).lower()
+
+    assert "create schema if not exists geocomponents_event" in sql
+    assert "create table if not exists geocomponents_event.change_outbox" in sql
+    assert "create index if not exists change_outbox_pending_idx" in sql
+    assert "create or replace function geocomponents_event.record_change" in sql
+    assert "drop schema" not in sql
+    assert "drop table" not in sql
 
 
 def test_dispatch_layer_is_dataset_agnostic_no_table_names_leak():

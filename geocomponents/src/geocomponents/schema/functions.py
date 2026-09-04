@@ -1,7 +1,9 @@
-"""Generate + apply the database functions.
+"""Generate + apply fixed and description-driven database functions.
 
-Two layers, mirroring the DB/API contract decision:
+Three layers, mirroring the DB/API contract decision:
 
+* **Event layer** (``geocomponents_event``) — fixed outbox objects installed
+    non-destructively before generated collection triggers.
 * **Dispatch layer** (``ogc.feature_*``) — a *fixed*, generic set of functions
   the API calls with OGC identifiers ``(dataset, collection)`` as arguments. It
   is written once, lists no datasets, and routes by naming convention to the
@@ -53,6 +55,91 @@ def _quote_key(name: str) -> str:
 def topogdb_statements() -> list[str]:
     """The fixed PostGIS helper objects under ``topogdb`` applied once per DB."""
     return [(_SCHEMA_DIR / "topogdb_functions.sql").read_text(encoding="utf-8")]
+
+
+def event_schema_statements() -> list[str]:
+    """Fixed, non-destructive outbox objects applied before collection triggers."""
+    schema = "geocomponents_event"
+    return [
+        "create extension if not exists postgis",
+        "create extension if not exists pgcrypto",
+        f"create schema if not exists {schema}",
+        f"""\
+create table if not exists {schema}.change_outbox (
+    id uuid primary key default gen_random_uuid(),
+    transaction_id xid8 not null,
+    dataset text not null,
+    collection text not null,
+    localids uuid[] not null default '{{}}'::uuid[],
+    operations text[] not null default '{{}}'::text[],
+    srid integer not null,
+    affected_area geometry,
+    created_at timestamptz not null default now(),
+    claimed_at timestamptz,
+    claim_token uuid,
+    attempts integer not null default 0,
+    last_error text,
+    redis_message_id text,
+    published_at timestamptz,
+    unique (transaction_id, dataset, collection)
+)""",
+        f"""\
+create index if not exists change_outbox_pending_idx
+on {schema}.change_outbox (created_at, id)
+where published_at is null""",
+        f"""\
+create or replace function {schema}.record_change(
+    event_dataset text,
+    event_collection text,
+    event_operation text,
+    event_localid uuid,
+    old_geometry geometry,
+    new_geometry geometry,
+    event_srid integer
+) returns void language plpgsql as $function$
+declare
+    change_area geometry;
+begin
+    change_area := case
+        when old_geometry is null then ST_Envelope(new_geometry)
+        when new_geometry is null then ST_Envelope(old_geometry)
+        else ST_Envelope(ST_Collect(old_geometry, new_geometry))
+    end;
+
+    insert into {schema}.change_outbox (
+        transaction_id, dataset, collection, localids, operations, srid, affected_area
+    ) values (
+        pg_current_xact_id(), event_dataset, event_collection,
+        array[event_localid], array[event_operation], event_srid, change_area
+    )
+    on conflict (transaction_id, dataset, collection) do update set
+        localids = case
+            when event_localid = any({schema}.change_outbox.localids)
+                then {schema}.change_outbox.localids
+            else array_append({schema}.change_outbox.localids, event_localid)
+        end,
+        operations = case
+            when event_operation = any({schema}.change_outbox.operations)
+                then {schema}.change_outbox.operations
+            else array_append({schema}.change_outbox.operations, event_operation)
+        end,
+        affected_area = case
+            when {schema}.change_outbox.affected_area is null then excluded.affected_area
+            when excluded.affected_area is null then {schema}.change_outbox.affected_area
+            else ST_Envelope(ST_Collect(
+                {schema}.change_outbox.affected_area, excluded.affected_area
+            ))
+        end;
+end;
+$function$""",
+    ]
+
+
+def apply_event_schema(conn: psycopg.Connection) -> None:
+    """Create or refresh fixed event objects without deleting pending events."""
+    for stmt in event_schema_statements():
+        conn.execute(stmt)
+    conn.commit()
 
 
 def apply_topogdb(conn: psycopg.Connection) -> None:

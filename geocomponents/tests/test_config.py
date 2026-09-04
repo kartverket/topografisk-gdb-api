@@ -81,6 +81,26 @@ def test_raises_when_unconfigured(clean_env):
         config.database_dsn()
 
 
+def test_event_settings_have_operational_defaults(clean_env):
+    clean_env.setenv("REDIS_URL", "redis://localhost:6379/0")
+
+    assert config.redis_url() == "redis://localhost:6379/0"
+    assert config.event_poll_seconds() == 1.0
+    assert config.event_batch_size() == 100
+    assert config.event_claim_timeout_seconds() == 30.0
+    assert config.event_stream_maxlen() == 10_000
+
+
+def test_event_settings_reject_missing_redis_and_non_positive_values(clean_env):
+    clean_env.delenv("REDIS_URL", raising=False)
+    with pytest.raises(RuntimeError, match="REDIS_URL"):
+        config.redis_url()
+
+    clean_env.setenv("GEOCOMPONENTS_EVENT_BATCH_SIZE", "0")
+    with pytest.raises(RuntimeError, match="greater than zero"):
+        config.event_batch_size()
+
+
 def test_descriptions_dir_defaults_to_shared_repo_folder(clean_env):
     clean_env.delenv("GEOCOMPONENTS_DESCRIPTIONS", raising=False)
 

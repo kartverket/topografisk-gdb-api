@@ -259,12 +259,58 @@ mounted into the container so code edits take effect on a restart — no rebuild
 
 ```bash
 docker compose up --build
-# db  →  migrate (geocomponents apply-schema)  →  api (geocomponents serve) on :8000
+# db → migrate (geocomponents apply-schema) → api (geocomponents serve) on :8000
 ```
 
-`docker compose up db` brings up just PostGIS (used by the host-run tests below).
-The image's entrypoint is the `geocomponents` CLI (`validate` | `apply-schema` |
-`serve`); the compose services simply run those subcommands.
+`docker compose up db redis` brings up just PostGIS and Redis. The image's
+entrypoint is the `geocomponents` CLI (`validate` | `apply-schema` | `serve`);
+the compose services simply run those subcommands.
+
+`apply-schema` first creates or refreshes fixed application infrastructure such
+as the event outbox, then generates dataset tables, functions, and their
+change-capture triggers. Existing pending outbox rows are preserved.
+
+## Feature change streams
+
+Every committed create, update, and delete is distributed through a Redis
+Stream dedicated to its map layer (OGC collection):
+
+```text
+geocomponents.feature-events.{dataset}.{collection}
+```
+
+One database transaction produces one event per affected collection. A single
+write therefore emits one event, a batch upsert emits one event containing all
+affected local IDs, and an atomic transaction spanning collections emits one
+event on each collection's stream. Rolled-back changes emit nothing.
+
+Each stream entry has one field named `event` containing JSON:
+
+```json
+{
+  "id": "938845b6-35fd-4ee2-b39b-ad2f12dc840f",
+  "type": "features.changed",
+  "dataset": "bygning",
+  "maplayer": "bygning_posisjon",
+  "localids": ["56b6d12c-6937-40d4-aada-04faca3e6f19"],
+  "operations": ["update"],
+  "bbox": [262000.0, 6649000.0, 262100.0, 6649100.0],
+  "crs": "http://www.opengis.net/def/crs/EPSG/0/5972",
+  "occurred_at": "2026-09-04T12:00:00+00:00"
+}
+```
+
+The bbox is calculated by PostGIS in the collection's native CRS. Creates use
+the new geometry, deletes use the old geometry, and updates cover the union of
+the old and new geometry so consumers can invalidate both locations.
+
+Delivery uses a transactional PostgreSQL outbox and is **at least once**. Redis
+outages do not fail successful feature writes; pending events are retried.
+Consumers must deduplicate by the stable event `id`. Stream retention is bounded
+approximately by `GEOCOMPONENTS_EVENT_STREAM_MAXLEN` (default `10000`). Runtime
+configuration also includes `REDIS_URL`, `GEOCOMPONENTS_EVENT_POLL_SECONDS`,
+`GEOCOMPONENTS_EVENT_BATCH_SIZE`, and
+`GEOCOMPONENTS_EVENT_CLAIM_TIMEOUT_SECONDS`.
 
 ## Using the API
 
@@ -456,6 +502,5 @@ select ogc.transaction(
 
 ### Not built yet (designed for)
 - Importing descriptions from GML/UML models.
-- Emitting events when data changes.
 - Migrations when a description changes an existing table. Until then, operators
   must migrate manually — see the note in [DEPLOY.md](DEPLOY.md#extra-development-note).

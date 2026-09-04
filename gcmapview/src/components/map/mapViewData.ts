@@ -5,6 +5,7 @@ import {
   bygningPosisjonItemsInBboxUrl,
   bygningSenterlinjeItemsInBboxUrl,
   buildingsItemsInBboxUrl,
+  collectionItemsInBboxUrl,
   parcelsItemsInBboxUrl,
   platformEdgesItemsInBboxUrl,
   trackCentresItemsInBboxUrl,
@@ -39,7 +40,11 @@ import {
   type ActiveFeatureFilter
 } from '../../map/featureInspect';
 import type { Coordinates, Feature, FeatureCollection, Position } from '../../map/geojson';
-import { type LayerVisibility, useLayerVisibilityStore } from '../../store/layerVisibilityStore';
+import {
+  type LayerVisibility,
+  MAP_LAYER_COLLECTION_IDS,
+  useLayerVisibilityStore
+} from '../../store/layerVisibilityStore';
 import { buildingCentroidsFeatureCollection, normalizePolygonFeatureCollection } from './mapViewGeometry';
 
 export const emptyFeatureCollection: FeatureCollection = {
@@ -540,6 +545,23 @@ export async function getVisibleFeatureCollections(
     bygningSenterlinje,
     bygningPosisjon
   };
+}
+
+export async function getVisibleFeatureCollection(
+  map: maplibregl.Map,
+  visibility: LayerVisibility,
+  layerId: VisibleFeatureCollectionKey
+): Promise<FeatureCollection | null> {
+  const requiresBuildingZoom =
+    layerId === 'buildings' ||
+    layerId === 'bygning' ||
+    layerId === 'bygningOmrade' ||
+    layerId === 'bygningSenterlinje' ||
+    layerId === 'bygningPosisjon';
+  if (!visibility[layerId] || (requiresBuildingZoom && !isBuildingZoom(map))) {
+    return null;
+  }
+  return getFeatureCollection(collectionItemsInBboxUrl(MAP_LAYER_COLLECTION_IDS[layerId], visibleOgcBbox(map)));
 }
 
 export function layerVisibilityChanged(previous: LayerVisibility, current: LayerVisibility) {

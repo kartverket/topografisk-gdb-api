@@ -47,6 +47,19 @@ def _fk_plan(schema: str, table_names: list[str]) -> SchemaPlan:
     return SchemaPlan(schema_name=schema, collections=tuple(colls))
 
 
+def test_table_statements_capture_changes_with_collection_metadata():
+    ddl = "\n".join(postgis.table_statements(_fk_plan("roads", ["centreline"])))
+
+    assert "create or replace function roads._centreline_record_change()" in ddl
+    assert "after insert or update or delete on roads.centreline" in ddl
+    assert "'roads', 'centreline', 'create', NEW.\"id\"" in ddl
+    assert 'null, NEW."geometry", 4326' in ddl
+    assert "'roads', 'centreline', 'update', NEW.\"id\"" in ddl
+    assert 'OLD."geometry", NEW."geometry", 4326' in ddl
+    assert "'roads', 'centreline', 'delete', OLD.\"id\"" in ddl
+    assert 'OLD."geometry", null, 4326' in ddl
+
+
 def test_apply_tables_grown_plan_survives_duplicate_fk_from_prior_run(db):
     """Re-applying a grown plan (new collection added since last apply) must
     create the new table cleanly, even though the pre-existing FKs raise

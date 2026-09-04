@@ -75,7 +75,9 @@ def db(datasets):
             conn.execute(f"drop schema if exists {d.name} cascade")
         conn.execute("drop schema if exists topogdb cascade")
         conn.execute("drop schema if exists ogc cascade")
+        conn.execute("drop schema if exists geocomponents_event cascade")
         conn.autocommit = False
+        functions.apply_event_schema(conn)
         functions.apply_topogdb(conn)
         functions.apply_dispatch(conn)
         for d in datasets:

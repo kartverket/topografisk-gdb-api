@@ -20,6 +20,12 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+SERVICE_NAME = "geocomponents"
+DEFAULT_EVENT_POLL_SECONDS = 1.0
+DEFAULT_EVENT_BATCH_SIZE = 100
+DEFAULT_EVENT_CLAIM_TIMEOUT_SECONDS = 30.0
+DEFAULT_EVENT_STREAM_MAXLEN = 10_000
+
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # DB_* var -> libpq keyword. Included in the DSN only when the var is set.
@@ -51,6 +57,62 @@ def database_dsn() -> str:
         keyword: os.environ[var] for var, keyword in _DB_PARTS if os.environ.get(var)
     }
     return make_conninfo(**params)
+
+
+def redis_url() -> str:
+    value = os.environ.get("REDIS_URL", "").strip()
+    if not value:
+        raise RuntimeError(f"No Redis configured for {SERVICE_NAME}: set REDIS_URL.")
+    return value
+
+
+def _positive_float(name: str, default: float) -> float:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    try:
+        value = float(raw_value)
+    except ValueError as err:
+        raise RuntimeError(f"{name} must be a number") from err
+    if value <= 0:
+        raise RuntimeError(f"{name} must be greater than zero")
+    return value
+
+
+def _positive_int(name: str, default: int) -> int:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError as err:
+        raise RuntimeError(f"{name} must be an integer") from err
+    if value <= 0:
+        raise RuntimeError(f"{name} must be greater than zero")
+    return value
+
+
+def event_poll_seconds() -> float:
+    return _positive_float(
+        "GEOCOMPONENTS_EVENT_POLL_SECONDS", DEFAULT_EVENT_POLL_SECONDS
+    )
+
+
+def event_batch_size() -> int:
+    return _positive_int("GEOCOMPONENTS_EVENT_BATCH_SIZE", DEFAULT_EVENT_BATCH_SIZE)
+
+
+def event_claim_timeout_seconds() -> float:
+    return _positive_float(
+        "GEOCOMPONENTS_EVENT_CLAIM_TIMEOUT_SECONDS",
+        DEFAULT_EVENT_CLAIM_TIMEOUT_SECONDS,
+    )
+
+
+def event_stream_maxlen() -> int:
+    return _positive_int(
+        "GEOCOMPONENTS_EVENT_STREAM_MAXLEN", DEFAULT_EVENT_STREAM_MAXLEN
+    )
 
 
 def descriptions_dir() -> Path:

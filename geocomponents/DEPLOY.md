@@ -7,13 +7,15 @@ CLI; CI publishes it (e.g. to GHCR) and the manifest lives in the apps repo.
 ## What the apps repo provides
 
 1. **A database** — set the `DB_*` environment variables.
-2. **The dataset descriptions** — mount them as a folder (`filesFrom`) and set
+2. **Redis** — set `REDIS_URL` for feature-change stream distribution.
+3. **The dataset descriptions** — mount them as a folder (`filesFrom`) and set
    `GEOCOMPONENTS_DESCRIPTIONS` to that path.
 
 ## Commands
 
 - `serve` — runs the API. This is the image default; the main container sets no command.
-- `apply-schema` — builds the database schema. Run it as a separate one-shot job
+- `apply-schema` — creates fixed infrastructure including the transactional
+  event outbox, then builds the dataset schemas. Run it as a separate one-shot job
   (a `SKIPJob`), **not** as an init container on the Application — see
   [Applying the schema](#applying-the-schema).
 
@@ -24,8 +26,13 @@ CLI; CI publishes it (e.g. to GHCR) and the manifest lives in the apps repo.
 | `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | database connection (required); `DB_PASSWORD` from a secret |
 | `DB_PORT` | optional, defaults to 5432 |
 | `DB_SSLMODE`, `DB_SSLROOTCERT`, `DB_SSLCERT`, `DB_SSLKEY` | optional TLS (recommend `DB_SSLMODE=verify-ca`) |
+| `REDIS_URL` | Redis connection URL used by the feature-event outbox relay (required by `serve`) |
 | `GEOCOMPONENTS_DESCRIPTIONS` | path to the mounted descriptions folder |
 | `GEOCOMPONENTS_BASE_URL` | external URL, used in the OGC API's links |
+| `GEOCOMPONENTS_EVENT_POLL_SECONDS` | outbox polling interval; default `1` |
+| `GEOCOMPONENTS_EVENT_BATCH_SIZE` | maximum events claimed per iteration; default `100` |
+| `GEOCOMPONENTS_EVENT_CLAIM_TIMEOUT_SECONDS` | stale claim timeout; default `30` |
+| `GEOCOMPONENTS_EVENT_STREAM_MAXLEN` | approximate Redis Stream retention; default `10000` |
 
 If the `DB_*` variables are missing, the app exits with an error.
 
@@ -47,6 +54,8 @@ spec:
       valueFrom: { secretKeyRef: { name: geocomponents-db, key: password } }
     - { name: GEOCOMPONENTS_DESCRIPTIONS, value: "/etc/geocomponents/descriptions" }
     - { name: GEOCOMPONENTS_BASE_URL, value: "https://geo.example.org" }
+    - name: REDIS_URL
+      valueFrom: { secretKeyRef: { name: geocomponents-redis, key: url } }
   filesFrom:
     - configMap: geocomponents-descriptions
       mountPath: /etc/geocomponents/descriptions
@@ -56,8 +65,9 @@ spec:
 
 ## Applying the schema
 
-`apply-schema` is a task: it connects, issues the DDL, prints what
-it applied, and exits 0. Run it as a `SKIPJob`.
+`apply-schema` creates or refreshes the fixed `geocomponents_event` schema and
+outbox before creating dataset tables and attaching their change triggers. It is
+a one-shot `SKIPJob` task. Reapplication preserves pending outbox rows.
 
 ```yaml
 apiVersion: skiperator.kartverket.no/v1beta1
