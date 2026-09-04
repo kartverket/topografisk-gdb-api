@@ -124,6 +124,9 @@ def _change_trigger_function_ddl(plan: CollectionPlan) -> str:
 create or replace function {table.schema}.{function_name}()
 returns trigger language plpgsql as $trigger$
 begin
+    if current_setting('geocomponents.suppress_change_events', true) = 'on' then
+        return case when TG_OP = 'DELETE' then OLD else NEW end;
+    end if;
     if TG_OP = 'INSERT' then
         perform geocomponents_event.record_change(
             '{dataset}', '{collection}', 'create', NEW."{identifier}",

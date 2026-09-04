@@ -48,7 +48,7 @@ def _events(connection: psycopg.Connection) -> list[tuple]:
 def test_outbox_groups_transaction_and_aggregates_old_and_new_bounds(db):
     first = UUID("00000000-0000-0000-0000-000000000101")
     second = UUID("00000000-0000-0000-0000-000000000102")
-    connection = psycopg.connect(db, autocommit=False)
+    connection = psycopg.connect(db, autocommit=True)
     try:
         with connection.transaction():
             connection.execute("drop schema if exists event_contract cascade")
@@ -117,3 +117,66 @@ def test_outbox_groups_transaction_and_aggregates_old_and_new_bounds(db):
                 "where dataset = 'event_contract'"
             )
         connection.close()
+
+
+def test_delete_all_event_becomes_visible_after_transaction_commit(db):
+    first = UUID("00000000-0000-0000-0000-000000000201")
+    second = UUID("00000000-0000-0000-0000-000000000202")
+    writer = psycopg.connect(db, autocommit=False)
+    observer = psycopg.connect(db, autocommit=True)
+    try:
+        with writer.transaction():
+            writer.execute("drop schema if exists event_contract cascade")
+            writer.execute(
+                "delete from geocomponents_event.change_outbox "
+                "where dataset = 'event_contract'"
+            )
+        postgis.apply_tables(writer, _event_plan())
+        with writer.transaction():
+            writer.execute(
+                "insert into event_contract.roads (localid, shape) values "
+                "(%s, ST_SetSRID(ST_Point(1, 2), 4326)), "
+                "(%s, ST_SetSRID(ST_Point(8, 9), 4326))",
+                (first, second),
+            )
+        with writer.transaction():
+            writer.execute(
+                "delete from geocomponents_event.change_outbox "
+                "where dataset = 'event_contract'"
+            )
+
+        deleted = writer.execute(
+            "select ogc.feature_delete_all('event_contract', 'roads')"
+        ).fetchone()[0]
+        assert deleted == 2
+        assert (
+            observer.execute(
+                "select count(*) from geocomponents_event.change_outbox "
+                "where dataset = 'event_contract'"
+            ).fetchone()[0]
+            == 0
+        )
+
+        writer.commit()
+
+        event = observer.execute(
+            """
+            select localids, operations, srid, array[
+                ST_XMin(Box2D(affected_area)), ST_YMin(Box2D(affected_area)),
+                ST_XMax(Box2D(affected_area)), ST_YMax(Box2D(affected_area))
+            ]
+            from geocomponents_event.change_outbox
+            where dataset = 'event_contract' and collection = 'roads'
+            """
+        ).fetchone()
+        assert event == ([first, second], ["delete"], 4326, [1.0, 2.0, 8.0, 9.0])
+    finally:
+        writer.rollback()
+        with writer.transaction():
+            writer.execute("drop schema if exists event_contract cascade")
+            writer.execute(
+                "delete from geocomponents_event.change_outbox "
+                "where dataset = 'event_contract'"
+            )
+        observer.close()
+        writer.close()

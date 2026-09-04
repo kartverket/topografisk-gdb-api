@@ -52,6 +52,7 @@ def test_table_statements_capture_changes_with_collection_metadata():
 
     assert "create or replace function roads._centreline_record_change()" in ddl
     assert "after insert or update or delete on roads.centreline" in ddl
+    assert "current_setting('geocomponents.suppress_change_events', true)" in ddl
     assert "'roads', 'centreline', 'create', NEW.\"id\"" in ddl
     assert 'null, NEW."geometry", 4326' in ddl
     assert "'roads', 'centreline', 'update', NEW.\"id\"" in ddl

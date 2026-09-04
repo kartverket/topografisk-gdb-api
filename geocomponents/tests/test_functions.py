@@ -72,6 +72,7 @@ def test_dispatch_exposes_all_feature_entrypoints_taking_dataset_and_collection(
     for op in (*OPERATIONS, "upsert"):
         assert f"function ogc.feature_{op}(" in sql
     assert "function ogc.transaction(" in sql
+    assert "function ogc.feature_delete_all(" in sql
     # The fixed entrypoints route by OGC identifiers, not physical names.
     assert "dataset text, collection text" in sql
 
@@ -110,6 +111,28 @@ def test_direct_write_dispatchers_call_the_guard_helper():
         )
         assert stmt is not None, f"missing dispatcher for {dispatch_function(op)}"
         assert "perform ogc._assert_direct_write_allowed(dataset, collection);" in stmt
+
+    delete_all = next(
+        stmt
+        for stmt in statements
+        if stmt.startswith("create or replace function ogc.feature_delete_all(")
+    )
+    assert (
+        "perform ogc._assert_direct_write_allowed(dataset, collection);" in delete_all
+    )
+    assert (
+        "perform set_config('geocomponents.suppress_change_events', 'on', true);"
+        in delete_all
+    )
+    assert "lock table %I.%I in share row exclusive mode" in delete_all
+    assert (
+        "select array_agg(%1$I), ST_SetSRID(ST_Extent(%2$I)::geometry, $1)"
+        in delete_all
+    )
+    assert "insert into geocomponents_event.change_outbox" in delete_all
+    assert "to_regclass(format('%I.association', dataset))" in delete_all
+    assert "delete from %I.association where source_collection = $1" in delete_all
+    assert "execute format('delete from %I.%I', dataset, collection);" in delete_all
 
 
 def test_internal_functions_match_each_collections_declared_operations():

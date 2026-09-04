@@ -6,9 +6,11 @@ import {
   bygningSenterlinjeItemsInBboxUrl,
   buildingsItemsInBboxUrl,
   collectionItemsInBboxUrl,
+  deleteCollectionItemsExecutionUrl,
   parcelsItemsInBboxUrl,
   platformEdgesItemsInBboxUrl,
   trackCentresItemsInBboxUrl,
+  type CollectionId,
   type OgcBbox
 } from '../../api/geocomponentsApi';
 import {
@@ -78,6 +80,8 @@ export const MIN_VECTOR_ZOOM = 10;
 export const MIN_BUILDING_ZOOM = 15;
 const FEATURE_PAGE_LIMIT = 1000;
 const MAX_FEATURE_PAGE_REQUESTS = 100;
+const VIEWPORT_QUERY_PADDING_PX = 64;
+const FULL_NEAR_PADDING_PITCH = 60;
 
 const BUILDING_COLOR = '#ff0000';
 const BUILDING_FILL_COLOR = '#9914d2';
@@ -192,15 +196,23 @@ export function visibleOgcBbox(map: maplibregl.Map): OgcBbox {
   const container = map.getContainer();
   const width = container.clientWidth;
   const height = container.clientHeight;
+  const nearPadding = Math.max(
+    VIEWPORT_QUERY_PADDING_PX,
+    height * Math.min(1, map.getPitch() / FULL_NEAR_PADDING_PITCH)
+  );
+  const minX = -VIEWPORT_QUERY_PADDING_PX;
+  const minY = -VIEWPORT_QUERY_PADDING_PX;
+  const maxX = width + VIEWPORT_QUERY_PADDING_PX;
+  const maxY = height + nearPadding;
   const screenPoints: Array<[number, number]> = [
-    [0, 0],
-    [width / 2, 0],
-    [width, 0],
-    [width, height / 2],
-    [width, height],
-    [width / 2, height],
-    [0, height],
-    [0, height / 2]
+    [minX, minY],
+    [width / 2, minY],
+    [maxX, minY],
+    [maxX, height / 2],
+    [maxX, maxY],
+    [width / 2, maxY],
+    [minX, maxY],
+    [minX, height / 2]
   ];
   const coordinates = screenPoints.map(([x, y]) => map.unproject([x, y]));
   const longitudes = coordinates.map(({ lng }) => lng);
@@ -674,6 +686,23 @@ export async function deleteFeature(url: string) {
   if (!response.ok && response.status !== 404) {
     throw await responseError(response, 'Delete failed');
   }
+}
+
+export async function deleteAllFeatures(collectionId: CollectionId) {
+  const response = await fetch(deleteCollectionItemsExecutionUrl(collectionId), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ inputs: { collection: collectionId } })
+  });
+  if (!response.ok) {
+    throw await responseError(response, 'Delete collection items process failed');
+  }
+
+  const result = (await response.json()) as { deleted?: unknown };
+  if (typeof result.deleted !== 'number') {
+    throw new Error('Sletteprosessen returnerte ikke antall slettede objekter.');
+  }
+  return result.deleted;
 }
 
 export async function upsertGeoJsonSource(map: maplibregl.Map, sourceId: string, data: FeatureCollection) {

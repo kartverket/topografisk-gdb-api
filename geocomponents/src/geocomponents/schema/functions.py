@@ -253,6 +253,79 @@ $disp$""",
             using_sql="$1",
         ).replace("using $1", "using fid"),
         f"""\
+create or replace function {s}.feature_delete_all(dataset text, collection text)
+returns bigint language plpgsql as $disp$
+declare
+    deleted_count bigint;
+    identifier_column text;
+    geometry_column text;
+    geometry_srid integer;
+    deleted_localids uuid[];
+    deleted_area geometry;
+begin
+    perform {s}._assert_direct_write_allowed(dataset, collection);
+        select f_geometry_column, srid
+      into geometry_column, geometry_srid
+      from public.geometry_columns
+     where f_table_schema = dataset and f_table_name = collection;
+        select column_name
+      into identifier_column
+      from information_schema.table_constraints constraint_info
+      join information_schema.key_column_usage key_info
+        on key_info.constraint_schema = constraint_info.constraint_schema
+       and key_info.constraint_name = constraint_info.constraint_name
+     where constraint_info.constraint_type = 'PRIMARY KEY'
+       and constraint_info.table_schema = dataset
+       and constraint_info.table_name = collection;
+    execute format(
+        'lock table %I.%I in share row exclusive mode', dataset, collection
+    );
+    execute format(
+        'select array_agg(%1$I), ST_SetSRID(ST_Extent(%2$I)::geometry, $1) from %3$I.%4$I',
+        identifier_column, geometry_column, dataset, collection
+    ) into deleted_localids, deleted_area using geometry_srid;
+    if to_regclass(format('%I.association', dataset)) is not null then
+        execute format('delete from %I.association where source_collection = $1', dataset)
+            using collection;
+    end if;
+    perform set_config('geocomponents.suppress_change_events', 'on', true);
+    execute format('delete from %I.%I', dataset, collection);
+    get diagnostics deleted_count = row_count;
+    if deleted_count > 0 then
+        insert into geocomponents_event.change_outbox (
+            transaction_id, dataset, collection, localids, operations, srid, affected_area
+        ) values (
+            pg_current_xact_id(), dataset, collection, deleted_localids,
+            array['delete'], geometry_srid, deleted_area
+        ) on conflict on constraint change_outbox_transaction_id_dataset_collection_key
+        do update set
+            localids = array(
+                select distinct localid
+                from unnest(
+                    geocomponents_event.change_outbox.localids || excluded.localids
+                ) localid
+            ),
+            operations = array(
+                select distinct operation
+                from unnest(
+                    geocomponents_event.change_outbox.operations || excluded.operations
+                ) operation
+            ),
+            affected_area = case
+                when geocomponents_event.change_outbox.affected_area is null
+                    then excluded.affected_area
+                when excluded.affected_area is null
+                    then geocomponents_event.change_outbox.affected_area
+                else ST_Envelope(ST_Collect(
+                    geocomponents_event.change_outbox.affected_area,
+                    excluded.affected_area
+                ))
+            end;
+    end if;
+    return deleted_count;
+end;
+$disp$""",
+        f"""\
 create or replace function {s}.transaction(dataset text, document jsonb)
 returns jsonb language plpgsql as $disp$
 declare
@@ -454,6 +527,13 @@ $disp$""",
             "Precondition: dataset and collection must resolve to a simple-feature collection with a generated delete function. "
             "Returns true when a matching feature was deleted. "
             "Raises P0001 for topology collections, where ogc.transaction is the write path, and class 42 for unknown dataset or broken deployment.",
+        ),
+        _comment_statement(
+            "feature_delete_all(text, text)",
+            "Delete every feature in one simple-feature collection with one SQL statement. "
+            "Outbound association rows for the collection are removed first when the dataset has relationships. "
+            "Returns the number of deleted features. The statement and its row-level event triggers run in one transaction, so the aggregated outbox event becomes visible only after successful commit. "
+            "Raises P0001 for topology collections and class 42 for an unknown dataset, collection, or broken deployment.",
         ),
         _comment_statement(
             "transaction(text, jsonb)",

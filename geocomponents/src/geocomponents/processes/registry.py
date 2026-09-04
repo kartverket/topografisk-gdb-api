@@ -15,6 +15,7 @@ from __future__ import annotations
 
 PROCESS_REGISTRY: dict[str, str] = {
     "hello": "geocomponents.processes.placeholder.PlaceholderProcessor",
+    "delete-collection-items": "geocomponents.processes.delete_collection_items.DeleteCollectionItemsProcessor",
     "upsert-batch": "geocomponents.processes.upsert_batch.UpsertBatchProcessor",
     "import": "geocomponents.processes.external.import_process.ImportProcessor",
 }

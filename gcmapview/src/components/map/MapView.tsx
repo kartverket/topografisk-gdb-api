@@ -2,20 +2,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import robotoLatinVariableUrl from '@fontsource-variable/roboto/files/roboto-latin-wght-normal.woff2';
-import { AlertCircle, Eraser, Plus } from 'lucide-react';
+import { AlertCircle, Plus } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { featureChangeIntersectsBbox, subscribeToFeatureChanges } from '../../api/featureEvents';
-import {
-  buildingItemUrl,
-  buildingsCreateUrl,
-  buildingsItemsUrl,
-  parcelItemUrl,
-  parcelsItemsInBboxUrl,
-  parcelsCreateUrl,
-  parcelsItemsUrl
-} from '../../api/geocomponentsApi';
+import { buildingsCreateUrl, parcelsItemsInBboxUrl, parcelsCreateUrl } from '../../api/geocomponentsApi';
 import {
   applyMapDimensionMode,
   applyMapLayerVisibility,
@@ -31,7 +23,10 @@ import {
 } from '../../map/featureInspect';
 import {
   filterUnavailableLayers,
+  MAP_LAYER_COLLECTION_IDS,
+  MAP_LAYER_LABELS,
   mapLayerIdForCollection,
+  type MapLayerId,
   useLayerVisibilityStore
 } from '../../store/layerVisibilityStore';
 import { useMapViewStore } from '../../store/mapViewStore';
@@ -44,7 +39,7 @@ import {
   addNativeFeatureSourcesAndLayers,
   clearVectorSources,
   createFeature,
-  deleteFeature,
+  deleteAllFeatures,
   emptyFeatureCollection,
   emptyVisibleFeatureCollections,
   filterVisibleFeatureCollectionsByProperty,
@@ -227,7 +222,7 @@ export function MapView() {
   const [backgroundMap, setBackgroundMap] = useState<BackgroundMapId>('topo');
   const backgroundMapRef = useRef<BackgroundMapId>(backgroundMap);
   const [isCreating, setIsCreating] = useState(false);
-  const [isClearing, setIsClearing] = useState(false);
+  const [deletingLayerId, setDeletingLayerId] = useState<MapLayerId>();
   const [placeInspectorLeftOfLayers, setPlaceInspectorLeftOfLayers] = useState(false);
   const [featureInspectorPosition, setFeatureInspectorPosition] = useState<{ left: number; top: number }>();
   const [hoveredPositionIndex, setHoveredPositionIndex] = useState<number>();
@@ -1111,75 +1106,35 @@ export function MapView() {
     }
   }
 
-  async function clearData() {
+  async function deleteLayerData(layerId: MapLayerId) {
     const map = mapRef.current;
     if (!map) {
       return;
     }
-    if (!isVectorZoom(map)) {
-      setError(`Zoom inn over nivå ${MIN_VECTOR_ZOOM} før du tømmer data`);
-      return;
-    }
-
-    setIsClearing(true);
+    const collectionId = MAP_LAYER_COLLECTION_IDS[layerId];
+    const layerLabel = MAP_LAYER_LABELS[layerId];
+    setDeletingLayerId(layerId);
     setError(undefined);
 
     try {
-      const [buildings, parcels] = await Promise.all([
-        getFeatureCollection(buildingsItemsUrl),
-        getFeatureCollection(parcelsItemsUrl)
-      ]);
-      logLoadedCoordinates('buildings before clear', buildings);
-      logLoadedCoordinates('parcels before clear', parcels);
+      const confirmed = window.confirm(`Vil du slette alle objekter i laget «${layerLabel}»? Dette kan ikke angres.`);
+      if (!confirmed) {
+        setStatus(`Sletting av ${layerLabel.toLowerCase()} ble avbrutt.`);
+        return;
+      }
 
-      await Promise.all(
-        buildings.features.map(building =>
-          building.id === undefined ? Promise.resolve() : deleteFeature(buildingItemUrl(building.id))
-        )
-      );
-      await Promise.all(
-        parcels.features.map(parcel =>
-          parcel.id === undefined ? Promise.resolve() : deleteFeature(parcelItemUrl(parcel.id))
-        )
-      );
-
-      const {
-        parcels: reloadedParcels,
-        buildings: reloadedBuildings,
-        platformEdges: reloadedPlatformEdges,
-        trackCentres: reloadedTrackCentres,
-        bygning: reloadedBygning,
-        bygningOmrade: reloadedBygningOmrade,
-        bygningSenterlinje: reloadedBygningSenterlinje,
-        bygningPosisjon: reloadedBygningPosisjon
-      } = await getVisibleFeatureCollections(map, filteredLayerVisibility);
-      logLoadedCoordinates('parcels after clear', reloadedParcels);
-      logLoadedCoordinates('buildings after clear', reloadedBuildings);
-      latestVectorDataRef.current = {
-        parcels: reloadedParcels,
-        buildings: reloadedBuildings,
-        platformEdges: reloadedPlatformEdges,
-        trackCentres: reloadedTrackCentres,
-        bygning: reloadedBygning,
-        bygningOmrade: reloadedBygningOmrade,
-        bygningSenterlinje: reloadedBygningSenterlinje,
-        bygningPosisjon: reloadedBygningPosisjon
-      };
-      await applyRenderedVisibleData(map, latestVectorDataRef.current, filteredLayerVisibility);
-      const clearedStatus = `Tømte ${buildings.features.length} bygninger og ${parcels.features.length} parseller.`;
-      setStatus(clearedStatus);
-      map.once('idle', () => {
-        const nativeState = logNativeRenderingState(map);
-        setStatus(
-          `${clearedStatus} Native kildefeaturer P:${nativeState.parcelSourceFeatures} B:${nativeState.buildingSourceFeatures}; rendret P:${nativeState.parcelRenderedFeatures} B:${nativeState.buildingRenderedFeatures}.`
-        );
-      });
-      setIsMapReady(true);
+      setStatus(`Sletter alle objekter fra ${layerLabel.toLowerCase()}...`);
+      const deletedCount = await deleteAllFeatures(collectionId);
+      if (selectedFeature?.collectionId === collectionId) {
+        closeSelectedFeatureInspector();
+      }
+      await reloadVisibleDataRef.current?.();
+      setStatus(`Slettet ${deletedCount} objekter fra ${layerLabel.toLowerCase()}.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Ukjent feil');
-      setStatus('Kunne ikke tømme data');
+      setStatus(`Kunne ikke tømme ${layerLabel.toLowerCase()}.`);
     } finally {
-      setIsClearing(false);
+      setDeletingLayerId(undefined);
     }
   }
 
@@ -1195,19 +1150,10 @@ export function MapView() {
       <div className="absolute top-4 left-4 z-[3] flex flex-col items-start gap-2 sm:flex-row">
         <Button
           size="sm"
-          disabled={!isMapReady || !isVectorZoomActive || isCreating || isClearing}
+          disabled={!isMapReady || !isVectorZoomActive || isCreating || deletingLayerId !== undefined}
           onClick={createRandomBuilding}>
           <Plus data-icon="inline-start" />
           {isCreating ? 'Oppretter parsell...' : 'Opprett tilfeldig parsell'}
-        </Button>
-        <Button
-          size="sm"
-          variant="destructive"
-          className="border-destructive/30 bg-destructive text-white shadow-md hover:bg-destructive/90 hover:text-white"
-          disabled={!isMapReady || !isVectorZoomActive || isCreating || isClearing}
-          onClick={clearData}>
-          <Eraser data-icon="inline-start" />
-          {isClearing ? 'Tømmer data...' : 'Tøm parseller'}
         </Button>
       </div>
       <div
@@ -1219,6 +1165,7 @@ export function MapView() {
           is3d={is3d}
           isEditingFeature={isEditingFeature}
           isLoadingAvailableLayers={isLoadingAvailableLayers}
+          deletingLayerId={deletingLayerId}
           terrainEnabled={terrainEnabled}
           visibility={filteredLayerVisibility}
           favoriteViews={favoriteViews}
@@ -1229,6 +1176,7 @@ export function MapView() {
           onSaveFavoriteView={saveCurrentFavoriteView}
           onClearFavoriteView={clearStoredFavoriteView}
           onSelectFavoriteView={selectStoredFavoriteView}
+          onDeleteLayer={deleteLayerData}
         />
       </div>
       {selectedFeature ? (

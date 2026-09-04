@@ -224,7 +224,9 @@ Optional `has_z: true` stores XYZ coordinates (PostGIS `PointZ`,
 
 `processes` lists named operations (OGC API — Processes) the dataset exposes at
 `/processes/<id>`. Each id must be registered in the process registry
-(`src/geocomponents/processes/registry.py`); the example ships a `hello` process.
+(`src/geocomponents/processes/registry.py`). The built-in processes include
+`hello`, `upsert-batch`, and `delete-collection-items`. The deletion process is
+available only for directly writable simple-feature collections.
 
 ### A minimal dataset
 
@@ -284,6 +286,15 @@ write therefore emits one event, a batch upsert emits one event containing all
 affected local IDs, and an atomic transaction spanning collections emits one
 event on each collection's stream. Rolled-back changes emit nothing.
 
+`delete-collection-items` deletes a complete collection with one database
+statement. It calculates all deleted local IDs and old geometry bounds in one
+aggregate query, suppresses per-row event writes for the delete statement, and
+writes one outbox event after the delete completes. A collection-level write
+lock ensures that the aggregate and deletion cover the same rows. The process
+returns only after the transaction has committed. Because the relay reads the
+outbox through a separate connection, it cannot publish this event before
+deletion completion; a failed or rolled-back deletion produces no event.
+
 Each stream entry has one field named `event` containing JSON:
 
 ```json
@@ -327,6 +338,11 @@ curl -X POST localhost:8000/datasets/cadastre/ogc_api/collections/parcels/items 
 # Run a process
 curl -X POST localhost:8000/datasets/cadastre/ogc_api/processes/hello/execution \
   -H 'content-type: application/json' -d '{"inputs":{"name":"world"}}'
+
+# Delete every feature in one writable collection (returns collection + deleted count)
+curl -X POST localhost:8000/datasets/cadastre/ogc_api/processes/delete-collection-items/execution \
+  -H 'content-type: application/json' \
+  -d '{"inputs":{"collection":"parcels"}}'
 ```
 
 Open `http://localhost:8000/datasets/cadastre/ogc_api/` in a browser for the
