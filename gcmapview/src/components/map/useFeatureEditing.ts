@@ -359,12 +359,10 @@ export function useFeatureEditing({
   const [isDeletingFeature, setIsDeletingFeature] = useState(false);
   const [isSavingFeatureChanges, setIsSavingFeatureChanges] = useState(false);
   const [isEditingFeature, setIsEditingFeature] = useState(false);
+  const [editSessionFeature, setEditSessionFeature] = useState<InspectedFeature>();
   const selectedFeatureRef = useRef(selectedFeature);
-  selectedFeatureRef.current = selectedFeature;
   const isEditingFeatureRef = useRef(isEditingFeature);
-  isEditingFeatureRef.current = isEditingFeature;
   const hoveredPositionIndexRef = useRef(hoveredPositionIndex);
-  hoveredPositionIndexRef.current = hoveredPositionIndex;
   const previewFeaturePositionChangesRef = useRef<(positions: Position[]) => void>(() => {});
   const featureEditSessionRef = useRef<FeatureEditSession | undefined>(undefined);
   const dragPointsOverlayRef = useRef<HTMLDivElement | undefined>(undefined);
@@ -375,25 +373,33 @@ export function useFeatureEditing({
   const projectFeaturePositionPointRef = useRef<
     (feature: InspectedFeature, index: number, position: Position) => maplibregl.Point
   >(() => new maplibregl.Point(0, 0));
-  projectFeaturePositionPointRef.current = (feature: InspectedFeature, index: number, position: Position) => {
-    const map = mapRef.current;
-    if (!map) {
-      return new maplibregl.Point(0, 0);
-    }
 
-    return projectInspectedFeaturePositionPoint(
-      map,
-      feature,
-      index,
-      position,
-      is3d,
-      adjustElevatedHeights,
-      currentSelectedPositionZOffset
-    );
-  };
+  useEffect(() => {
+    selectedFeatureRef.current = selectedFeature;
+    isEditingFeatureRef.current = isEditingFeature;
+    hoveredPositionIndexRef.current = hoveredPositionIndex;
+  }, [hoveredPositionIndex, isEditingFeature, selectedFeature]);
+
+  useEffect(() => {
+    projectFeaturePositionPointRef.current = (feature: InspectedFeature, index: number, position: Position) => {
+      const map = mapRef.current;
+      if (!map) {
+        return new maplibregl.Point(0, 0);
+      }
+
+      return projectInspectedFeaturePositionPoint(
+        map,
+        feature,
+        index,
+        position,
+        is3d,
+        adjustElevatedHeights,
+        currentSelectedPositionZOffset
+      );
+    };
+  }, [adjustElevatedHeights, currentSelectedPositionZOffset, is3d, mapRef]);
 
   const editedPositionIndices = useMemo(() => {
-    const editSessionFeature = featureEditSessionRef.current?.selectedFeature;
     if (
       !isEditingFeature ||
       !selectedFeature ||
@@ -410,7 +416,7 @@ export function useFeatureEditing({
       }
       return indices;
     }, []);
-  }, [isEditingFeature, selectedFeature]);
+  }, [editSessionFeature, isEditingFeature, selectedFeature]);
 
   function applyDragMarkerClass(element: HTMLElement, isHighlighted: boolean, isDragging: boolean) {
     element.className = [
@@ -470,6 +476,7 @@ export function useFeatureEditing({
         selectedFeature.featureId
       )
     };
+    setEditSessionFeature(featureEditSessionRef.current.selectedFeature);
     setHoveredPositionIndex(selectedFeature.mapPositions.length > 0 ? 0 : undefined);
     setShowSelectedPositionDots(false);
     setIsEditingFeature(true);
@@ -483,6 +490,7 @@ export function useFeatureEditing({
 
     restoreFeatureEditPreview();
     featureEditSessionRef.current = undefined;
+    setEditSessionFeature(undefined);
     setIsEditingFeature(false);
     setHoveredPositionIndex(undefined);
     setShowSelectedPositionDots(true);
@@ -522,7 +530,9 @@ export function useFeatureEditing({
       };
     });
   }
-  previewFeaturePositionChangesRef.current = previewSelectedFeaturePositionChanges;
+  useEffect(() => {
+    previewFeaturePositionChangesRef.current = previewSelectedFeaturePositionChanges;
+  });
 
   async function deleteSelectedFeature() {
     const map = mapRef.current;
@@ -573,7 +583,7 @@ export function useFeatureEditing({
 
   async function commitSelectedFeaturePositionChanges(positions: Position[]) {
     const map = mapRef.current;
-    const featureToEdit = selectedFeatureRef.current;
+    const featureToEdit = selectedFeature;
 
     if (
       !map ||
@@ -599,6 +609,7 @@ export function useFeatureEditing({
         updatedSourceFeature
       );
       featureEditSessionRef.current = undefined;
+      setEditSessionFeature(undefined);
       setIsEditingFeature(false);
       setHoveredPositionIndex(undefined);
       setShowSelectedPositionDots(true);

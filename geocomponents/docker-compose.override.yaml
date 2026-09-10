@@ -34,6 +34,7 @@ services:
       DB_PASSWORD: geocomponents
       GEOCOMPONENTS_DESCRIPTIONS: /app/descriptions
       GEOCOMPONENTS_BASE_URL: http://localhost:8004
+      REDIS_URL: redis://redis:6379/0
     volumes:
       - ./src:/app/src:ro
       - type: bind
@@ -102,11 +103,14 @@ services:
     build: ../gcmapview
     environment:
       GCAPI_API_URL: http://localhost:8004
+      REDIS_URL: redis://redis:6379/0
     read_only: true
     ports:
       - "8080:8080"
     depends_on:
       gcapi:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   gccore-migrate:

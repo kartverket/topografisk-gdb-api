@@ -31,8 +31,22 @@ def _config():
 def test_resources_are_collections_plus_declared_processes():
     cfg = _config()
     # cadastre declares process 'hello' and has a topology collection 'blocks'.
-    assert set(cfg["resources"]) == {"parcels", "buildings", "blocks", "hello"}
+    assert set(cfg["resources"]) == {
+        "parcels",
+        "buildings",
+        "blocks",
+        "hello",
+        "delete-collection-items",
+    }
     assert cfg["resources"]["hello"]["type"] == "process"
+
+
+def test_delete_collection_process_exposes_only_directly_writable_collections():
+    cfg = _config()
+    process = cfg["resources"]["delete-collection-items"]
+
+    assert process["type"] == "process"
+    assert sorted(process["processor"]["provider_defs"]) == ["buildings", "parcels"]
 
 
 def test_fkb_bane_config_exposes_batch_upsert_process():

@@ -158,11 +158,12 @@ def _process_resource(dataset: ResolvedDataset, process_id: str, dsn: str) -> di
             "dataset_title": dataset.title,
         },
     }
-    if process_id == "upsert-batch":
+    if process_id in {"delete-collection-items", "upsert-batch"}:
         provider_defs = {
             coll.name: _collection_resource(dataset.name, coll, dsn)["providers"][0]
             for coll in dataset.collections
-            if coll.supports_upsert
+            if coll.supports_crud
+            and (process_id == "delete-collection-items" or coll.supports_upsert)
         }
         resource["processor"]["provider_defs"] = provider_defs
     return resource

@@ -305,5 +305,13 @@ class DbFunctionProvider(BaseProvider):
             raise ProviderItemNotFoundError(f"item {identifier} not found")
         return True
 
+    def delete_all(self) -> int:
+        with _rethrow_pg_raise(), self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                "select ogc.feature_delete_all(%s, %s)",
+                (self.dataset, self.collection),
+            )
+            return int(cur.fetchone()[0])
+
     def __repr__(self):
         return f"<DbFunctionProvider {self.dataset}/{self.collection}>"

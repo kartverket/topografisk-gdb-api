@@ -1,4 +1,4 @@
-import { Compass, Cuboid, Eye, EyeOff, Map, Mountain, ScanLine } from 'lucide-react';
+import { Compass, Cuboid, Eye, EyeOff, Loader2, Map, Mountain, ScanLine, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -52,11 +52,17 @@ const backgroundMapOptions: Array<{
 function LayerToggleRow({
   layerId,
   visible,
-  onToggle
+  deleting,
+  deletionDisabled,
+  onToggle,
+  onDelete
 }: {
   layerId: MapLayerId;
   visible: boolean;
+  deleting: boolean;
+  deletionDisabled: boolean;
   onToggle: () => void;
+  onDelete: () => void;
 }) {
   const isLine =
     layerId === 'platformEdges' ||
@@ -65,7 +71,7 @@ function LayerToggleRow({
     layerId === 'bygningSenterlinje';
 
   return (
-    <li>
+    <li className="flex items-center gap-1">
       <Tooltip>
         <TooltipTrigger
           render={
@@ -116,6 +122,23 @@ function LayerToggleRow({
           {visible ? `Skjul ${MAP_LAYER_LABELS[layerId]}` : `Vis ${MAP_LAYER_LABELS[layerId]}`}
         </TooltipContent>
       </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              className="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              aria-label={`Slett alle data i ${MAP_LAYER_LABELS[layerId]}`}
+              disabled={deletionDisabled}
+              onClick={onDelete}
+            />
+          }>
+          {deleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
+        </TooltipTrigger>
+        <TooltipContent>Slett alle data i {MAP_LAYER_LABELS[layerId]}</TooltipContent>
+      </Tooltip>
     </li>
   );
 }
@@ -126,6 +149,7 @@ type MapLayersCardProps = {
   is3d: boolean;
   isEditingFeature?: boolean;
   isLoadingAvailableLayers?: boolean;
+  deletingLayerId?: MapLayerId;
   terrainEnabled: boolean;
   visibility: LayerVisibility;
   favoriteViews: FavoriteMapView[];
@@ -136,6 +160,7 @@ type MapLayersCardProps = {
   onSaveFavoriteView: () => void;
   onClearFavoriteView: () => void;
   onSelectFavoriteView: (name: string) => void;
+  onDeleteLayer: (layerId: MapLayerId) => void;
 };
 
 export function MapLayersCard({
@@ -144,6 +169,7 @@ export function MapLayersCard({
   is3d,
   isEditingFeature = false,
   isLoadingAvailableLayers = false,
+  deletingLayerId,
   terrainEnabled,
   visibility,
   favoriteViews,
@@ -153,7 +179,8 @@ export function MapLayersCard({
   onToggleTerrain,
   onSaveFavoriteView,
   onClearFavoriteView,
-  onSelectFavoriteView
+  onSelectFavoriteView,
+  onDeleteLayer
 }: MapLayersCardProps) {
   const toggleLayer = useLayerVisibilityStore(state => state.toggleLayer);
   const activeFavoriteView =
@@ -273,7 +300,10 @@ export function MapLayersCard({
                 key={layerId}
                 layerId={layerId}
                 visible={visibility[layerId]}
+                deleting={deletingLayerId === layerId}
+                deletionDisabled={isEditingFeature || deletingLayerId !== undefined}
                 onToggle={() => toggleLayer(layerId)}
+                onDelete={() => onDeleteLayer(layerId)}
               />
             ))}
           </ul>

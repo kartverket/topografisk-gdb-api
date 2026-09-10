@@ -1,7 +1,9 @@
-"""Generate + apply the database functions.
+"""Generate + apply fixed and description-driven database functions.
 
-Two layers, mirroring the DB/API contract decision:
+Three layers, mirroring the DB/API contract decision:
 
+* **Event layer** (``geocomponents_event``) — fixed outbox objects installed
+    non-destructively before generated collection triggers.
 * **Dispatch layer** (``ogc.feature_*``) — a *fixed*, generic set of functions
   the API calls with OGC identifiers ``(dataset, collection)`` as arguments. It
   is written once, lists no datasets, and routes by naming convention to the
@@ -53,6 +55,91 @@ def _quote_key(name: str) -> str:
 def topogdb_statements() -> list[str]:
     """The fixed PostGIS helper objects under ``topogdb`` applied once per DB."""
     return [(_SCHEMA_DIR / "topogdb_functions.sql").read_text(encoding="utf-8")]
+
+
+def event_schema_statements() -> list[str]:
+    """Fixed, non-destructive outbox objects applied before collection triggers."""
+    schema = "geocomponents_event"
+    return [
+        "create extension if not exists postgis",
+        "create extension if not exists pgcrypto",
+        f"create schema if not exists {schema}",
+        f"""\
+create table if not exists {schema}.change_outbox (
+    id uuid primary key default gen_random_uuid(),
+    transaction_id xid8 not null,
+    dataset text not null,
+    collection text not null,
+    localids uuid[] not null default '{{}}'::uuid[],
+    operations text[] not null default '{{}}'::text[],
+    srid integer not null,
+    affected_area geometry,
+    created_at timestamptz not null default now(),
+    claimed_at timestamptz,
+    claim_token uuid,
+    attempts integer not null default 0,
+    last_error text,
+    redis_message_id text,
+    published_at timestamptz,
+    unique (transaction_id, dataset, collection)
+)""",
+        f"""\
+create index if not exists change_outbox_pending_idx
+on {schema}.change_outbox (created_at, id)
+where published_at is null""",
+        f"""\
+create or replace function {schema}.record_change(
+    event_dataset text,
+    event_collection text,
+    event_operation text,
+    event_localid uuid,
+    old_geometry geometry,
+    new_geometry geometry,
+    event_srid integer
+) returns void language plpgsql as $function$
+declare
+    change_area geometry;
+begin
+    change_area := case
+        when old_geometry is null then ST_Envelope(new_geometry)
+        when new_geometry is null then ST_Envelope(old_geometry)
+        else ST_Envelope(ST_Collect(old_geometry, new_geometry))
+    end;
+
+    insert into {schema}.change_outbox (
+        transaction_id, dataset, collection, localids, operations, srid, affected_area
+    ) values (
+        pg_current_xact_id(), event_dataset, event_collection,
+        array[event_localid], array[event_operation], event_srid, change_area
+    )
+    on conflict (transaction_id, dataset, collection) do update set
+        localids = case
+            when event_localid = any({schema}.change_outbox.localids)
+                then {schema}.change_outbox.localids
+            else array_append({schema}.change_outbox.localids, event_localid)
+        end,
+        operations = case
+            when event_operation = any({schema}.change_outbox.operations)
+                then {schema}.change_outbox.operations
+            else array_append({schema}.change_outbox.operations, event_operation)
+        end,
+        affected_area = case
+            when {schema}.change_outbox.affected_area is null then excluded.affected_area
+            when excluded.affected_area is null then {schema}.change_outbox.affected_area
+            else ST_Envelope(ST_Collect(
+                {schema}.change_outbox.affected_area, excluded.affected_area
+            ))
+        end;
+end;
+$function$""",
+    ]
+
+
+def apply_event_schema(conn: psycopg.Connection) -> None:
+    """Create or refresh fixed event objects without deleting pending events."""
+    for stmt in event_schema_statements():
+        conn.execute(stmt)
+    conn.commit()
 
 
 def apply_topogdb(conn: psycopg.Connection) -> None:
@@ -165,6 +252,79 @@ $disp$""",
             result_type="boolean",
             using_sql="$1",
         ).replace("using $1", "using fid"),
+        f"""\
+create or replace function {s}.feature_delete_all(dataset text, collection text)
+returns bigint language plpgsql as $disp$
+declare
+    deleted_count bigint;
+    identifier_column text;
+    geometry_column text;
+    geometry_srid integer;
+    deleted_localids uuid[];
+    deleted_area geometry;
+begin
+    perform {s}._assert_direct_write_allowed(dataset, collection);
+        select f_geometry_column, srid
+      into geometry_column, geometry_srid
+      from public.geometry_columns
+     where f_table_schema = dataset and f_table_name = collection;
+        select column_name
+      into identifier_column
+      from information_schema.table_constraints constraint_info
+      join information_schema.key_column_usage key_info
+        on key_info.constraint_schema = constraint_info.constraint_schema
+       and key_info.constraint_name = constraint_info.constraint_name
+     where constraint_info.constraint_type = 'PRIMARY KEY'
+       and constraint_info.table_schema = dataset
+       and constraint_info.table_name = collection;
+    execute format(
+        'lock table %I.%I in share row exclusive mode', dataset, collection
+    );
+    execute format(
+        'select array_agg(%1$I), ST_SetSRID(ST_Extent(%2$I)::geometry, $1) from %3$I.%4$I',
+        identifier_column, geometry_column, dataset, collection
+    ) into deleted_localids, deleted_area using geometry_srid;
+    if to_regclass(format('%I.association', dataset)) is not null then
+        execute format('delete from %I.association where source_collection = $1', dataset)
+            using collection;
+    end if;
+    perform set_config('geocomponents.suppress_change_events', 'on', true);
+    execute format('delete from %I.%I', dataset, collection);
+    get diagnostics deleted_count = row_count;
+    if deleted_count > 0 then
+        insert into geocomponents_event.change_outbox (
+            transaction_id, dataset, collection, localids, operations, srid, affected_area
+        ) values (
+            pg_current_xact_id(), dataset, collection, deleted_localids,
+            array['delete'], geometry_srid, deleted_area
+        ) on conflict on constraint change_outbox_transaction_id_dataset_collection_key
+        do update set
+            localids = array(
+                select distinct localid
+                from unnest(
+                    geocomponents_event.change_outbox.localids || excluded.localids
+                ) localid
+            ),
+            operations = array(
+                select distinct operation
+                from unnest(
+                    geocomponents_event.change_outbox.operations || excluded.operations
+                ) operation
+            ),
+            affected_area = case
+                when geocomponents_event.change_outbox.affected_area is null
+                    then excluded.affected_area
+                when excluded.affected_area is null
+                    then geocomponents_event.change_outbox.affected_area
+                else ST_Envelope(ST_Collect(
+                    geocomponents_event.change_outbox.affected_area,
+                    excluded.affected_area
+                ))
+            end;
+    end if;
+    return deleted_count;
+end;
+$disp$""",
         f"""\
 create or replace function {s}.transaction(dataset text, document jsonb)
 returns jsonb language plpgsql as $disp$
@@ -367,6 +527,13 @@ $disp$""",
             "Precondition: dataset and collection must resolve to a simple-feature collection with a generated delete function. "
             "Returns true when a matching feature was deleted. "
             "Raises P0001 for topology collections, where ogc.transaction is the write path, and class 42 for unknown dataset or broken deployment.",
+        ),
+        _comment_statement(
+            "feature_delete_all(text, text)",
+            "Delete every feature in one simple-feature collection with one SQL statement. "
+            "Outbound association rows for the collection are removed first when the dataset has relationships. "
+            "Returns the number of deleted features. The statement and its row-level event triggers run in one transaction, so the aggregated outbox event becomes visible only after successful commit. "
+            "Raises P0001 for topology collections and class 42 for an unknown dataset, collection, or broken deployment.",
         ),
         _comment_statement(
             "transaction(text, jsonb)",

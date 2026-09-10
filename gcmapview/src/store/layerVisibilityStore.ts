@@ -36,6 +36,19 @@ export const MAP_LAYER_COLLECTION_IDS: Record<MapLayerId, CollectionId> = {
   bygningPosisjon: 'bygning_posisjon'
 };
 
+export function mapLayerIdForCollection(dataset: string, collection: string): MapLayerId | undefined {
+  return MAP_LAYER_IDS.find(layerId => {
+    const collectionId = MAP_LAYER_COLLECTION_IDS[layerId];
+    const expectedDataset =
+      collectionId === 'parcels' || collectionId === 'buildings'
+        ? 'cadastre'
+        : collectionId === 'jernbaneplattformkant' || collectionId === 'spormidt'
+          ? 'fkb_bane'
+          : 'bygning';
+    return expectedDataset === dataset && collectionId === collection;
+  });
+}
+
 export type LayerVisibility = Record<MapLayerId, boolean>;
 
 const defaultVisibility: LayerVisibility = {
