@@ -64,9 +64,8 @@ def _txn(conn, *items):
 
 
 def _insert(collection, geom, props, *, keep_geometry=False):
-    feature = {"type": "Feature", "properties": props}
-    if keep_geometry or collection not in _DERIVED_COLLECTIONS:
-        feature["geometry"] = geom
+    geometry = geom if keep_geometry or collection not in _DERIVED_COLLECTIONS else None
+    feature = {"type": "Feature", "geometry": geometry, "properties": props}
     return {
         "action": "insert",
         "collection": collection,

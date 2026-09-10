@@ -111,6 +111,16 @@ class IndexPlan:
 
 
 @dataclass(frozen=True)
+class NestedFieldPlan:
+    name: str
+    sql_type: str
+    required: bool = False
+    server_supplied: bool = False
+    codelist_values: tuple[str, ...] = ()
+    fields: tuple[NestedFieldPlan, ...] = ()
+
+
+@dataclass(frozen=True)
 class ColumnPlan:
     name: str
     sql_type: str
@@ -126,6 +136,8 @@ class ColumnPlan:
     write_inject: tuple[tuple[str, str], ...] = ()
     # Permitted code values for DB-level validation (empty = no validation).
     codelist_values: tuple[str, ...] = ()
+    # JSONB-only: complete declaration of fields inside the stored object.
+    nested_fields: tuple[NestedFieldPlan, ...] = ()
     # Scalar server-managed: SQL expression substituted for client input on write.
     # When set, the column is excluded from the writable set entirely.
     server_write_expr: str | None = None

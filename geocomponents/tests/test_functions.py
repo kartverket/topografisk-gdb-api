@@ -165,7 +165,9 @@ def test_has_z_collections_force_3d_on_ingest():
     plan = _plan("fkb_bane")
     sql = "\n".join(function_statements(plan))
     assert (
-        "ST_Force3D(ST_SetSRID(ST_GeomFromGeoJSON(feature->'geometry'), 5973))" in sql
+        "ST_Force3D(case when jsonb_typeof(feature->'geometry') = 'object' "
+        "then ST_SetSRID(ST_GeomFromGeoJSON(feature->'geometry'), 5973) "
+        "else null end)" in sql
     )
 
     cadastre_sql = "\n".join(function_statements(_plan("cadastre")))

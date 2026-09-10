@@ -371,9 +371,19 @@ def _txn_doc(conn, document, *, dataset="topology"):
 
 
 def _insert(collection, geom, props, *, fid=None, keep_geometry=False):
-    feature = {"type": "Feature", "properties": props}
-    if keep_geometry or collection not in _DERIVED_COLLECTIONS:
-        feature["geometry"] = geom
+    geometry = geom if keep_geometry or collection not in _DERIVED_COLLECTIONS else None
+    feature = {"type": "Feature", "geometry": geometry, "properties": props}
+    if fid is not None:
+        feature["id"] = fid
+    return {
+        "action": "insert",
+        "collection": collection,
+        "feature": feature,
+    }
+
+
+def _insert_with_null_geometry(collection, props, *, fid=None):
+    feature = {"type": "Feature", "geometry": None, "properties": props}
     if fid is not None:
         feature["id"] = fid
     return {
@@ -415,9 +425,8 @@ def _update_with_geometry(collection, fid, geom, props):
 
 def _replace(collection, fid, geom, props, *, keep_geometry=False):
     """PUT: full document, all columns and link properties replaced."""
-    feature = {"type": "Feature", "properties": props}
-    if keep_geometry or collection not in _DERIVED_COLLECTIONS:
-        feature["geometry"] = geom
+    geometry = geom if keep_geometry or collection not in _DERIVED_COLLECTIONS else None
+    feature = {"type": "Feature", "geometry": geometry, "properties": props}
     return {
         "action": "replace",
         "collection": collection,
@@ -941,7 +950,7 @@ def _case_delete_source_removes_its_own_links_before_structural_checks():
 def _case_transaction_with_no_deletes_keeps_structure_empty():
     return StructuralSuccessCase(
         (),
-        (_insert_without_geometry("surface2", {}, fid=_new_id()),),
+        (_insert_with_null_geometry("surface2", {}, fid=_new_id()),),
     )
 
 
@@ -1161,7 +1170,7 @@ def _case_optional_surface_with_no_links_is_valid():
     return FootprintRuleSuccessCase(
         raw,
         (),
-        (_insert_without_geometry("surface2", {}, fid=surface_id),),
+        (_insert_with_null_geometry("surface2", {}, fid=surface_id),),
     )
 
 
@@ -1940,7 +1949,7 @@ def _case_crossing_lines_are_nonsimple():
             ),
         ),
         (
-            _insert_without_geometry(
+            _insert_with_null_geometry(
                 "surface2", _surface2_props(first_id, second_id), fid=surface_id
             ),
         ),
@@ -1976,7 +1985,7 @@ def _case_open_lines_do_not_close():
             ),
         ),
         (
-            _insert_without_geometry(
+            _insert_with_null_geometry(
                 "surface2", _surface2_props(first_id, second_id), fid=surface_id
             ),
         ),
@@ -2015,7 +2024,7 @@ def _case_free_floating_line_is_unused():
             ),
         ),
         (
-            _insert_without_geometry(
+            _insert_with_null_geometry(
                 "surface2", _surface2_props(ring_id, free_id), fid=surface_id
             ),
         ),
@@ -2101,7 +2110,7 @@ def _case_inner_ring_rejected_on_surface2():
             ),
         ),
         (
-            _insert_without_geometry(
+            _insert_with_null_geometry(
                 "surface2", _surface2_props(outer_id, inner_id), fid=surface_id
             ),
         ),
@@ -2184,7 +2193,7 @@ def _case_disjoint_rings_allowed_on_surface2():
             ),
         ),
         (
-            _insert_without_geometry(
+            _insert_with_null_geometry(
                 "surface2", _surface2_props(first_id, second_id), fid=surface_id
             ),
         ),
@@ -2245,10 +2254,10 @@ def _case_two_surfaces_both_bad_geometry_are_both_reported():
             ),
         ),
         (
-            _insert_without_geometry(
+            _insert_with_null_geometry(
                 "surface2", _surface2_props(ring_id, free_id), fid=surface_a_id
             ),
-            _insert_without_geometry(
+            _insert_with_null_geometry(
                 "surface2", _surface2_props(ring_id, free_id), fid=surface_b_id
             ),
         ),
@@ -2399,6 +2408,36 @@ def test_wrong_identifier_key_is_rejected(topology_conn, borders):
     _assert_rejected(report_b)
 
 
+def test_link_identifier_that_is_not_uuid_is_rejected(topology_conn):
+    bad_id = "not-a-uuid"
+    report = _txn(
+        topology_conn,
+        _insert(
+            "surface",
+            _POLYGON_GEOM,
+            {
+                "boundedByOuter": [{"featuretype": "border1", "lokalid": bad_id}],
+            },
+        ),
+    )
+
+    _assert_rejected(report)
+    assert bad_id in json.dumps(report)
+
+
+def test_duplicate_identifier_is_rejected_by_transaction(topology_conn):
+    fid = _new_id()
+    _txn(topology_conn, _insert("border3", _NOTE_LINE_GEOM, {}, fid=fid))
+
+    report = _txn(
+        topology_conn,
+        _insert("border3", _NOTE_LINE_GEOM, {}, fid=fid),
+    )
+
+    _assert_rejected(report)
+    assert fid in json.dumps(report)
+
+
 def test_unknown_target_identifier_is_rejected(topology_conn, borders):
     """An identifier that no target row holds → P0001 (missing_member).
 
@@ -2537,10 +2576,17 @@ def test_read_uses_declared_featuretype(topology_conn, borders):
 
 def test_property_with_no_links_is_absent_on_read(topology_conn):
     """A declared property with no links is omitted rather than returned as []."""
-    report = _txn(topology_conn, _insert_without_geometry("surface2", {}))
+    report = _txn(topology_conn, _insert_with_null_geometry("surface2", {}))
 
     got = _properties(topology_conn, "surface2", report["items"][0]["id"])
     assert "boundedByOuter" not in got
+
+
+def test_derived_insert_without_geometry_is_rejected(topology_conn):
+    report = _txn(topology_conn, _insert_without_geometry("surface2", {}))
+
+    _assert_rejected(report)
+    assert report["items"][0]["sqlstate"] == "P0001"
 
 
 def test_derived_insert_with_geometry_is_rejected(topology_conn):
@@ -2554,7 +2600,7 @@ def test_derived_insert_with_geometry_is_rejected(topology_conn):
 
 
 def test_derived_update_with_geometry_is_rejected(topology_conn):
-    created = _txn(topology_conn, _insert_without_geometry("surface2", {}))
+    created = _txn(topology_conn, _insert_with_null_geometry("surface2", {}))
     surface_id = created["items"][0]["id"]
 
     report = _txn(
@@ -2567,7 +2613,7 @@ def test_derived_update_with_geometry_is_rejected(topology_conn):
 
 
 def test_derived_replace_with_geometry_is_rejected(topology_conn):
-    created = _txn(topology_conn, _insert_without_geometry("surface2", {}))
+    created = _txn(topology_conn, _insert_with_null_geometry("surface2", {}))
     surface_id = created["items"][0]["id"]
 
     report = _txn(
@@ -2585,7 +2631,7 @@ def test_closed_ring_surface_stores_built_geometry(topology_conn):
 
     report = _txn(
         topology_conn,
-        _insert_without_geometry("surface2", _surface2_props(ring_id)),
+        _insert_with_null_geometry("surface2", _surface2_props(ring_id)),
     )
     surface_id = report["items"][0]["id"]
 
@@ -2604,7 +2650,7 @@ def test_member_curve_update_refreshes_stored_footprint(topology_conn):
     _txn(topology_conn, *_border1_ring_pair_items(first_id, second_id))
     created = _txn(
         topology_conn,
-        _insert_without_geometry("surface2", _surface2_props(first_id, second_id)),
+        _insert_with_null_geometry("surface2", _surface2_props(first_id, second_id)),
     )
     surface_id = created["items"][0]["id"]
     assert _stored_geometry_equals(topology_conn, "surface2", surface_id, _RING_POLYGON)
@@ -2631,7 +2677,7 @@ def test_member_curve_opening_ring_rolls_back_and_keeps_stored_footprint(topolog
     _txn(topology_conn, *_border1_ring_pair_items(first_id, second_id))
     created = _txn(
         topology_conn,
-        _insert_without_geometry("surface2", _surface2_props(first_id, second_id)),
+        _insert_with_null_geometry("surface2", _surface2_props(first_id, second_id)),
     )
     surface_id = created["items"][0]["id"]
 
@@ -2676,11 +2722,11 @@ def test_shared_curve_update_refreshes_both_stored_footprints(topology_conn, bor
             {"identifikasjon": {"lokalid": surface2_tail_id}},
             fid=surface2_tail_id,
         ),
-        _insert_without_geometry(
+        _insert_with_null_geometry(
             "surface",
             _surface_props(outer=(shared_id,), shared=(borders["b2_lokalid"],)),
         ),
-        _insert_without_geometry(
+        _insert_with_null_geometry(
             "surface2",
             _surface2_props(shared_id, surface2_tail_id),
         ),
@@ -2708,7 +2754,7 @@ def test_shared_curve_update_refreshes_both_stored_footprints(topology_conn, bor
 
 
 def test_optional_boundary_with_no_members_stores_null_geometry(topology_conn):
-    report = _txn(topology_conn, _insert_without_geometry("surface2", {}))
+    report = _txn(topology_conn, _insert_with_null_geometry("surface2", {}))
     surface_id = report["items"][0]["id"]
 
     stored_json, geometry_type, part_count = _stored_geometry_meta(
@@ -2836,7 +2882,7 @@ def test_empty_array_clears_that_property(topology_conn, borders):
 
     create_report = _txn(
         topology_conn,
-        _insert_without_geometry(
+        _insert_with_null_geometry(
             "surface2",
             _surface2_props(first_id, second_id),
         ),
@@ -2919,7 +2965,7 @@ def test_unlinking_does_not_modify_target_feature(topology_conn, borders):
 
     create_report = _txn(
         topology_conn,
-        _insert_without_geometry(
+        _insert_with_null_geometry(
             "surface2",
             _surface2_props(first_id, second_id),
         ),
@@ -3003,6 +3049,7 @@ def test_write_read_replace_roundtrip_keeps_links(topology_conn, borders):
             "id": surface_id,
             "feature": {
                 "type": "Feature",
+                "geometry": None,
                 "properties": before["properties"],
             },
         },
@@ -3110,7 +3157,7 @@ def test_associations_returns_one_row_per_link_including_dangling(
     )
     report = _txn(
         topology_conn,
-        _insert_without_geometry(
+        _insert_with_null_geometry(
             "surface2",
             _surface2_props(borders["b1a_lokalid"], disposable_lokalid),
         ),
@@ -3151,7 +3198,7 @@ def test_sources_using_is_polymorphic_on_source_collection(topology_conn, border
             _POLYGON_GEOM,
             _surface_props(outer=(reverse_id,), shared=(borders["b2_lokalid"],)),
         ),
-        _insert_without_geometry(
+        _insert_with_null_geometry(
             "surface2",
             _surface2_props(reverse_id, closing_id),
         ),
@@ -3186,7 +3233,7 @@ def test_sources_using_accepts_many_ids_in_one_call(topology_conn, borders):
             _POLYGON_GEOM,
             _surface_props(outer=(reverse_a,), shared=(borders["b2_lokalid"],)),
         ),
-        _insert_without_geometry(
+        _insert_with_null_geometry(
             "surface2",
             _surface2_props(reverse_b),
         ),
@@ -3565,7 +3612,7 @@ def test_case_schema_is_reused_and_cleaned_between_cases(topology_case_schemas):
 
         created = _txn(
             conn,
-            _insert_without_geometry("surface2", _surface2_props(border_lokalid)),
+            _insert_with_null_geometry("surface2", _surface2_props(border_lokalid)),
             dataset=first_dataset,
         )
         _assert_structure_clean_commit(created, 1)
@@ -3621,7 +3668,7 @@ def test_case_schema_cleaning_preserves_catalogue_rows(topology_case_schemas):
 
         linked = _txn(
             conn,
-            _insert_without_geometry("surface2", _surface2_props(border_lokalid)),
+            _insert_with_null_geometry("surface2", _surface2_props(border_lokalid)),
             dataset=dataset,
         )
         _assert_structure_clean_commit(linked, 1)

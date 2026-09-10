@@ -32,6 +32,7 @@ from geocomponents.schema.plan import (
     DerivedPlan,
     DerivedRolePlan,
     FootprintOwnerRolePlan,
+    NestedFieldPlan,
     SchemaPlan,
     TablePlan,
 )
@@ -687,7 +688,11 @@ def _feature_object(
 
 
 def _geom_from_feature(table: TablePlan) -> str:
-    geom = f"ST_SetSRID(ST_GeomFromGeoJSON(feature->'geometry'), {table.geometry.srid})"
+    geom = (
+        "case when jsonb_typeof(feature->'geometry') = 'object' "
+        f"then ST_SetSRID(ST_GeomFromGeoJSON(feature->'geometry'), {table.geometry.srid}) "
+        "else null end"
+    )
     if table.geometry.has_z:
         # Accept 2D GeoJSON into *Z columns (missing Z becomes 0).
         return f"ST_Force3D({geom})"
@@ -737,15 +742,157 @@ def _enum_checks(writable: list[ColumnPlan], *, guarded_by_presence: bool) -> li
     return checks
 
 
-def _derived_geometry_guard(plan: CollectionPlan) -> str:
+def _json_value_expr(parent_expr: str, key: str) -> str:
+    return f"({parent_expr}->'{_quote_key(key)}')"
+
+
+def _nested_field_checks(
+    field: NestedFieldPlan, *, parent_expr: str, parent_path: str
+) -> list[str]:
+    key = _quote_key(field.name)
+    path = f"{parent_path}.{field.name}"
+    value_expr = _json_value_expr(parent_expr, field.name)
+    checks: list[str] = []
+
+    if field.required and not field.server_supplied:
+        checks.append(
+            f"  if not ({parent_expr} ? '{key}') "
+            f"or jsonb_typeof({value_expr}) = 'null' then\n"
+            f"    raise exception 'field {path}: required value is missing' "
+            "using errcode = 'P0001';\n"
+            "  end if;"
+        )
+
+    expected_json_type = {
+        "text": "string",
+        "date": "string",
+        "timestamp": "string",
+        "timestamptz": "string",
+        "uuid": "string",
+        "integer": "number",
+        "double precision": "number",
+        "boolean": "boolean",
+        "jsonb": "object",
+    }[field.sql_type]
+    checks.append(
+        f"  if {parent_expr} ? '{key}' "
+        f"and jsonb_typeof({value_expr}) not in ('null', '{expected_json_type}') then\n"
+        f"    raise exception 'field {path}: expected {expected_json_type}' "
+        "using errcode = 'P0001';\n"
+        "  end if;"
+    )
+
+    if field.sql_type == "integer":
+        number_text = f"({value_expr} #>> '{{}}')"
+        checks.append(
+            f"  if jsonb_typeof({value_expr}) = 'number' "
+            f"and ({number_text})::numeric <> trunc(({number_text})::numeric) then\n"
+            f"    raise exception 'field {path}: expected integer' "
+            "using errcode = 'P0001';\n"
+            "  end if;"
+        )
+
+    if field.codelist_values:
+        values_sql = ", ".join(
+            f"'{_quote_key(value)}'" for value in field.codelist_values
+        )
+        checks.append(
+            f"  if jsonb_typeof({value_expr}) = 'string' "
+            f"and ({value_expr}->>0) not in ({values_sql}) then\n"
+            f"    raise exception 'field {path}: value % is not a valid code', "
+            f"({value_expr}->>0) using errcode = 'P0001';\n"
+            "  end if;"
+        )
+
+    if field.fields:
+        checks.extend(_nested_object_checks(field.fields, value_expr, path))
+    return checks
+
+
+def _nested_object_checks(
+    fields: tuple[NestedFieldPlan, ...], object_expr: str, object_path: str
+) -> list[str]:
+    declared = ", ".join(f"'{_quote_key(field.name)}'" for field in fields)
+    unknown_expr = (
+        f"(select key from jsonb_object_keys({object_expr}) as keys(key) "
+        f"where key not in ({declared}) limit 1)"
+    )
+    checks = [
+        f"  if jsonb_typeof({object_expr}) = 'object' and {unknown_expr} is not null then\n"
+        f"    raise exception 'field {object_path}: undeclared child %', {unknown_expr} "
+        "using errcode = 'P0001';\n"
+        "  end if;"
+    ]
+    for field in fields:
+        checks.extend(
+            _nested_field_checks(
+                field, parent_expr=object_expr, parent_path=object_path
+            )
+        )
+    return checks
+
+
+def _nested_checks(
+    writable: list[ColumnPlan], *, guarded_by_presence: bool
+) -> list[str]:
+    checks: list[str] = []
+    for column in writable:
+        if not column.nested_fields:
+            continue
+        key = _quote_key(column.name)
+        object_expr = f"feature->'properties'->'{key}'"
+        required = (
+            ""
+            if guarded_by_presence or column.nullable
+            else (
+                f"  if not feature->'properties' ? '{key}' "
+                f"or jsonb_typeof({object_expr}) = 'null' then\n"
+                f"    raise exception 'field {column.name}: required value is missing' "
+                "using errcode = 'P0001';\n"
+                "  end if;\n"
+            )
+        )
+        presence = (
+            f"feature->'properties' ? '{key}' and " if guarded_by_presence else ""
+        )
+        checks.append(
+            f"{required}  if {presence}jsonb_typeof({object_expr}) "
+            "not in ('object', 'null') then\n"
+            f"    raise exception 'field {column.name}: expected object' "
+            "using errcode = 'P0001';\n"
+            "  end if;"
+        )
+        nested = _nested_object_checks(column.nested_fields, object_expr, column.name)
+        if guarded_by_presence:
+            checks.append(
+                f"  if feature->'properties' ? '{key}' then\n"
+                + "\n".join(nested)
+                + "\n  end if;"
+            )
+        else:
+            checks.extend(nested)
+    return checks
+
+
+def _derived_geometry_guard(plan: CollectionPlan, *, guarded_by_presence: bool) -> str:
     if plan.derived is None:
         raise ValueError("derived geometry guard requires a derived collection")
     props = ", ".join(
         _quote_key(role.property) for role in _derived_roles(plan.derived)
     )
+    missing_guard = (
+        ""
+        if guarded_by_presence
+        else (
+            "  if not feature ? 'geometry' then\n"
+            "    raise exception 'missing geometry' using errcode = 'P0001';\n"
+            "  end if;\n"
+        )
+    )
     return (
-        "  if feature ? 'geometry' then\n"
-        f"    raise exception 'collection {plan.collection_name}: geometry is derived from boundary properties {props}; omit geometry' using errcode = 'P0001';\n"
+        f"{missing_guard}"
+        "  if feature ? 'geometry' and jsonb_typeof(feature->'geometry') <> 'null' then\n"
+        f"    raise exception 'collection {plan.collection_name}: geometry is derived from boundary properties {props}; geometry must be null' using errcode = 'P0001';\n"
         "  end if;"
     )
 
@@ -753,19 +900,19 @@ def _derived_geometry_guard(plan: CollectionPlan) -> str:
 def _geom_checks(plan: CollectionPlan, *, guarded_by_presence: bool) -> list[str]:
     """IF blocks that raise P0001 when geometry is missing, invalid, or non-simple."""
     if plan.derived is not None:
-        return [_derived_geometry_guard(plan)]
+        return [_derived_geometry_guard(plan, guarded_by_presence=guarded_by_presence)]
 
     table = plan.table
     checks: list[str] = []
-    # nullable null check
+    # Complete writes require the member; PATCH validates it only when supplied.
     if table.geometry.nullable:
-        first_condition = "coalesce(jsonb_typeof(feature->'geometry'), 'null') not in ('object', 'null')"
+        invalid_type = "jsonb_typeof(feature->'geometry') not in ('object', 'null')"
     else:
-        first_condition = (
-            "coalesce(jsonb_typeof(feature->'geometry'), 'null') not in ('object')"
-        )
+        invalid_type = "jsonb_typeof(feature->'geometry') <> 'object'"
     if guarded_by_presence:
-        first_condition = f"feature ? 'geometry' and {first_condition}"
+        first_condition = f"feature ? 'geometry' and {invalid_type}"
+    else:
+        first_condition = f"not feature ? 'geometry' or {invalid_type}"
     checks.append(
         f"  if {first_condition} then\n"
         f"    raise exception 'missing geometry' using errcode = 'P0001';\n"
@@ -861,6 +1008,10 @@ def _link_validation_block(role: CollectionRolePlan) -> str:
         raise exception 'property {prop}: expected identifier key {oi_leaf}'
           using errcode = 'P0001';
       end if;
+            if pg_input_is_valid(_elem->>'{oi_leaf}', 'uuid') is not true then
+                raise exception 'field {prop}.{oi_leaf}: value % is not a uuid',
+                    coalesce(_elem->>'{oi_leaf}', 'null') using errcode = 'P0001';
+            end if;
       select "id" into _target_id from {role.target_table}
         where {role.oi_lookup_cond};
       if not found then
@@ -1696,6 +1847,16 @@ def _oi_column(table: TablePlan) -> ColumnPlan | None:
     return next((c for c in table.property_columns if c.id_inject_key), None)
 
 
+def _uuid_check(value_expr: str, field_path: str) -> str:
+    return (
+        f"  if ({value_expr}) is not null "
+        f"and pg_input_is_valid(({value_expr}), 'uuid') is not true then\n"
+        f"    raise exception 'field {field_path}: value % is not a uuid', "
+        f"({value_expr}) using errcode = 'P0001';\n"
+        "  end if;"
+    )
+
+
 def _fn_create(plan: CollectionPlan) -> str:
     t = plan.table
     oi = _oi_column(t)
@@ -1720,10 +1881,19 @@ def _fn_create(plan: CollectionPlan) -> str:
             "  end if;\n"
             "  new_id := coalesce((feature->>'id')::uuid, _oi_raw::uuid, gen_random_uuid());\n"
         )
+        id_checks = "\n".join(
+            (
+                _uuid_check("feature->>'id'", "id"),
+                _uuid_check("_oi_raw", f"{oi.name}.{oi.id_inject_key}"),
+            )
+        )
+        duplicate_value = "coalesce(feature->>'id', _oi_raw)"
         id_val = "new_id"
     else:
         oi_declare = ""
         oi_resolve = ""
+        id_checks = _uuid_check("feature->>'id'", "id")
+        duplicate_value = "feature->>'id'"
         id_val = "coalesce((feature->>'id')::uuid, gen_random_uuid())"
     vals = ", ".join(
         [id_val, _geometry_insert_value(plan)]
@@ -1731,7 +1901,9 @@ def _fn_create(plan: CollectionPlan) -> str:
         + [c.server_write_expr for c in sw]
     )
     validations = [
+        id_checks,
         *_enum_checks(writable, guarded_by_presence=False),
+        *_nested_checks(writable, guarded_by_presence=False),
         *_geom_checks(plan, guarded_by_presence=False),
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""
@@ -1751,9 +1923,15 @@ create or replace function {plan.functions["create"]}(feature jsonb)
 returns uuid language plpgsql as $func$
 {declare}
 begin
-{guard_block}{link_validate_block}{oi_resolve}  insert into {t.qualified} ({cols})
-  values ({vals})
-  returning "{t.id_column}" into new_id;{link_write_block}
+{guard_block}{link_validate_block}{oi_resolve}  begin
+        insert into {t.qualified} ({cols})
+        values ({vals})
+        returning "{t.id_column}" into new_id;
+    exception
+        when unique_violation then
+            raise exception 'duplicate identifier %', {duplicate_value}
+                using errcode = 'P0001';
+    end;{link_write_block}
   return new_id;
 end;
 $func$"""
@@ -1786,10 +1964,17 @@ def _fn_upsert(plan: CollectionPlan) -> str:
             "  end if;\n"
             "  result_id := coalesce((feature->>'id')::uuid, _oi_raw::uuid);\n"
         )
+        id_checks = "\n".join(
+            (
+                _uuid_check("feature->>'id'", "id"),
+                _uuid_check("_oi_raw", f"{oi.name}.{oi.id_inject_key}"),
+            )
+        )
         id_val = "result_id"
     else:
         oi_declare = ""
         oi_resolve = ""
+        id_checks = _uuid_check("feature->>'id'", "id")
         id_val = "coalesce((feature->>'id')::uuid, gen_random_uuid())"
     vals = ", ".join(
         [id_val, _geometry_insert_value(plan)]
@@ -1802,7 +1987,9 @@ def _fn_upsert(plan: CollectionPlan) -> str:
     sets.append('"updated_at" = now()')
     set_clause = ",\n      ".join(sets)
     validations = [
+        id_checks,
         *_enum_checks(writable, guarded_by_presence=False),
+        *_nested_checks(writable, guarded_by_presence=False),
         *_geom_checks(plan, guarded_by_presence=False),
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""
@@ -1840,6 +2027,7 @@ def _fn_replace(plan: CollectionPlan) -> str:
     set_clause = ",\n      ".join(sets)
     validations = [
         *_enum_checks(writable, guarded_by_presence=False),
+        *_nested_checks(writable, guarded_by_presence=False),
         *_geom_checks(plan, guarded_by_presence=False),
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""
@@ -1909,6 +2097,7 @@ def _fn_update(plan: CollectionPlan) -> str:
     set_clause = ",\n      ".join(sets)
     validations = [
         *_enum_checks(writable, guarded_by_presence=True),
+        *_nested_checks(writable, guarded_by_presence=True),
         *_geom_checks(plan, guarded_by_presence=True),
     ]
     guard_block = ("\n".join(validations) + "\n") if validations else ""

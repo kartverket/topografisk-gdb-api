@@ -31,6 +31,7 @@ from geocomponents.schema.plan import (
     ForeignKeyPlan,
     GeometryColumnPlan,
     IndexPlan,
+    NestedFieldPlan,
     SchemaPlan,
     TablePlan,
     internal_function,
@@ -64,12 +65,39 @@ def _standard_columns() -> list[ColumnPlan]:
     ]
 
 
+def _nested_field_plan(
+    field,
+    *,
+    path: str,
+    server_supplied_paths: set[str],
+) -> NestedFieldPlan:
+    field_path = f"{path}.{field.name}"
+    return NestedFieldPlan(
+        name=field.name,
+        sql_type=field.sql_type,
+        required=field.required,
+        server_supplied=field_path in server_supplied_paths,
+        codelist_values=field.codelist_values,
+        fields=tuple(
+            _nested_field_plan(
+                child,
+                path=field_path,
+                server_supplied_paths=server_supplied_paths,
+            )
+            for child in field.sub_fields
+        ),
+    )
+
+
 def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: PLR0912
     columns: list[ColumnPlan] = _standard_columns()
     indexes: list[IndexPlan] = []
 
     for fld in coll.fields:
         if fld.sql_type == "jsonb":
+            server_supplied_paths = set(coll.server_managed_paths)
+            if coll.outward_identifier_path is not None:
+                server_supplied_paths.add(coll.outward_identifier_path)
             # Translate server_managed_paths entries for this field into
             # ColumnPlan injection metadata.  Only consider paths whose first
             # dot-segment matches this field's name.
@@ -114,6 +142,14 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
                     strip_keys=tuple(strip_keys),
                     id_inject_key=id_inject_key,
                     write_inject=tuple(write_inject),
+                    nested_fields=tuple(
+                        _nested_field_plan(
+                            child,
+                            path=fld.name,
+                            server_supplied_paths=server_supplied_paths,
+                        )
+                        for child in fld.sub_fields
+                    ),
                 )
             )
         else:

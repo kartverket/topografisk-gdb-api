@@ -86,6 +86,7 @@ collections:
     geometry:
       type: LineString
       srid: 4326
+      required: false
 
   - name: border4
     title: Border4
