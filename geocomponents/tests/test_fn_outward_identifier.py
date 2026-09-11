@@ -123,8 +123,8 @@ _CREATE_CASES: list[CreateCase] = [
     CreateCase("both-equal", _u(0xC), _u(0xC), _u(0xC), None),
     CreateCase("both-different", _A, _B, None, "P0001"),
     CreateCase("neither", None, None, None, None),
-    CreateCase("non-uuid-feature-id", "BANE-001", None, None, "22P02"),
-    CreateCase("non-uuid-oi-path", None, "BANE-001", None, "22P02"),
+    CreateCase("non-uuid-feature-id", "BANE-001", None, None, "P0001"),
+    CreateCase("non-uuid-oi-path", None, "BANE-001", None, "P0001"),
 ]
 
 _ACCEPTED = [c for c in _CREATE_CASES if c.expected_sqlstate is None]
@@ -149,6 +149,8 @@ def test_create_rejected(oid_conn, case: CreateCase):
     with pytest.raises(psycopg.Error) as exc:
         _create(oid_conn, _feature(fid=case.fid, testoi=case.testoi))
     assert exc.value.sqlstate == case.expected_sqlstate
+    if "BANE-001" in (case.fid, case.testoi):
+        assert "BANE-001" in str(exc.value)
 
 
 # ── Upsert identity resolution ────────────────────────────────────────────────
@@ -163,8 +165,8 @@ _UPSERT_CASES: list[CreateCase] = [
     CreateCase("both-equal", _u(0xC0), _u(0xC0), _u(0xC0), None),
     CreateCase("both-different", _u(0xA0), _u(0xB0), None, "P0001"),
     CreateCase("neither", None, None, None, "P0001"),
-    CreateCase("non-uuid-feature-id", "BANE-001", None, None, "22P02"),
-    CreateCase("non-uuid-oi-path", None, "BANE-001", None, "22P02"),
+    CreateCase("non-uuid-feature-id", "BANE-001", None, None, "P0001"),
+    CreateCase("non-uuid-oi-path", None, "BANE-001", None, "P0001"),
 ]
 
 _UPSERT_ACCEPTED = [c for c in _UPSERT_CASES if c.expected_sqlstate is None]
@@ -189,6 +191,8 @@ def test_upsert_rejected(oid_conn, case: CreateCase):
     with pytest.raises(psycopg.Error) as exc:
         _upsert(oid_conn, _feature(fid=case.fid, testoi=case.testoi))
     assert exc.value.sqlstate == case.expected_sqlstate
+    if "BANE-001" in (case.fid, case.testoi):
+        assert "BANE-001" in str(exc.value)
 
 
 def test_upsert_is_idempotent_on_matching_id(oid_conn):
@@ -269,7 +273,8 @@ def test_duplicate_identifier_is_rejected(oid_conn):
     _create(oid_conn, _feature(fid=fid))
     with pytest.raises(psycopg.Error) as exc:
         _create(oid_conn, _feature(fid=fid))
-    assert exc.value.sqlstate == "23505"
+    assert exc.value.sqlstate == "P0001"
+    assert fid in str(exc.value)
 
 
 # ── Collection without OI is unaffected ───────────────────────────────────────

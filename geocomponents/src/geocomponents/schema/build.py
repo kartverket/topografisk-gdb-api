@@ -25,9 +25,13 @@ from geocomponents.schema.plan import (
     CollectionPlan,
     CollectionRolePlan,
     ColumnPlan,
+    DerivedPlan,
+    DerivedRolePlan,
+    FootprintOwnerRolePlan,
     ForeignKeyPlan,
     GeometryColumnPlan,
     IndexPlan,
+    NestedFieldPlan,
     SchemaPlan,
     TablePlan,
     internal_function,
@@ -61,12 +65,39 @@ def _standard_columns() -> list[ColumnPlan]:
     ]
 
 
+def _nested_field_plan(
+    field,
+    *,
+    path: str,
+    server_supplied_paths: set[str],
+) -> NestedFieldPlan:
+    field_path = f"{path}.{field.name}"
+    return NestedFieldPlan(
+        name=field.name,
+        sql_type=field.sql_type,
+        required=field.required,
+        server_supplied=field_path in server_supplied_paths,
+        codelist_values=field.codelist_values,
+        fields=tuple(
+            _nested_field_plan(
+                child,
+                path=field_path,
+                server_supplied_paths=server_supplied_paths,
+            )
+            for child in field.sub_fields
+        ),
+    )
+
+
 def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: PLR0912
     columns: list[ColumnPlan] = _standard_columns()
     indexes: list[IndexPlan] = []
 
     for fld in coll.fields:
         if fld.sql_type == "jsonb":
+            server_supplied_paths = set(coll.server_managed_paths)
+            if coll.outward_identifier_path is not None:
+                server_supplied_paths.add(coll.outward_identifier_path)
             # Translate server_managed_paths entries for this field into
             # ColumnPlan injection metadata.  Only consider paths whose first
             # dot-segment matches this field's name.
@@ -111,6 +142,14 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
                     strip_keys=tuple(strip_keys),
                     id_inject_key=id_inject_key,
                     write_inject=tuple(write_inject),
+                    nested_fields=tuple(
+                        _nested_field_plan(
+                            child,
+                            path=fld.name,
+                            server_supplied_paths=server_supplied_paths,
+                        )
+                        for child in fld.sub_fields
+                    ),
                 )
             )
         else:
@@ -150,7 +189,7 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
         geometry_type=coll.geometry_type,
         srid=coll.srid,
         has_z=coll.has_z,
-        nullable=not coll.geometry_required,  # False when geometry is required
+        nullable=(coll.derived is not None) or (not coll.geometry_required),
     )
     return TablePlan(
         schema=schema,
@@ -180,11 +219,58 @@ def _build_role(
     )
 
 
+def _build_derived(coll: ResolvedCollection, schema: str) -> DerivedPlan | None:
+    if coll.derived is None:
+        return None
+    one_of = tuple(
+        tuple(
+            DerivedRolePlan(
+                property=role.property,
+                target_collection=role.target,
+                target_table=f"{schema}.{role.target}",
+                when_field=role.when_field,
+            )
+            for role in alternative
+        )
+        for alternative in coll.derived.one_of
+    )
+    return DerivedPlan(
+        rule=coll.derived.rule,
+        required=coll.geometry_required,
+        areas=coll.derived.areas,
+        holes=coll.derived.holes,
+        one_of=one_of,
+    )
+
+
+def _build_footprint_owner_roles(
+    coll: ResolvedCollection, schema: str
+) -> tuple[FootprintOwnerRolePlan, ...]:
+    if coll.derived is None or coll.derived.rule != "footprint":
+        return ()
+
+    roles_by_property: dict[str, FootprintOwnerRolePlan] = {}
+    for alternative in coll.derived.one_of:
+        for role in alternative:
+            roles_by_property.setdefault(
+                role.property,
+                FootprintOwnerRolePlan(
+                    source_collection=coll.name,
+                    property=role.property,
+                    target_collection=role.target,
+                    target_table=f"{schema}.{role.target}",
+                    when_field=role.when_field,
+                ),
+            )
+    return tuple(roles_by_property.values())
+
+
 def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
     """Turn a resolved dataset into a ``SchemaPlan`` -- the tables, columns,
     geometries, foreign keys, and function names it needs.
     """
     schema = dataset.name
+    coll_by_name = {c.name: c for c in dataset.collections}
     collections: list[CollectionPlan] = []
     for coll in dataset.collections:
         table = _build_table(schema, coll)
@@ -192,7 +278,6 @@ def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
         if coll.supports_upsert:
             ops += (UPSERT_OP,)
         functions = {op: internal_function(schema, coll.name, op) for op in ops}
-        coll_by_name = {c.name: c for c in dataset.collections}
         roles = tuple(
             _build_role(rel, schema, coll_by_name[rel.target])
             for rel in coll.relationships
@@ -203,9 +288,12 @@ def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
                 feature_model=coll.feature_model,
                 table=table,
                 functions=functions,
+                bounds=coll.bounds,
                 upsert_field=coll.upsert_field,
                 upsert_path=coll.upsert_path,
                 roles=roles,
+                derived=_build_derived(coll, schema),
+                footprint_owner_roles=_build_footprint_owner_roles(coll, schema),
             )
         )
     role_rows = [

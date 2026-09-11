@@ -1,18 +1,19 @@
-from pathlib import Path
-
 import pytest
+from fixtures.description_cache import resolved_dataset
 
-from geocomponents.descriptions.loader import load_resolved_datasets
 from geocomponents.descriptions.models import (
+    DerivedAreas,
+    DerivedHoles,
     ResolvedCollection,
     ResolvedDataset,
+    ResolvedDerivedDef,
+    ResolvedDerivedRole,
     ResolvedField,
 )
 from geocomponents.schema import postgis
 from geocomponents.schema.build import build_schema_plan
 from geocomponents.schema.plan import OPERATIONS, READ_OPS
 
-DESCRIPTIONS = Path(__file__).resolve().parents[2] / "descriptions"
 WGS84_SRID = 4326
 
 
@@ -21,6 +22,8 @@ def _make_dataset(
     fields: list[ResolvedField] | None = None,
     server_managed_paths: dict[str, str] | None = None,
     outward_identifier_path: str | None = None,
+    geometry_type: str = "Point",
+    derived: ResolvedDerivedDef | None = None,
 ) -> ResolvedDataset:
     """Minimal dataset fixture for build tests."""
     return ResolvedDataset(
@@ -33,10 +36,11 @@ def _make_dataset(
                 title="C",
                 description="",
                 feature_model="simple",
-                geometry_type="Point",
+                geometry_type=geometry_type,
                 srid=4258,
                 fields=tuple(fields or []),
                 relationships=(),
+                derived=derived,
                 server_managed_paths=server_managed_paths or {},
                 outward_identifier_path=outward_identifier_path,
             ),
@@ -44,23 +48,70 @@ def _make_dataset(
     )
 
 
+@pytest.mark.parametrize(
+    ("areas", "holes"),
+    [
+        (DerivedAreas.ONE, DerivedHoles.ALLOWED),
+        (DerivedAreas.MANY, DerivedHoles.FORBIDDEN),
+    ],
+    ids=["areas-one-holes-allowed", "areas-many-holes-forbidden"],
+)
+def test_derived_plan_carries_areas_and_holes(areas, holes):
+    ds = _make_dataset(
+        geometry_type="MultiPolygon",
+        derived=ResolvedDerivedDef(
+            rule="footprint",
+            areas=areas,
+            holes=holes,
+            one_of=((ResolvedDerivedRole("boundedByOuter", "border"),),),
+        ),
+    )
+
+    plan = build_schema_plan(ds)
+    derived = plan.collections[0].derived
+
+    assert derived is not None
+    assert derived.rule == "footprint"
+    assert derived.areas is areas
+    assert derived.holes is holes
+    assert len(derived.one_of) == 1
+    assert len(derived.one_of[0]) == 1
+    role = derived.one_of[0][0]
+    assert role.property == "boundedByOuter"
+    assert role.target_collection == "border"
+    assert role.target_table == "x.border"
+    assert role.when_field is None
+
+
+def test_derived_geometry_column_is_nullable_in_plan_even_when_required():
+    ds = _make_dataset(
+        geometry_type="MultiPolygon",
+        derived=ResolvedDerivedDef(
+            rule="footprint",
+            areas=DerivedAreas.ONE,
+            holes=DerivedHoles.ALLOWED,
+            one_of=((ResolvedDerivedRole("boundedByOuter", "border"),),),
+        ),
+    )
+
+    plan = build_schema_plan(ds)
+    coll = plan.collections[0]
+
+    assert coll.derived is not None
+    assert coll.derived.required is True
+    assert coll.table.geometry.nullable is True
+
+
 def _cadastre_plan():
-    cad = next(d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "cadastre")
-    return build_schema_plan(cad)
+    return build_schema_plan(resolved_dataset("cadastre"))
 
 
 def _fkb_bane_plan():
-    fkb_bane = next(
-        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "fkb_bane"
-    )
-    return build_schema_plan(fkb_bane)
+    return build_schema_plan(resolved_dataset("fkb_bane"))
 
 
 def _bygning_plan():
-    bygning = next(
-        d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "bygning"
-    )
-    return build_schema_plan(bygning)
+    return build_schema_plan(resolved_dataset("bygning"))
 
 
 def test_dataset_maps_to_schema_and_collections_to_tables():

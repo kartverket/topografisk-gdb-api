@@ -1,6 +1,10 @@
+from contextlib import nullcontext
+from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from geocomponents.descriptions.loader import (
@@ -15,8 +19,410 @@ from geocomponents.descriptions.models import (
     FieldDef,
     RelationshipDef,
 )
+from geocomponents.schema.build import build_schema_plan
 
 DESCRIPTIONS = Path(__file__).resolve().parents[2] / "descriptions"
+TOPOLOGY_FIXTURE = (
+    Path(__file__).resolve().parent / "fixtures" / "topology_fixture.yaml"
+)
+
+
+@dataclass(frozen=True)
+class CollectionNameCase:
+    id: str
+    collection_name: str
+    error_fragment: str | None
+
+
+COLLECTION_NAME_CASES = [
+    CollectionNameCase("association-is-reserved", "association", "association"),
+    CollectionNameCase(
+        "association-role-is-reserved",
+        "association_role",
+        "association_role",
+    ),
+    CollectionNameCase("association-kind-is-allowed", "association_kind", None),
+]
+
+
+@dataclass(frozen=True)
+class DerivedResolveCase:
+    id: str
+    raw: dict
+    collection_name: str
+    expected: (
+        tuple[str, str, tuple[tuple[tuple[str, str, str | None], ...], ...]] | None
+    )
+
+
+@dataclass(frozen=True)
+class DerivedRejectCase:
+    id: str
+    raw: dict
+    error_fragment: str
+
+
+@dataclass(frozen=True)
+class BoundsResolveCase:
+    id: str
+    raw: dict
+    collection_name: str
+    expected: int | None
+
+
+@dataclass(frozen=True)
+class BoundsRejectCase:
+    id: str
+    raw: dict
+    error_fragment: str
+    error_type: type[Exception]
+
+
+@dataclass(frozen=True)
+class ExtraKeyRejectCase:
+    id: str
+    raw: dict
+    error_fragment: str
+
+
+def _topology_fixture_raw() -> dict:
+    return yaml.safe_load(TOPOLOGY_FIXTURE.read_text(encoding="utf-8"))
+
+
+def _with_surface_derived(
+    one_of: list[list[object]],
+    *,
+    areas: str | None = "one",
+    holes: str | None = "allowed",
+) -> dict:
+    raw = deepcopy(_topology_fixture_raw())
+    surface = next(coll for coll in raw["collections"] if coll["name"] == "surface")
+    derived = {"rule": "footprint", "one_of": one_of}
+    if areas is not None:
+        derived["areas"] = areas
+    if holes is not None:
+        derived["holes"] = holes
+    surface["geometry"]["derived"] = derived
+    return raw
+
+
+def _with_border4_when_field(flag_type: str) -> dict:
+    raw = deepcopy(_topology_fixture_raw())
+    border4 = next(coll for coll in raw["collections"] if coll["name"] == "border4")
+    border4["fields"] = [{"name": "is_bounding", "type": flag_type}]
+    return raw
+
+
+def _with_target_geometry(
+    collection_name: str,
+    *,
+    geometry_type: str | None = None,
+    srid: int | None = None,
+) -> dict:
+    raw = deepcopy(_topology_fixture_raw())
+    target = next(
+        coll for coll in raw["collections"] if coll["name"] == collection_name
+    )
+    if geometry_type is not None:
+        target["geometry"]["type"] = geometry_type
+    if srid is not None:
+        target["geometry"]["srid"] = srid
+    return raw
+
+
+def _with_collection_bounds(collection_name: str, bounds) -> dict:
+    raw = deepcopy(_topology_fixture_raw())
+    target = next(
+        coll for coll in raw["collections"] if coll["name"] == collection_name
+    )
+    if bounds is None:
+        target.pop("bounds", None)
+    else:
+        target["bounds"] = bounds
+    return raw
+
+
+def _with_collection_extra_key(collection_name: str, key: str, value) -> dict:
+    raw = deepcopy(_topology_fixture_raw())
+    target = next(
+        coll for coll in raw["collections"] if coll["name"] == collection_name
+    )
+    target[key] = value
+    return raw
+
+
+def _with_geometry_extra_key(collection_name: str, key: str, value) -> dict:
+    raw = deepcopy(_topology_fixture_raw())
+    target = next(
+        coll for coll in raw["collections"] if coll["name"] == collection_name
+    )
+    target["geometry"][key] = value
+    return raw
+
+
+def _with_field_extra_key(
+    collection_name: str, field_name: str, key: str, value
+) -> dict:
+    raw = deepcopy(_topology_fixture_raw())
+    target = next(
+        coll for coll in raw["collections"] if coll["name"] == collection_name
+    )
+    field = next(fld for fld in target["fields"] if fld["name"] == field_name)
+    field[key] = value
+    return raw
+
+
+def _with_dataset_extra_key(key: str, value) -> dict:
+    raw = deepcopy(_topology_fixture_raw())
+    raw[key] = value
+    return raw
+
+
+def _without_derived_shape(collection_name: str) -> dict:
+    raw = deepcopy(_topology_fixture_raw())
+    collection = next(
+        coll for coll in raw["collections"] if coll["name"] == collection_name
+    )
+    del collection["geometry"]["derived"]["areas"]
+    del collection["geometry"]["derived"]["holes"]
+    return raw
+
+
+DERIVED_RESOLVE_CASES = [
+    DerivedResolveCase(
+        "areas-one-and-holes-allowed-resolve",
+        _with_surface_derived(
+            [["boundedByOuter", "boundedByShared"]],
+            areas="one",
+            holes="allowed",
+        ),
+        "surface",
+        (
+            "one",
+            "allowed",
+            (
+                (
+                    ("boundedByOuter", "border1", None),
+                    ("boundedByShared", "border2", None),
+                ),
+            ),
+        ),
+    ),
+    DerivedResolveCase(
+        "areas-many-and-holes-forbidden-resolve",
+        _with_surface_derived(
+            [["boundedByOuter", "boundedByShared"]],
+            areas="many",
+            holes="forbidden",
+        ),
+        "surface",
+        (
+            "many",
+            "forbidden",
+            (
+                (
+                    ("boundedByOuter", "border1", None),
+                    ("boundedByShared", "border2", None),
+                ),
+            ),
+        ),
+    ),
+    DerivedResolveCase(
+        "fixture-surface-explicit-areas-and-holes-resolve",
+        _topology_fixture_raw(),
+        "surface",
+        (
+            "one",
+            "allowed",
+            (
+                (
+                    ("boundedByOuter", "border1", None),
+                    ("boundedByShared", "border2", None),
+                ),
+                (("boundedByConditional", "border4", "is_bounding"),),
+            ),
+        ),
+    ),
+    DerivedResolveCase(
+        "fixture-surface2-explicit-areas-and-holes-resolve",
+        _topology_fixture_raw(),
+        "surface2",
+        ("many", "forbidden", ((("boundedByOuter", "border1", None),),)),
+    ),
+]
+
+
+DERIVED_REJECT_CASES = [
+    DerivedRejectCase(
+        "omitted-areas-and-holes-on-required-surface-are-rejected",
+        _without_derived_shape("surface"),
+        "areas",
+    ),
+    DerivedRejectCase(
+        "omitted-areas-and-holes-on-optional-surface-are-rejected",
+        _without_derived_shape("surface2"),
+        "areas",
+    ),
+    DerivedRejectCase(
+        "undeclared-property-is-rejected",
+        _with_surface_derived([["boundedByGhost", "boundedByShared"]]),
+        "boundedByGhost",
+    ),
+    DerivedRejectCase(
+        "unknown-when-field-is-rejected",
+        _with_surface_derived(
+            [
+                [
+                    {"name": "boundedByConditional", "when": "missing_flag"},
+                    "boundedByShared",
+                ]
+            ]
+        ),
+        "missing_flag",
+    ),
+    DerivedRejectCase(
+        "non-boolean-when-field-is-rejected",
+        _with_border4_when_field("string"),
+        "is_bounding",
+    ),
+    DerivedRejectCase(
+        "non-line-target-geometry-is-rejected",
+        _with_target_geometry("border1", geometry_type="Point"),
+        "Point",
+    ),
+    DerivedRejectCase(
+        "target-srid-mismatch-is-rejected",
+        _with_target_geometry("border1", srid=3857),
+        "3857",
+    ),
+]
+
+
+BOUNDS_RESOLVE_CASES = [
+    BoundsResolveCase(
+        "bounds-one-reaches-plan",
+        _topology_fixture_raw(),
+        "border1",
+        1,
+    ),
+    BoundsResolveCase(
+        "bounds-two-reaches-plan",
+        _topology_fixture_raw(),
+        "border2",
+        2,
+    ),
+    BoundsResolveCase(
+        "missing-bounds-records-no-rule",
+        _topology_fixture_raw(),
+        "border3",
+        None,
+    ),
+    BoundsResolveCase(
+        "targeted-only-by-non-boundary-is-accepted",
+        _with_collection_bounds("border3", 1),
+        "border3",
+        1,
+    ),
+]
+
+
+BOUNDS_REJECT_CASES = [
+    BoundsRejectCase(
+        "negative-bounds-is-rejected",
+        _with_collection_bounds("border1", -1),
+        "-1",
+        ValidationError,
+    ),
+    BoundsRejectCase(
+        "string-bounds-is-rejected",
+        _with_collection_bounds("border1", "two"),
+        "two",
+        ValidationError,
+    ),
+    BoundsRejectCase(
+        "zero-bounds-is-rejected",
+        _with_collection_bounds("border1", 0),
+        "0",
+        ValidationError,
+    ),
+    BoundsRejectCase(
+        "untargeted-collection-bounds-is-rejected",
+        _with_collection_bounds("surface", 1),
+        "surface",
+        DescriptionError,
+    ),
+    BoundsRejectCase(
+        "non-line-collection-bounds-is-rejected",
+        _with_target_geometry("border1", geometry_type="MultiPolygon"),
+        "MultiPolygon",
+        DescriptionError,
+    ),
+]
+
+
+EXTRA_KEY_REJECT_CASES = [
+    ExtraKeyRejectCase(
+        "dataset-extra-key-is-rejected",
+        _with_dataset_extra_key("nonsense_key", "hi"),
+        "nonsense_key",
+    ),
+    ExtraKeyRejectCase(
+        "collection-extra-key-is-rejected",
+        _with_collection_extra_key("border1", "nonsense_key", "hi"),
+        "nonsense_key",
+    ),
+    ExtraKeyRejectCase(
+        "geometry-extra-key-is-rejected",
+        _with_geometry_extra_key("border1", "bounds", 1),
+        "bounds",
+    ),
+    ExtraKeyRejectCase(
+        "field-extra-key-is-rejected",
+        _with_field_extra_key("border1", "label", "nonsense_key", True),
+        "nonsense_key",
+    ),
+]
+
+
+def _derived_shape(
+    coll,
+) -> tuple[str, str, tuple[tuple[tuple[str, str, str | None], ...], ...]] | None:
+    if coll.derived is None:
+        return None
+    return (
+        coll.derived.areas.value,
+        coll.derived.holes.value,
+        tuple(
+            tuple((role.property, role.target, role.when_field) for role in alternative)
+            for alternative in coll.derived.one_of
+        ),
+    )
+
+
+@pytest.mark.parametrize("case", BOUNDS_RESOLVE_CASES, ids=lambda case: case.id)
+def test_collection_bounds_resolve_and_reach_plan(case):
+    resolved = resolve_dataset(DatasetDef.model_validate(case.raw), Commons())
+    coll = next(c for c in resolved.collections if c.name == case.collection_name)
+    assert coll.bounds == case.expected
+
+    plan = build_schema_plan(resolved)
+    plan_coll = next(
+        c for c in plan.collections if c.collection_name == case.collection_name
+    )
+    assert plan_coll.bounds == case.expected
+
+
+@pytest.mark.parametrize("case", BOUNDS_REJECT_CASES, ids=lambda case: case.id)
+def test_collection_bounds_reject_invalid_shape_or_resolution(case):
+    with pytest.raises(case.error_type, match=case.error_fragment):
+        dataset = DatasetDef.model_validate(case.raw)
+        resolve_dataset(dataset, Commons())
+
+
+@pytest.mark.parametrize("case", EXTRA_KEY_REJECT_CASES, ids=lambda case: case.id)
+def test_unknown_description_keys_are_rejected(case):
+    with pytest.raises(ValidationError, match=case.error_fragment):
+        DatasetDef.model_validate(case.raw)
 
 
 def test_commons_base_field_is_inherited_by_every_collection():
@@ -68,6 +474,94 @@ def test_relationship_to_unknown_collection_raises():
     )
     with pytest.raises(DescriptionError, match="unknown collection 'ghost'"):
         resolve_dataset(dataset, Commons())
+
+
+@pytest.mark.parametrize("geometry_type", ["LineString", "Point"])
+def test_footprint_derived_geometry_requires_multipolygon(geometry_type, tmp_path):
+    path = tmp_path / "bad-derived.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "name": "x",
+                "collections": [
+                    {
+                        "name": "surface",
+                        "geometry": {
+                            "type": geometry_type,
+                            "derived": {
+                                "rule": "footprint",
+                                "areas": "one",
+                                "holes": "allowed",
+                                "one_of": [["boundedByOuter"]],
+                            },
+                        },
+                        "relationships": [
+                            {"property": "boundedByOuter", "target": "border"}
+                        ],
+                    },
+                    {"name": "border", "geometry": {"type": "LineString"}},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(DescriptionError, match="MultiPolygon"):
+        load_dataset(path)
+
+
+@pytest.mark.parametrize("case", DERIVED_RESOLVE_CASES, ids=lambda case: case.id)
+def test_collection_derived_resolves(case):
+    resolved = resolve_dataset(DatasetDef.model_validate(case.raw), Commons())
+    coll = next(c for c in resolved.collections if c.name == case.collection_name)
+    assert _derived_shape(coll) == case.expected
+
+
+@pytest.mark.parametrize("case", DERIVED_REJECT_CASES, ids=lambda case: case.id)
+def test_collection_derived_rejects_invalid_resolution(case):
+    expectation = (
+        pytest.raises(ValidationError, match=case.error_fragment)
+        if case.error_fragment in {"areas", "holes"}
+        else pytest.raises(DescriptionError, match=case.error_fragment)
+    )
+    with expectation:
+        dataset = DatasetDef.model_validate(case.raw)
+        resolve_dataset(dataset, Commons())
+
+
+@pytest.mark.parametrize("case", COLLECTION_NAME_CASES, ids=lambda case: case.id)
+def test_collection_name_reserves_generated_table_names(case):
+    dataset = DatasetDef.model_validate(
+        {
+            "name": "x",
+            "collections": [{"name": case.collection_name}],
+        }
+    )
+    expectation = (
+        pytest.raises(DescriptionError, match=case.error_fragment)
+        if case.error_fragment is not None
+        else nullcontext()
+    )
+    with expectation:
+        resolve_dataset(dataset, Commons())
+
+
+def test_existing_descriptions_still_resolve_with_reserved_name_guard():
+    datasets = load_resolved_datasets(DESCRIPTIONS)
+    assert datasets
+
+
+def test_topology_fixture_resolves_with_bounds_and_strict_models():
+    dataset = DatasetDef.model_validate(_topology_fixture_raw())
+    resolved = resolve_dataset(dataset, Commons())
+    assert [coll.name for coll in resolved.collections] == [
+        "surface",
+        "surface2",
+        "border1",
+        "border2",
+        "border3",
+        "border4",
+    ]
 
 
 def test_feature_model_and_processes_resolve():

@@ -40,6 +40,34 @@ comment on column topogdb.footprint_facts.curves_all_used is
     'that failed to close and was discarded.';
 
 
+do $$
+begin
+    if not exists (
+        select 1
+        from pg_type t
+        join pg_namespace n on n.oid = t.typnamespace
+        where n.nspname = 'topogdb'
+          and t.typname = 'footprint_measure'
+    ) then
+        create type topogdb.footprint_measure as (
+            row_exists       boolean,
+            members          integer,
+            included         integer,
+            linework_simple  boolean,
+            footprint        geometry,
+            areas            integer,
+            holes            integer,
+            curves_all_used  boolean,
+            unused           jsonb
+        );
+    end if;
+end;
+$$;
+
+comment on type topogdb.footprint_measure is
+    'All measured facts needed to judge one derived footprint without rebuilding it.';
+
+
 create or replace function topogdb.build_footprint(lines geometry)
 returns topogdb.footprint_facts
 language plpgsql

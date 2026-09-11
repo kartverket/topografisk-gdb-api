@@ -77,6 +77,17 @@ _DATASET = ResolvedDataset(
             fields=(),
             relationships=(),
         ),
+        ResolvedCollection(
+            name="nullable_line",
+            title="",
+            description="",
+            feature_model="simple",
+            geometry_type="LineString",
+            srid=4326,
+            fields=(),
+            relationships=(),
+            geometry_required=False,
+        ),
     ),
 )
 
@@ -107,7 +118,7 @@ _BOWTIE_POLY = {
     "coordinates": [[[0, 0], [2, 2], [2, 0], [0, 2], [0, 0]]],
 }
 
-# ST_IsValid=False, ST_IsSimple=True — caught by validity only (case 6)
+# ST_IsValid=False, ST_IsSimple=True — caught by validity only
 _EDGE_MPOLY = {
     "type": "MultiPolygon",
     "coordinates": [
@@ -188,6 +199,14 @@ def _update(conn, collection: str, fid: str, feature: dict) -> bool:
     return row[0]
 
 
+def _replace(conn, collection: str, fid: str, feature: dict) -> bool:
+    row = conn.execute(
+        "select ogc.feature_replace(%s, %s, %s, %s)",
+        (_DS, collection, fid, orjson.dumps(feature).decode()),
+    ).fetchone()
+    return row[0]
+
+
 def _fetch(conn, collection: str, fid: str) -> dict | None:
     row = conn.execute(
         "select ogc.feature_item(%s, %s, %s::uuid)",
@@ -220,3 +239,64 @@ def test_update_without_geometry_key_leaves_geometry_unchanged(geom_conn):
     stored = _fetch(geom_conn, "line", fid)["geometry"]
     _update(geom_conn, "line", fid, {"type": "Feature", "properties": {}})
     assert _fetch(geom_conn, "line", fid)["geometry"] == stored
+
+
+def test_create_nullable_geometry_with_null_stores_null(geom_conn):
+    feature = {"type": "Feature", "geometry": None, "properties": {}}
+    fid = geom_conn.execute(
+        "select ogc.feature_create(%s, %s, %s)",
+        (_DS, "nullable_line", orjson.dumps(feature).decode()),
+    ).fetchone()[0]
+    assert _fetch(geom_conn, "nullable_line", fid)["geometry"] is None
+
+
+def test_create_nullable_geometry_without_member_is_rejected(geom_conn):
+    feature = {"type": "Feature", "properties": {}}
+    with pytest.raises(psycopg.Error) as exc:
+        geom_conn.execute(
+            "select ogc.feature_create(%s, %s, %s)",
+            (_DS, "nullable_line", orjson.dumps(feature).decode()),
+        )
+    assert exc.value.sqlstate == "P0001"
+
+
+def test_required_geometry_rejects_null(geom_conn):
+    feature = {"type": "Feature", "geometry": None, "properties": {}}
+    with pytest.raises(psycopg.Error) as exc:
+        geom_conn.execute(
+            "select ogc.feature_create(%s, %s, %s)",
+            (_DS, "line", orjson.dumps(feature).decode()),
+        )
+    assert exc.value.sqlstate == "P0001"
+
+
+def test_update_with_null_geometry_clears_nullable_geometry(geom_conn):
+    fid = _create(geom_conn, "nullable_line", _CLOSED_RING_LINE)
+    feature = {"type": "Feature", "geometry": None, "properties": {}}
+    assert _update(geom_conn, "nullable_line", fid, feature) is True
+    assert _fetch(geom_conn, "nullable_line", fid)["geometry"] is None
+
+
+def test_update_without_geometry_preserves_nullable_geometry(geom_conn):
+    fid = _create(geom_conn, "nullable_line", _CLOSED_RING_LINE)
+    stored = _fetch(geom_conn, "nullable_line", fid)["geometry"]
+    assert (
+        _update(geom_conn, "nullable_line", fid, {"type": "Feature", "properties": {}})
+        is True
+    )
+    assert _fetch(geom_conn, "nullable_line", fid)["geometry"] == stored
+
+
+def test_replace_with_null_geometry_clears_nullable_geometry(geom_conn):
+    fid = _create(geom_conn, "nullable_line", _CLOSED_RING_LINE)
+    feature = {"type": "Feature", "geometry": None, "properties": {}}
+    assert _replace(geom_conn, "nullable_line", fid, feature) is True
+    assert _fetch(geom_conn, "nullable_line", fid)["geometry"] is None
+
+
+def test_replace_without_geometry_member_is_rejected(geom_conn):
+    fid = _create(geom_conn, "nullable_line", _CLOSED_RING_LINE)
+    feature = {"type": "Feature", "properties": {}}
+    with pytest.raises(psycopg.Error) as exc:
+        _replace(geom_conn, "nullable_line", fid, feature)
+    assert exc.value.sqlstate == "P0001"

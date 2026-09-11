@@ -17,9 +17,10 @@ PostgreSQL type here, but the concept (a column with a type) is generic.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 # --------------------------------------------------------------------------
 # Builtin scalar types -> PostgreSQL column types. FieldType.sql_type overrides.
@@ -52,6 +53,7 @@ GeometryType = Literal[
 #                 is unsafe here and will arrive later via processes + the OGC
 #                 Features Part 11 (Transactions) draft.
 FeatureModel = Literal["simple", "topology"]
+BoundsValue = Literal[1, 2]
 
 
 # Names flowing into generated SQL are validated at parse time so authoring
@@ -102,6 +104,8 @@ class FieldDef(BaseModel):
     nested sub-fields (stored as JSONB at arbitrary depth).
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     name: SafeIdentifier
     type: str | None = None
     type_ref: str | None = None
@@ -147,11 +151,73 @@ class FieldDef(BaseModel):
 FieldDef.model_rebuild()
 
 
+DerivedRule = Literal["footprint"]
+RelationshipPropertyName = Annotated[str, StringConstraints(min_length=1)]
+
+
+class DerivedAreas(StrEnum):
+    ONE = "one"
+    MANY = "many"
+
+
+class DerivedHoles(StrEnum):
+    ALLOWED = "allowed"
+    FORBIDDEN = "forbidden"
+
+
+class DerivedRoleDef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: RelationshipPropertyName
+    when: SafeIdentifier | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_bare_name(cls, value):
+        if isinstance(value, str):
+            return {"name": value}
+        return value
+
+
+class DerivedDef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rule: DerivedRule
+    areas: DerivedAreas
+    holes: DerivedHoles
+    one_of: list[list[DerivedRoleDef]]
+
+    @model_validator(mode="after")
+    def _validate_one_of(self):
+        if not self.one_of:
+            raise ValueError("derived.one_of must contain at least one alternative")
+        if any(not alternative for alternative in self.one_of):
+            raise ValueError(
+                "derived.one_of alternatives must contain at least one role"
+            )
+        return self
+
+
 class GeometryDef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     type: GeometryType = "Point"
     srid: int = 4326
     has_z: bool = False
     required: bool = True
+    derived: DerivedDef | None = None
+
+    @model_validator(mode="after")
+    def _validate_derived_geometry_type(self):
+        if (
+            self.derived is not None
+            and self.derived.rule == "footprint"
+            and self.type != "MultiPolygon"
+        ):
+            raise ValueError(
+                "geometry.derived rule 'footprint' requires type 'MultiPolygon'"
+            )
+        return self
 
 
 class RelationshipDef(BaseModel):
@@ -169,10 +235,13 @@ class RelationshipDef(BaseModel):
 
 
 class CollectionDef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: SafeIdentifier
     title: str | None = None
     description: str | None = None
     feature_model: FeatureModel = "simple"
+    bounds: BoundsValue | None = None
     geometry: GeometryDef = Field(default_factory=GeometryDef)
     fields: list[FieldDef] = Field(default_factory=list)
     relationships: list[RelationshipDef] = Field(default_factory=list)
@@ -215,6 +284,8 @@ class Commons(BaseModel):
 
 
 class DatasetDef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: SafeIdentifier
     title: str | None = None
     description: str | None = None
@@ -252,6 +323,21 @@ class ResolvedRelationship:
 
 
 @dataclass(frozen=True)
+class ResolvedDerivedRole:
+    property: str
+    target: str
+    when_field: str | None = None
+
+
+@dataclass(frozen=True)
+class ResolvedDerivedDef:
+    rule: str
+    areas: DerivedAreas
+    holes: DerivedHoles
+    one_of: tuple[tuple[ResolvedDerivedRole, ...], ...]
+
+
+@dataclass(frozen=True)
 class ResolvedCollection:
     name: str
     title: str
@@ -261,10 +347,12 @@ class ResolvedCollection:
     srid: int
     fields: tuple[ResolvedField, ...]
     relationships: tuple[ResolvedRelationship, ...]
+    derived: ResolvedDerivedDef | None = None
     upsert_field: str | None = None
     upsert_path: str | None = None
     has_z: bool = False
     geometry_required: bool = True
+    bounds: BoundsValue | None = None
     # Dot-path to the outward-identifier sub-field (e.g. "identifikasjon.lokalid").
     outward_identifier_path: str | None = None
     # Server-managed dot-paths -> token values (mirrors CollectionDef.server_managed).

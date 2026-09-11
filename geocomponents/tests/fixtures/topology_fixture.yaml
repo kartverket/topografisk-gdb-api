@@ -10,6 +10,13 @@ collections:
     geometry:
       type: MultiPolygon
       srid: 4326
+      derived:
+        rule: footprint
+        areas: one
+        holes: allowed
+        one_of:
+          - [boundedByOuter, boundedByShared]
+          - [{name: boundedByConditional, when: is_bounding}]
     relationships:
       - property: boundedByOuter
         target: border1
@@ -17,6 +24,8 @@ collections:
         target: border2
       - property: describedByNote
         target: border3
+      - property: boundedByConditional
+        target: border4
 
   - name: surface2
     title: Surface2
@@ -25,6 +34,13 @@ collections:
     geometry:
       type: MultiPolygon
       srid: 4326
+      required: false
+      derived:
+        rule: footprint
+        areas: many
+        holes: forbidden
+        one_of:
+          - [boundedByOuter]
     relationships:
       - property: boundedByOuter
         target: border1
@@ -32,11 +48,15 @@ collections:
   - name: border1
     title: Border1
     description: ''
+    feature_model: topology
+    bounds: 1
     geometry:
       type: LineString
       srid: 4326
     outward_identifier: identifikasjon.lokalid
     fields:
+      - name: label
+        type: string
       - name: identifikasjon
         type: object
         fields:
@@ -46,6 +66,8 @@ collections:
   - name: border2
     title: Border2
     description: ''
+    feature_model: topology
+    bounds: 2
     geometry:
       type: LineString
       srid: 4326
@@ -60,6 +82,20 @@ collections:
   - name: border3
     title: Border3
     description: ''
+    feature_model: topology
     geometry:
       type: LineString
       srid: 4326
+      required: false
+
+  - name: border4
+    title: Border4
+    description: ''
+    feature_model: topology
+    bounds: 1
+    geometry:
+      type: LineString
+      srid: 4326
+    fields:
+      - name: is_bounding
+        type: boolean

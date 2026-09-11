@@ -1,7 +1,12 @@
 from pathlib import Path
 
-from geocomponents.descriptions.loader import load_resolved_datasets
+import yaml
+from fixtures.description_cache import resolved_dataset
+
+from geocomponents.descriptions.loader import resolve_dataset
 from geocomponents.descriptions.models import (
+    Commons,
+    DatasetDef,
     ResolvedCollection,
     ResolvedDataset,
     ResolvedField,
@@ -29,12 +34,13 @@ from geocomponents.schema.plan import (
     internal_function,
 )
 
-DESCRIPTIONS = Path(__file__).resolve().parents[2] / "descriptions"
+TOPOLOGY_FIXTURE = (
+    Path(__file__).resolve().parent / "fixtures" / "topology_fixture.yaml"
+)
 
 
 def _plan(name="cadastre"):
-    d = next(x for x in load_resolved_datasets(DESCRIPTIONS) if x.name == name)
-    return build_schema_plan(d)
+    return build_schema_plan(resolved_dataset(name))
 
 
 def _synthetic_plan(
@@ -64,6 +70,11 @@ def _synthetic_plan(
             ),
         )
     )
+
+
+def _topology_fixture_plan() -> SchemaPlan:
+    raw = yaml.safe_load(TOPOLOGY_FIXTURE.read_text(encoding="utf-8"))
+    return build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw), Commons()))
 
 
 def test_dispatch_exposes_all_feature_entrypoints_taking_dataset_and_collection():
@@ -154,11 +165,36 @@ def test_has_z_collections_force_3d_on_ingest():
     plan = _plan("fkb_bane")
     sql = "\n".join(function_statements(plan))
     assert (
-        "ST_Force3D(ST_SetSRID(ST_GeomFromGeoJSON(feature->'geometry'), 5973))" in sql
+        "ST_Force3D(case when jsonb_typeof(feature->'geometry') = 'object' "
+        "then ST_SetSRID(ST_GeomFromGeoJSON(feature->'geometry'), 5973) "
+        "else null end)" in sql
     )
 
     cadastre_sql = "\n".join(function_statements(_plan("cadastre")))
     assert "ST_Force3D(" not in cadastre_sql
+
+
+def test_derived_footprint_is_built_only_in_measure_function():
+    plan = _topology_fixture_plan()
+    surface_measure = next(
+        stmt
+        for stmt in function_statements(plan)
+        if "function topology._surface_footprint_measure(" in stmt
+    )
+    surface_verdict = next(
+        stmt
+        for stmt in function_statements(plan)
+        if "function topology._surface_footprint_geometry_verdict(" in stmt
+    )
+    apply_dirty = next(
+        stmt
+        for stmt in function_statements(plan)
+        if "function topology._apply_dirty_footprints(" in stmt
+    )
+
+    assert surface_measure.count("topogdb.build_footprint(") == 1
+    assert "topogdb.build_footprint(" not in surface_verdict
+    assert "topogdb.build_footprint(" not in apply_dirty
 
 
 # --------------------------------------------------------------------------

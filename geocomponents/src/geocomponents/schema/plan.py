@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from geocomponents.descriptions.models import BoundsValue, DerivedAreas, DerivedHoles
+
 # Operations split by capability: reads exist for every collection; the
 # generator emits write functions for every collection, while the public
 # dispatch layer decides which collections expose direct Part 4 CRUD.
@@ -68,12 +70,54 @@ class CollectionRolePlan:
 
 
 @dataclass(frozen=True)
+class DerivedRolePlan:
+    """One derived-footprint role baked into generated SQL constants."""
+
+    property: str
+    target_collection: str
+    target_table: str
+    when_field: str | None = None
+
+
+@dataclass(frozen=True)
+class DerivedPlan:
+    """Everything the footprint-verdict generator needs for one collection."""
+
+    rule: str
+    required: bool
+    areas: DerivedAreas
+    holes: DerivedHoles
+    one_of: tuple[tuple[DerivedRolePlan, ...], ...]
+
+
+@dataclass(frozen=True)
+class FootprintOwnerRolePlan:
+    """One source-side role that counts as a footprint owner for bounds."""
+
+    source_collection: str
+    property: str
+    target_collection: str
+    target_table: str
+    when_field: str | None = None
+
+
+@dataclass(frozen=True)
 class IndexPlan:
     """One index to emit after the table DDL."""
 
     expression: str  # column name or functional expression, without outer parens
     unique: bool = False
     method: str = "btree"
+
+
+@dataclass(frozen=True)
+class NestedFieldPlan:
+    name: str
+    sql_type: str
+    required: bool = False
+    server_supplied: bool = False
+    codelist_values: tuple[str, ...] = ()
+    fields: tuple[NestedFieldPlan, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -92,6 +136,8 @@ class ColumnPlan:
     write_inject: tuple[tuple[str, str], ...] = ()
     # Permitted code values for DB-level validation (empty = no validation).
     codelist_values: tuple[str, ...] = ()
+    # JSONB-only: complete declaration of fields inside the stored object.
+    nested_fields: tuple[NestedFieldPlan, ...] = ()
     # Scalar server-managed: SQL expression substituted for client input on write.
     # When set, the column is excluded from the writable set entirely.
     server_write_expr: str | None = None
@@ -152,9 +198,12 @@ class CollectionPlan:
     feature_model: str
     table: TablePlan
     functions: dict[str, str]  # operation -> internal function name (private)
+    bounds: BoundsValue | None = None
     upsert_field: str | None = None
     upsert_path: str | None = None
     roles: tuple[CollectionRolePlan, ...] = ()
+    derived: DerivedPlan | None = None
+    footprint_owner_roles: tuple[FootprintOwnerRolePlan, ...] = ()
 
     @property
     def id_field(self) -> str:

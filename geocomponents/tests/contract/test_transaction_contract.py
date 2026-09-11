@@ -102,6 +102,7 @@ def _assert_report_shell(report, *, committed, item_count):
         "committed",
         "phase",
         "reason",
+        "sqlstate",
         "items",
         "structure",
         "geometry",
@@ -109,6 +110,7 @@ def _assert_report_shell(report, *, committed, item_count):
     assert report["committed"] is committed
     assert report["phase"] == "items"
     assert report["reason"] is None
+    assert report["sqlstate"] is None
     assert report["structure"] == []
     assert report["geometry"] == []
     assert len(report["items"]) == item_count
@@ -154,12 +156,14 @@ def _assert_document_level_rejection(report):
         "committed",
         "phase",
         "reason",
+        "sqlstate",
         "items",
         "structure",
         "geometry",
     }
     assert report["committed"] is False
-    assert report["phase"] == "items"
+    assert report["phase"] == "document"
+    assert report["sqlstate"] == "P0001"
     assert report["items"] == []
     assert report["structure"] == []
     assert report["geometry"] == []
