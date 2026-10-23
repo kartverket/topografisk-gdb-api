@@ -68,6 +68,11 @@ def _delete(cur, ds, coll, fid):
     return cur.fetchone()[0]
 
 
+def _delete_all(cur, ds, coll):
+    cur.execute("select ogc.feature_delete_all(%s,%s)", (ds, coll))
+    return cur.fetchone()[0]
+
+
 def _upsert(cur, ds, coll, feature):
     cur.execute(
         "select ogc.feature_upsert(%s,%s,%s)",
@@ -97,6 +102,8 @@ def _call_write_entrypoint(cur, op, ds, coll, feature):
         return _create(cur, ds, coll, feature)
     if op == "delete":
         return _delete(cur, ds, coll, fid)
+    if op == "delete_all":
+        return _delete_all(cur, ds, coll)
     if op == "replace":
         return _replace(cur, ds, coll, fid, feature)
     if op == "update":

@@ -1,5 +1,6 @@
 type RuntimeConfig = {
   gcapiApiUrl?: unknown;
+  featureEventsUrl?: unknown;
 };
 
 declare global {
@@ -39,4 +40,8 @@ export function resolveApiBaseUrl(
 
 export function gcapiRuntimeApiUrl() {
   return getRuntimeConfig()?.gcapiApiUrl;
+}
+
+export function featureEventsRuntimeUrl() {
+  return getRuntimeConfig()?.featureEventsUrl;
 }

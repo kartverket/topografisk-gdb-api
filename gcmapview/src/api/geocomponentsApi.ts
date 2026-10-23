@@ -58,6 +58,11 @@ function collectionItemsUrl(collectionId: CollectionId) {
   return `${collectionBaseUrl(collectionId)}/items?f=json&limit=10000`;
 }
 
+export function deleteCollectionItemsExecutionUrl(collectionId: CollectionId) {
+  const route = collectionRoutes[collectionId];
+  return `${datasetOgcApiBaseUrl(route.datasetId)}/processes/delete-collection-items/execution`;
+}
+
 export function collectionMetadataUrl(collectionId: CollectionId) {
   return `${collectionBaseUrl(collectionId)}?f=json`;
 }

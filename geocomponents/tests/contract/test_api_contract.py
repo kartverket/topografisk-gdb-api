@@ -428,6 +428,20 @@ def test_golden_process_execution_echoes(client):
     assert "Dataset echoes: world" in r.text
 
 
+def test_delete_collection_items_process_executes(client):
+    response = client.post(
+        f"{_api('cadastre')}/processes/delete-collection-items/execution",
+        content=orjson.dumps({"inputs": {"collection": "parcels"}}).decode(),
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == HTTPStatus.OK
+    payload = response.json()
+    assert payload["collection"] == "parcels"
+    assert isinstance(payload["deleted"], int)
+    assert payload["deleted"] >= 0
+
+
 def test_fkb_bane_batch_upsert_process_executes(client):
     lok = str(uuid.UUID(int=0xBA7C))
     r = client.post(

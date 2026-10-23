@@ -1,4 +1,4 @@
-import { useEffect, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { Check, Filter, FilterX, Loader2, Pencil, Trash2, Undo2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -39,6 +39,8 @@ type EditablePositionDraft = {
   y: string;
   z: string;
 };
+
+type PositionDraftOverrides = Partial<Record<number, Partial<EditablePositionDraft>>>;
 
 type ExpandableSectionHeaderProps = {
   label: string;
@@ -223,45 +225,34 @@ export function FeaturePropertiesCard({
 }: FeaturePropertiesCardProps) {
   const isSourceLoading = Boolean(feature.positionsLoading);
   const entries = Object.entries(feature.properties).sort(([a], [b]) => a.localeCompare(b));
-  const [positionDrafts, setPositionDrafts] = useState<EditablePositionDraft[]>(() =>
-    positionDraftsFromPositions(feature.positions)
-  );
+  const [positionDraftOverrides, setPositionDraftOverrides] = useState<PositionDraftOverrides>({});
+  const positionDrafts = positionDraftsFromPositions(feature.positions).map((draft, index) => ({
+    ...draft,
+    ...positionDraftOverrides[index]
+  }));
   const [editError, setEditError] = useState<string>();
   const editingDisabled = Boolean(editingDisabledReason);
   const hasPositionEditor = canEditFeature && feature.positions.length > 0 && Boolean(onCommitFeaturePositionChanges);
   const canCommitEditing = hasPositionEditor && isEditingFeature;
 
-  useEffect(() => {
-    setEditError(undefined);
-  }, [feature.collectionId, feature.featureId, feature.layerId]);
-
-  useEffect(() => {
-    setPositionDrafts(positionDraftsFromPositions(feature.positions));
-  }, [feature.positions]);
-
-  useEffect(() => {
-    if (!isEditingFeature) {
-      setPositionDrafts(positionDraftsFromPositions(feature.positions));
-    }
-    setEditError(undefined);
-  }, [feature.positions, isEditingFeature]);
-
   function updatePositionDraft(index: number, axis: 'x' | 'y' | 'z', value: string) {
-    setPositionDrafts(current => {
-      const nextDrafts = current.map((draft, draftIndex) =>
-        draftIndex === index ? { ...draft, [axis]: value } : draft
-      );
+    const nextOverrides = {
+      ...positionDraftOverrides,
+      [index]: { ...positionDraftOverrides[index], [axis]: value }
+    };
+    const nextDrafts = positionDraftsFromPositions(feature.positions).map((draft, draftIndex) => ({
+      ...draft,
+      ...nextOverrides[draftIndex]
+    }));
+    setPositionDraftOverrides(nextOverrides);
 
-      try {
-        const previewPositions = positionsFromDrafts(nextDrafts, feature.positions);
-        onPreviewFeaturePositionChanges?.(previewPositions);
-        setEditError(undefined);
-      } catch {
-        // Allow incomplete typing without tearing down the current preview.
-      }
-
-      return nextDrafts;
-    });
+    try {
+      const previewPositions = positionsFromDrafts(nextDrafts, feature.positions);
+      onPreviewFeaturePositionChanges?.(previewPositions);
+      setEditError(undefined);
+    } catch {
+      // Allow incomplete typing without tearing down the current preview.
+    }
   }
 
   async function commitEditedPositions() {
@@ -323,7 +314,7 @@ export function FeaturePropertiesCard({
                 title="Avbryt redigering"
                 disabled={isDeletingFeature || isSavingFeatureChanges}
                 onClick={() => {
-                  setPositionDrafts(positionDraftsFromPositions(feature.positions));
+                  setPositionDraftOverrides({});
                   setEditError(undefined);
                   onCancelFeatureEditing?.();
                 }}>
@@ -351,7 +342,7 @@ export function FeaturePropertiesCard({
               title={editingDisabledReason ?? 'Rediger objekt'}
               disabled={editingDisabled || isSourceLoading || isDeletingFeature || isSavingFeatureChanges}
               onClick={() => {
-                setPositionDrafts(positionDraftsFromPositions(feature.positions));
+                setPositionDraftOverrides({});
                 setEditError(undefined);
                 onStartFeatureEditing?.();
               }}>

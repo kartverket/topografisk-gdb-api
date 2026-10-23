@@ -58,6 +58,8 @@ def apply_schema():
 
     datasets = _load_datasets()
     with psycopg.connect(config.database_dsn()) as conn:
+        functions.apply_event_schema(conn)
+        typer.echo("applied feature event schema")
         functions.apply_topogdb(conn)
         typer.echo("applied topogdb schema")
         functions.apply_dispatch(conn)
@@ -78,11 +80,32 @@ def serve(host: str = "0.0.0.0", port: int = 8000):  # noqa: S104 - intentional:
     import uvicorn
 
     from geocomponents.api.pygeoapi_provider import PygeoapiProvider
+    from geocomponents.events import (
+        OutboxRelay,
+        PostgresOutboxStore,
+        RedisEventPublisher,
+    )
     from geocomponents.gateway.mounter import build_gateway
 
     datasets = _load_datasets()
-    provider = PygeoapiProvider(dsn=config.database_dsn())
-    gateway = build_gateway(datasets, provider, base_url=config.public_base_url())
+    dsn = config.database_dsn()
+    provider = PygeoapiProvider(dsn=dsn)
+    event_relay = OutboxRelay(
+        PostgresOutboxStore(dsn),
+        RedisEventPublisher(
+            config.redis_url(),
+            maxlen=config.event_stream_maxlen(),
+        ),
+        poll_seconds=config.event_poll_seconds(),
+        batch_size=config.event_batch_size(),
+        stale_after=config.event_claim_timeout_seconds(),
+    )
+    gateway = build_gateway(
+        datasets,
+        provider,
+        base_url=config.public_base_url(),
+        event_relay=event_relay,
+    )
     typer.echo(f"serving {len(datasets)} dataset(s) at {config.public_base_url()}")
     uvicorn.run(gateway, host=host, port=port)
 

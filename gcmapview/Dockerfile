@@ -14,11 +14,15 @@ COPY components.json index.html tsconfig.app.json tsconfig.json tsconfig.node.js
 
 RUN npm run build
 
+FROM builder AS runtime-dependencies
+RUN npm prune --omit=dev
+
 FROM node:26-alpine AS runtime
+WORKDIR /app
+COPY --from=runtime-dependencies /app/node_modules /app/node_modules
 RUN apk upgrade --no-cache \
  && rm -rf /usr/local/lib/node_modules/npm \
  && rm -f /usr/local/bin/npm /usr/local/bin/npx
-WORKDIR /app
 COPY server.mjs /app/server.mjs
 COPY --from=builder /app/dist /app/dist
 

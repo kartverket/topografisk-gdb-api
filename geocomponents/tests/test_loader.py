@@ -566,7 +566,7 @@ def test_topology_fixture_resolves_with_bounds_and_strict_models():
 
 def test_feature_model_and_processes_resolve():
     cad = next(d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "cadastre")
-    assert cad.processes == ("hello",)
+    assert cad.processes == ("hello", "delete-collection-items")
     by_name = {c.name: c for c in cad.collections}
     assert by_name["parcels"].feature_model == "simple"
     assert by_name["parcels"].supports_crud is True

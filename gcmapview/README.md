@@ -1,5 +1,20 @@
 # gcmapview
 
+The production Node server also exposes `/feature-events`, an SSE bridge over
+the per-map-layer Redis Streams emitted by geocomponents. Each browser gets an
+independent Redis cursor starting at the current stream tail. The Redis read and
+SSE response are released when the browser connection closes.
+
+When a change event arrives, the map transforms its aggregate bbox from the
+collection's native CRS to CRS84 and ignores changes outside the current view.
+It debounces events by collection and refetches only affected, visible
+collections using the current viewport bbox. This handles created, moved, and
+deleted features while keeping derived 3D and inspection sources synchronized.
+
+Runtime requires `GCAPI_API_URL` and `REDIS_URL`. Vite development can point the
+browser at a running production server with `VITE_FEATURE_EVENTS_URL`; it
+defaults to `http://localhost:8080/feature-events`.
+
 A small Vite + React map viewer for the canonical `gcapi` OGC facade, plus a
 JSON-FG upload page that starts imports through gcapi-owned OGC process
 execution endpoints.

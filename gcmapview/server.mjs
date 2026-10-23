@@ -4,11 +4,22 @@ import http from 'node:http';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { createClient } from 'redis';
 
 const distDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dist');
 const indexFile = path.join(distDir, 'index.html');
 const host = '0.0.0.0';
 const port = Number.parseInt(process.env.PORT ?? '8080', 10);
+const featureEventStreams = [
+  'geocomponents.feature-events.cadastre.parcels',
+  'geocomponents.feature-events.cadastre.buildings',
+  'geocomponents.feature-events.fkb_bane.jernbaneplattformkant',
+  'geocomponents.feature-events.fkb_bane.spormidt',
+  'geocomponents.feature-events.bygning.bygning',
+  'geocomponents.feature-events.bygning.bygning_omrade',
+  'geocomponents.feature-events.bygning.bygning_senterlinje',
+  'geocomponents.feature-events.bygning.bygning_posisjon'
+];
 
 function requireEnv(name) {
   const value = process.env[name]?.trim();
@@ -20,11 +31,13 @@ function requireEnv(name) {
 
 const runtimeConfigSource = `window.__GCMAPVIEW_CONFIG__ = ${JSON.stringify(
   {
-    gcapiApiUrl: requireEnv('GCAPI_API_URL')
+    gcapiApiUrl: requireEnv('GCAPI_API_URL'),
+    featureEventsUrl: '/feature-events'
   },
   null,
   2
 )};\n`;
+const redisUrl = requireEnv('REDIS_URL');
 
 const contentTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -91,6 +104,92 @@ async function sendFile(req, res, filePath) {
   stream.pipe(res);
 }
 
+function delay(milliseconds) {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
+async function streamFeatureEvents(req, res) {
+  res.writeHead(200, {
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'X-Accel-Buffering': 'no'
+  });
+  res.write('retry: 2000\n\n');
+
+  const client = createClient({ url: redisUrl });
+  let closed = false;
+  const close = () => {
+    closed = true;
+    if (client.isOpen) {
+      client.destroy();
+    }
+  };
+  req.once('aborted', close);
+  res.once('close', close);
+
+  client.on('error', error => {
+    if (!closed) {
+      console.error('[gcmapview] Redis feature event subscription failed', error);
+    }
+  });
+
+  const streamIds = new Map();
+  const heartbeat = setInterval(() => {
+    if (!closed && !res.destroyed) {
+      res.write(': keepalive\n\n');
+    }
+  }, 15_000);
+
+  try {
+    await client.connect();
+    await Promise.all(
+      featureEventStreams.map(async stream => {
+        const latestMessages = await client.xRevRange(stream, '+', '-', { COUNT: 1 });
+        streamIds.set(stream, latestMessages[0]?.id ?? '0-0');
+      })
+    );
+    while (!closed && !res.destroyed) {
+      try {
+        const results = await client.xRead(
+          featureEventStreams.map(key => ({ key, id: streamIds.get(key) ?? '0-0' })),
+          { BLOCK: 1000 }
+        );
+        for (const result of results ?? []) {
+          for (const message of result.messages) {
+            streamIds.set(result.name, message.id);
+            const event = message.message.event;
+            if (event && !closed && !res.destroyed) {
+              res.write(`data: ${event}\n\n`);
+            }
+          }
+        }
+      } catch (error) {
+        if (closed || res.destroyed) {
+          break;
+        }
+        console.error('[gcmapview] Could not read feature events', error);
+        await delay(1000);
+      }
+    }
+  } catch (error) {
+    if (!closed && !res.destroyed) {
+      console.error('[gcmapview] Feature event stream closed after Redis failure', error);
+    }
+  } finally {
+    clearInterval(heartbeat);
+    req.off('aborted', close);
+    res.off('close', close);
+    if (client.isOpen) {
+      client.destroy();
+    }
+    if (!res.writableEnded) {
+      res.end();
+    }
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -103,6 +202,18 @@ const server = http.createServer(async (req, res) => {
     }
 
     const requestUrl = new URL(req.url ?? '/', `http://${host}`);
+    if (requestUrl.pathname === '/feature-events') {
+      if (req.method === 'HEAD') {
+        res.writeHead(405, {
+          Allow: 'GET',
+          'Content-Type': 'text/plain; charset=utf-8'
+        });
+        res.end('Method Not Allowed');
+        return;
+      }
+      await streamFeatureEvents(req, res);
+      return;
+    }
     if (requestUrl.pathname === '/runtime-config.js') {
       res.writeHead(200, {
         'Cache-Control': 'no-store',

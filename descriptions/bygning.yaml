@@ -2,6 +2,7 @@ name: bygning
 title: Bygning
 description: Bygningsobjekter fra FKB-Bygning.
 processes:
+  - delete-collection-items
   - upsert-batch
   - import
 
