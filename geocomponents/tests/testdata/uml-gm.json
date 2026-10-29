@@ -1,0 +1,54 @@
+{
+  "Objektkatalog": {
+    "ObjektkatalogFullstendigNavn": "Eksempeldatasett",
+    "Versjon": "1.0"
+  },
+  "DefaultAttributeTypes": [
+    {
+      "UUID": "status-koder",
+      "TypeName": "Statuskode",
+      "Type": "CodeList",
+      "CodeList": [
+        { "Value": "aktiv" },
+        { "Value": "inaktiv" }
+      ]
+    }
+  ],
+  "FeatureTypes": [
+    {
+      "Name": "Linjeobjekt",
+      "Description": "Eksempel med identifikator, kodeliste og nestet struktur.",
+      "GeometryTypes": [{ "Name": "geometri", "Type": "GM_Curve" }],
+      "AttributeTypes": [
+        { "Name": "identifikasjon", "Type": "String", "MultiplicityMin": 1 },
+        { "Name": "oppdatert", "Type": "DateTime", "MultiplicityMin": 1 },
+        { "Name": "status", "Type": "CodeList", "UUID": "status-koder", "MultiplicityMin": 1 },
+        {
+          "Name": "detaljer",
+          "Type": "Struct",
+          "MultiplicityMin": 0,
+          "AttributeTypes": [
+            { "Name": "merknad", "Type": "String", "MultiplicityMin": 0 },
+            { "Name": "antall", "Type": "Integer", "MultiplicityMin": 1 }
+          ]
+        }
+      ]
+    },
+    {
+      "Name": "Punktobjekt",
+      "Description": "Eksempel med punktgeometri.",
+      "GeometryTypes": [{ "Name": "geometri", "Type": "GM_Point" }],
+      "AttributeTypes": [
+        { "Name": "navn", "Type": "String", "MultiplicityMin": 1 }
+      ]
+    },
+    {
+      "Name": "Flateobjekt",
+      "Description": "Eksempel med flategeometri.",
+      "GeometryTypes": [{ "Name": "geometri", "Type": "GM_Surface" }],
+      "AttributeTypes": [
+        { "Name": "areal", "Type": "Real", "MultiplicityMin": 0 }
+      ]
+    }
+  ]
+}

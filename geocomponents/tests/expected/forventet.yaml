@@ -1,0 +1,58 @@
+name: eksempeldatasett
+title: Eksempeldatasett
+description: Eksempeldatasett 1.0
+collections:
+- name: linjeobjekt
+  title: Linjeobjekt
+  description: Eksempel med identifikator, kodeliste og nestet struktur.
+  geometry:
+    type: MultiLineString
+    srid: 25833
+    has_z: true
+  outward_identifier: identifikasjon
+  server_managed:
+    oppdatert: timestamp_iso
+  fields:
+  - name: identifikasjon
+    type: string
+    required: true
+  - name: oppdatert
+    type: timestamp
+    required: true
+  - name: status
+    codelist: statuskode
+    required: true
+  - name: detaljer
+    type: object
+    fields:
+    - name: merknad
+      type: string
+    - name: antall
+      type: integer
+      required: true
+- name: punktobjekt
+  title: Punktobjekt
+  description: Eksempel med punktgeometri.
+  geometry:
+    type: MultiPoint
+    srid: 25833
+    has_z: true
+  fields:
+  - name: navn
+    type: string
+    required: true
+- name: flateobjekt
+  title: Flateobjekt
+  description: Eksempel med flategeometri.
+  geometry:
+    type: MultiPolygon
+    srid: 25833
+    has_z: true
+  fields:
+  - name: areal
+    type: number
+codelists:
+- name: statuskode
+  values:
+  - code: aktiv
+  - code: inaktiv

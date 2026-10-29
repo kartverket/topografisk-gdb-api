@@ -1,0 +1,8 @@
+general:
+  srid: 25833
+  has_z: true
+collections:
+  linjeobjekt:
+    outward_identifier: identifikasjon
+    server_managed:
+      oppdatert: timestamp_iso

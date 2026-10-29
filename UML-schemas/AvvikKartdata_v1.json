@@ -1,0 +1,1022 @@
+{
+  "SosiVersjon": "5.0",
+  "Objektkatalog": {
+    "Kortnavn": "AvvikKartdata",
+    "Versjon": "1.0",
+    "UndertypeVersjon": "",
+    "Objektkataloggruppe": "",
+    "ObjektkatalogFullstendigNavn": "Tilbakemelding på avvik i kartdata",
+    "Objektkataloglink": ""
+  },
+  "GMLSkjema": "http://skjema.geonorge.no/SOSI/produktspesifikasjon/AvvikKartdata/1.0/AvvikKartdata.xsd",
+  "DefaultAttributeTypes": [
+    {
+      "TypeName": "Avvikshåndtering",
+      "Type": "CodeList",
+      "Name": "avvikshåndtering",
+      "SosiName": "AVVIKSHÅNDTERING",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "CodeListURL": "https://register.geonorge.no/sosi-kodelister/geodatakvalitet/avvikkartdata/avvikshandtering.gml",
+      "Description": "kodeliste med verdier som forteller hvordan avviket skal rettes/håndteres.",
+      "UUID": "{70C8130F-1F27-4ec9-841F-E28C97C22E28}",
+      "CodeList": [
+        {
+          "Name": "Mottaker retter",
+          "Description": "Det påviste avviket rettes/håndteres av mottaker (bestiller) av kartdataene.",
+          "Value": "mottaker",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Avsender retter avvik",
+          "Description": "Det påviste avviket rettes av avsender (leverandør) av kartdataene",
+          "Value": "avsender",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Ingen",
+          "Description": "Det påviste avviket krever ingen retting, eller håndteringen videre er ikke klart definert",
+          "Value": "ingen",
+          "Status": "Gyldig"
+        }
+      ]
+    },
+    {
+      "TypeName": "AvvikstypeFullstendighet",
+      "Type": "CodeList",
+      "Name": "avvikstypeFullstendighet",
+      "SosiName": "FULLSTENDIGHET",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "CodeListURL": "https://register.geonorge.no/sosi-kodelister/geodatakvalitet/avvikkartdata/avvikstypefullstendighet.gml",
+      "Description": "kodeliste med verdier for forskjellige typer avvik innenfor kategorien Fullstendighet",
+      "UUID": "{6C738AF7-5B1C-44c5-BFCA-F4A3AF9DF53E}",
+      "CodeList": [
+        {
+          "Name": "Objekt mangler",
+          "Description": "Objekt/enhet som mangler i dataene (ref. kvalitetsmål Geodatakvalitet:2014/102/1)",
+          "Value": "mangler",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Overskytende objekt",
+          "Description": "Objekt/enhet som finnes i dataene, men som ikke burde ha vært med (ref. kvalitetsmål Geodatakvalitet:2014/101/1)",
+          "Value": "overskytende",
+          "Status": "Gyldig"
+        }
+      ]
+    },
+    {
+      "TypeName": "AvvikstypeEgenskapskvalitet",
+      "Type": "CodeList",
+      "Name": "avvikstypeEgenskapskvalitet",
+      "SosiName": "EGENSKAPSKVALITET",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "CodeListURL": "https://register.geonorge.no/sosi-kodelister/geodatakvalitet/avvikkartdata/avvikstypeegenskapskvalitet.gml",
+      "Description": "kodeliste med verdier for forskjellige typer avvik innenfor kategorien Egenskapskvalitet",
+      "UUID": "{55B38E63-276E-483b-A4A9-3ED4E0FAC7FC}",
+      "CodeList": [
+        {
+          "Name": "Egenskapsavvik",
+          "Description": "Objekt der en kvantitativ egenskap avviker fra fasit (ref. kvalitetsmål Geodatakvalitet:2014/504/1)",
+          "Value": "avvikEgenskap",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Feilklassifisert egenskap",
+          "Description": "Objekt der en kvalitativ egenskap er feilklassifisert (ref. kvalitetsmål Geodatakvalitet:2014/508/1)",
+          "Value": "feilKlasse",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Feilklassifisert objekttype",
+          "Description": "Objekt som er klassifisert til feil objekttype (ref. kvalitetsmål Geodatakvalitet:2014/509/1)",
+          "Value": "feilObjekt",
+          "Status": "Gyldig"
+        }
+      ]
+    },
+    {
+      "TypeName": "AvvikstypeKonsistenskontroller",
+      "Type": "CodeList",
+      "Name": "avvikstype",
+      "SosiName": "KONSISTENSKONTROLL",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "CodeListURL": "https://register.geonorge.no/sosi-kodelister/geodatakvalitet/avvikkartdata/avvikstypekonsistenskontroller.gml",
+      "Description": "kodeliste med verdier for forskjellige typer avvik funnet ved kjøring av konsistenskontroller mellom ulike kartdata.",
+      "UUID": "{F798833B-8224-45ad-A416-91A02BA9ED7B}",
+      "CodeList": [
+        {
+          "Name": "Adresse mangler Vegnett",
+          "Description": "Vegadressepunkter som ikke ligger i nærheten av vegnett med samme adressekode/gatekode",
+          "Value": "adresseVegnett",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Bygningspunkt nær AnnenBygning",
+          "Description": "Bygningspunkt som ligger nærmere enn 1m fra AnnenBygning-flate i i FKB-Bygning",
+          "Value": "bygningspunktAnnenBygning",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Vegnett uten vegflate",
+          "Description": "Vegnett i NVDB/Elveg som ikke har flate i FKB-Veg",
+          "Value": "vegnettFlate",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Annen type manglende samsvar",
+          "Description": "Beskriv manglende samsvar ved bruk av informasjon",
+          "Value": "annen",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Stor AnnenBygning",
+          "Description": "AnnenBygning-flater større enn 200m2 i FKB-Bygning",
+          "Value": "annenBygningStor",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Bygning på dyrka mark",
+          "Description": "Bygning som ligger på areal registrert som fulldyrka i FKB-AR5",
+          "Value": "bygningDyrkamark",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Bygning i vann",
+          "Description": "Bygningspunkt i FKB-Bygning som ligger i vann-flater i FKB-Vann.",
+          "Value": "bygningVann",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Flere bygningspunkt i samme bygning",
+          "Description": "Bygningsflater i FKB-Bygning som inneholder flere bygningspunkter",
+          "Value": "bygningspunktBygning",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Ikke samsvarene bruk av medium mellom vegflate og vegnett",
+          "Description": "Vegflater i FKB-Veg som ikke har sammenfallende medium-koding som underliggende vegnett",
+          "Value": "vegMedium",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Traktorveg overlapper Veg",
+          "Description": "Traktorveger i FKB-TraktorvegSti som overlapper veger i vegnettet(NVDB)",
+          "Value": "traktorvegOverlapperVeg",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Bygningslinjer uten bygning",
+          "Description": "Bygningslinjer som ikke ligger på bygningsflate i FKB-Bygning",
+          "Value": "bygningslinjerBygning",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Bygning i veg",
+          "Description": "Bygningspunkt i FKB-Bygning som ligger i Veg-flate i FKB-Veg.",
+          "Value": "bygningVeg",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Vegreferanse i vegflate samsvarer ikke med vegnettet",
+          "Description": "Vegflater i FKB-Veg som ikke har sammenfallende vegreferanse som underliggende vegnett",
+          "Value": "vegnettVegref",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Tiltak registrert i Bygning",
+          "Description": "Bygninger i FKB-Bygning som også ligger i FKB-Tiltak med informasjon om at tiltaket ikke er registrert i kartet (kartreg 1)",
+          "Value": "bygningTiltak",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Bygningspunkt i Takoverbygg",
+          "Description": "Bygningspunkt som ligger i Takoverbygg-flater i FKB-Bygning. Takoverbygg bør enten omklassifiseres til Bygning, eller bygningspunktet bør flyttes/fjernes.",
+          "Value": "bygningTakoverbygg",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Vegavgrensning uten vegnett",
+          "Description": "Vegdekkekant/GangSykkelvegkant i FKB-Veg som ikke ligger i nærheten av vegnettet (NVDB)",
+          "Value": "vegavgrensningVegnett",
+          "Status": "Gyldig"
+        }
+      ]
+    },
+    {
+      "TypeName": "AvvikstypeLogiskKonsistens",
+      "Type": "CodeList",
+      "Name": "avvikstypeLogiskKonsistens",
+      "SosiName": "LOGISK_KONSISTENS",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "CodeListURL": "https://register.geonorge.no/sosi-kodelister/geodatakvalitet/avvikkartdata/avvikstypelogiskkonsistens.gml",
+      "Description": "kodeliste med verdier for forskjellige typer avvik innenfor kategorien Logisk konsistens",
+      "UUID": "{3E9DDC3B-D82D-4902-851A-EB6563A422AC}",
+      "CodeList": [
+        {
+          "Name": "Avvik fra krav til topologisk konsistens",
+          "Description": "Produktspesifikasjonen kan inneholder krav til topologisk sammenheng i dataene. Når et avvik mot topologisk konsistens skal påvises må det spesifiseres nærmere hvilket konkret krav avviket gjelder (helst ved referanse til det definert kvalitetsmål)",
+          "Value": "topologi",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Avvik fra formatkrav",
+          "Description": "Avvik i krav til leveranseformat, f.eks. korrupt fil (ref. kvalitetsmål NS-EN ISO19157:2013/119/1)",
+          "Value": "format",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Avvik fra krav til samsvar med domene",
+          "Description": "Datamodellen beskriver hvilke objekttyper, egenskaper og egenskapsverdier som kan brukes i dataene. Avvik fra disse kravene finnes ved maskinell kontroll som SOSI-kontroll eller kontroll mot GML-skjema. (ref. kvalitetsmål NS-EN ISO19157:2013/016/1)",
+          "Value": "domene",
+          "Status": "Gyldig"
+        },
+        {
+          "Name": "Avvik fra krav i konseptuelt skjema",
+          "Description": "Det konseptuelle skjemaet inneholder alle krav til konsistens i datene som stilles i produktspesifikasjon og registreringsinstrukser. Dette går utover kravene som er definert i en UML-datamodell og kan f.eks. være krav til sammenknytning av objekter i randsoner for kartlegging etc. (ref. kvalitetsmål NS-EN ISO19157:2013/010/1)",
+          "Value": "konseptuelt",
+          "Status": "Gyldig"
+        }
+      ]
+    },
+    {
+      "TypeName": "AvvikstypeStedfesting",
+      "Type": "CodeList",
+      "Name": "avvikstypeStedfesting",
+      "SosiName": "STEDFESTING",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "CodeListURL": "https://register.geonorge.no/sosi-kodelister/geodatakvalitet/avvikkartdata/avvikstypestedfesting.gml",
+      "Description": "kodeliste med verdier for forskjellige typer avvik innenfor kategorien Stedfestingskvalitet",
+      "UUID": "{4A21E7C7-4155-48fc-9221-68636E7B2864}",
+      "CodeList": [
+        {
+          "Name": "Grov feil i absolutt posisjonering",
+          "Description": "Avvik i absolutt stedfesting større enn 3 ganger kravet til standardavvik (ref. kvalitetsmål Geodatakvalitet:2014/301/1)",
+          "Value": "grovFeil",
+          "Status": "Gyldig"
+        }
+      ]
+    },
+    {
+      "TypeName": "CharacterString",
+      "Type": "String",
+      "Name": "avvikId",
+      "SosiName": "AVVIKID",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "Description": "Unik identifikasjon av avviket innenfor datasettet i form av et nummer e.l. Unik identifikasjon av det enkelte avvik vil gjøre det lettere å kommunisere om de enkelte avvikene og er spesielt nyttig der avvikene ikke knytter seg til unikt identifiserbare kartobjekter.",
+      "UUID": "{286D3F3D-502D-48ca-89D8-33CDE4387D4C}"
+    },
+    {
+      "TypeName": "CharacterString",
+      "Type": "String",
+      "Name": "avvikObjekttype",
+      "SosiName": "AVVIK_OBJEKTTYPE",
+      "MultiplicityMin": 1,
+      "MultiplicityMax": 1,
+      "Description": "hvilken objekttype avviket gjelder. .For veglenke eller andre typer generelle objekttyper bør den klassifiserende egenskapen angis i tillegg til objekttypen. F.eks. \u0022Veglenke - sti\u0022 eller \u0022Veglenke - enkelBilveg\u0022.",
+      "UUID": "{43F9766A-9383-4bad-96FD-ECFB45405265}"
+    },
+    {
+      "TypeName": "CharacterString",
+      "Type": "String",
+      "Name": "datasett",
+      "SosiName": "DATASETT",
+      "MultiplicityMin": 1,
+      "MultiplicityMax": 1,
+      "Description": "hvilket datasett avviket gjelder",
+      "UUID": "{7B69FD52-E4C2-4fad-9389-7C27D82F2081}"
+    },
+    {
+      "TypeName": "CharacterString",
+      "Type": "String",
+      "Name": "objektpeker",
+      "SosiName": "OBJEKTPEKER",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "Description": "referanse til hvilket objekt avviket gjelder der dette er mulig/hensiktsmessig å angi. Bruk lokalid eller ev. annen identifikasjon som identifiserer objektet unikt.",
+      "UUID": "{1EC25D2D-7A3F-4fe4-BB8E-D49FBB08EA53}"
+    },
+    {
+      "TypeName": "CharacterString",
+      "Type": "String",
+      "Name": "informasjon",
+      "SosiName": "INFORMASJON",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "Description": "ekstra beskrivende eller forklarende tekst til avviket",
+      "UUID": "{AD14C07D-8193-451f-A868-8AE8A0EFFCEF}"
+    },
+    {
+      "TypeName": "URI",
+      "Type": "URI",
+      "Name": "link",
+      "SosiName": "LINK",
+      "MultiplicityMin": 0,
+      "MultiplicityMax": 1,
+      "Description": "Link til nettressurs med mer informasjon om avviket",
+      "UUID": "{C67EF68C-E840-407f-BAC6-0836F85F4783}"
+    },
+    {
+      "TypeName": "Boolean",
+      "Type": "Bool",
+      "Name": "sikkerPåvisning",
+      "SosiName": "SIKKER_PÅVISNING",
+      "MultiplicityMin": 1,
+      "MultiplicityMax": 1,
+      "Description": "vurdering av om avviket er sikkert påvist",
+      "UUID": "{DE386A17-BAA5-4813-8680-8B3E5C0218C8}"
+    },
+    {
+      "TypeName": "CharacterString",
+      "Type": "String",
+      "Name": "avvikBeskrivelse",
+      "SosiName": "AVVIK_BESKRIVELSE",
+      "MultiplicityMin": 1,
+      "MultiplicityMax": 1,
+      "Description": "Fritekst beskrivelse av type avvik. Kan i tillegg utfylles ved bruk av egenskapen informasjon.",
+      "UUID": "{0CC73ED1-462D-4072-93B7-97E3C881923E}"
+    }
+  ],
+  "FeatureTypes": [
+    {
+      "Name": "AvvikGenerell",
+      "Description": "avvik i kartdataene som ikke lar seg beskrive med en av de andre avvikstypene. Hva avviket går ut på må defineres i egenskapene avvikBeskrivelse og informasjon. .Dersom mulig bør en av de andre objekttypene som beskriver et avvik mer konkret/detaljert benyttes.",
+      "UUID": "{F3A4C63E-27A0-431d-985A-9EE1C8F8E405}",
+      "AttributeTypes": [
+        {
+          "Type": "String",
+          "Name": "avvikBeskrivelse",
+          "SosiName": "AVVIK_BESKRIVELSE",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "Fritekst beskrivelse av type avvik. Kan i tillegg utfylles ved bruk av egenskapen informasjon.",
+          "UUID": "{0CC73ED1-462D-4072-93B7-97E3C881923E}"
+        },
+        {
+          "Type": "String",
+          "Name": "avvikId",
+          "SosiName": "AVVIKID",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "Unik identifikasjon av avviket innenfor datasettet i form av et nummer e.l. Unik identifikasjon av det enkelte avvik vil gjøre det lettere å kommunisere om de enkelte avvikene og er spesielt nyttig der avvikene ikke knytter seg til unikt identifiserbare kartobjekter.",
+          "UUID": "{286D3F3D-502D-48ca-89D8-33CDE4387D4C}"
+        },
+        {
+          "Type": "String",
+          "Name": "avvikObjekttype",
+          "SosiName": "AVVIK_OBJEKTTYPE",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "hvilken objekttype avviket gjelder. .For veglenke eller andre typer generelle objekttyper bør den klassifiserende egenskapen angis i tillegg til objekttypen. F.eks. \u0022Veglenke - sti\u0022 eller \u0022Veglenke - enkelBilveg\u0022.",
+          "UUID": "{43F9766A-9383-4bad-96FD-ECFB45405265}"
+        },
+        {
+          "Type": "String",
+          "Name": "datasett",
+          "SosiName": "DATASETT",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "hvilket datasett avviket gjelder",
+          "UUID": "{7B69FD52-E4C2-4fad-9389-7C27D82F2081}"
+        },
+        {
+          "Type": "String",
+          "Name": "objektpeker",
+          "SosiName": "OBJEKTPEKER",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "referanse til hvilket objekt avviket gjelder der dette er mulig/hensiktsmessig å angi. Bruk lokalid eller ev. annen identifikasjon som identifiserer objektet unikt.",
+          "UUID": "{1EC25D2D-7A3F-4fe4-BB8E-D49FBB08EA53}"
+        },
+        {
+          "Type": "String",
+          "Name": "informasjon",
+          "SosiName": "INFORMASJON",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "ekstra beskrivende eller forklarende tekst til avviket",
+          "UUID": "{AD14C07D-8193-451f-A868-8AE8A0EFFCEF}"
+        },
+        {
+          "Type": "URI",
+          "Name": "link",
+          "SosiName": "LINK",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "Link til nettressurs med mer informasjon om avviket",
+          "UUID": "{C67EF68C-E840-407f-BAC6-0836F85F4783}"
+        }
+      ],
+      "GeometryTypes": [
+        {
+          "Name": "posisjon",
+          "Type": "GM_Point",
+          "Description": "avvikets posisjon.Der avviket er knyttet til et eksisterende kartobjekt velges et representasjonspunkt for geometrien til dette objektet. Der avviket er knyttet til en mangel i dataene etableres et punkt som viser hvor mangelen er.",
+          "SosiName": "PUNKT",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1
+        },
+        {
+          "Name": "utstrekning",
+          "Type": "GM_Curve",
+          "Description": "avvikets utstrekning.Kurve-geometri benyttes der avviket er knyttet til et objekt med Kurve-geometri.",
+          "SosiName": "KURVE",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1
+        },
+        {
+          "Name": "område",
+          "Type": "GM_Surface",
+          "Description": "avvikets område.Flate-geometri benyttes der avviket knyttes til et objekt med flate-geometri.",
+          "SosiName": "FLATE",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1
+        }
+      ]
+    },
+    {
+      "Name": "AvvikKonsistenskontroller",
+      "Description": "avvik som beskriver manglende samsvar/konsistens mellom ulike objekter i et datasett, eller mellom datasett.Geometrien for objektet avviket er knyttet til (eller en forenklet utgave av denne) brukes som geometri for avviket. Objektpeker til objektet angis.",
+      "UUID": "{78D790ED-7EDE-4fe2-9455-B4F0A64D2CB6}",
+      "AttributeTypes": [
+        {
+          "Type": "CodeList",
+          "Name": "avvikstype",
+          "SosiName": "KONSISTENSKONTROLL",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "CodeListURL": "https://register.geonorge.no/sosi-kodelister/geodatakvalitet/avvikkartdata/avvikstypekonsistenskontroller.gml",
+          "Description": "egenskap som beskriver hva slags type konsistenskontroll er er kjørt for å finne avviket",
+          "UUID": "{F798833B-8224-45ad-A416-91A02BA9ED7B}"
+        },
+        {
+          "Type": "String",
+          "Name": "avvikId",
+          "SosiName": "AVVIKID",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "Unik identifikasjon av avviket innenfor datasettet i form av et nummer e.l. Unik identifikasjon av det enkelte avvik vil gjøre det lettere å kommunisere om de enkelte avvikene og er spesielt nyttig der avvikene ikke knytter seg til unikt identifiserbare kartobjekter.",
+          "UUID": "{286D3F3D-502D-48ca-89D8-33CDE4387D4C}"
+        },
+        {
+          "Type": "String",
+          "Name": "avvikObjekttype",
+          "SosiName": "AVVIK_OBJEKTTYPE",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "hvilken objekttype avviket gjelder. .For veglenke eller andre typer generelle objekttyper bør den klassifiserende egenskapen angis i tillegg til objekttypen. F.eks. \u0022Veglenke - sti\u0022 eller \u0022Veglenke - enkelBilveg\u0022.",
+          "UUID": "{43F9766A-9383-4bad-96FD-ECFB45405265}"
+        },
+        {
+          "Type": "String",
+          "Name": "datasett",
+          "SosiName": "DATASETT",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "hvilket datasett avviket gjelder",
+          "UUID": "{7B69FD52-E4C2-4fad-9389-7C27D82F2081}"
+        },
+        {
+          "Type": "String",
+          "Name": "objektpeker",
+          "SosiName": "OBJEKTPEKER",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "referanse til hvilket objekt avviket gjelder der dette er mulig/hensiktsmessig å angi. Bruk lokalid eller ev. annen identifikasjon som identifiserer objektet unikt.",
+          "UUID": "{1EC25D2D-7A3F-4fe4-BB8E-D49FBB08EA53}"
+        },
+        {
+          "Type": "String",
+          "Name": "informasjon",
+          "SosiName": "INFORMASJON",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "ekstra beskrivende eller forklarende tekst til avviket",
+          "UUID": "{AD14C07D-8193-451f-A868-8AE8A0EFFCEF}"
+        },
+        {
+          "Type": "URI",
+          "Name": "link",
+          "SosiName": "LINK",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "Link til nettressurs med mer informasjon om avviket",
+          "UUID": "{C67EF68C-E840-407f-BAC6-0836F85F4783}"
+        }
+      ],
+      "GeometryTypes": [
+        {
+          "Name": "posisjon",
+          "Type": "GM_Point",
+          "Description": "avvikets posisjon.Der avviket er knyttet til et eksisterende kartobjekt velges et representasjonspunkt for geometrien til dette objektet. Der avviket er knyttet til en mangel i dataene etableres et punkt som viser hvor mangelen er.",
+          "SosiName": "PUNKT",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1
+        },
+        {
+          "Name": "utstrekning",
+          "Type": "GM_Curve",
+          "Description": "avvikets utstrekning.Kurve-geometri benyttes der avviket er knyttet til et objekt med Kurve-geometri.",
+          "SosiName": "KURVE",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1
+        },
+        {
+          "Name": "område",
+          "Type": "GM_Surface",
+          "Description": "avvikets område.Flate-geometri benyttes der avviket knyttes til et objekt med flate-geometri.",
+          "SosiName": "FLATE",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1
+        }
+      ]
+    },
+    {
+      "Name": "AvvikFullstendighet",
+      "Description": "avvik innenfor kvalitetskategorien Fullstendighet.Ved manglende fullstendighet angis et punkt der det manglende objektet burde finnes for å representere avviket. Ved overfullstendighet brukes det overskytende objektets geometri (eller ev. en forenklet utgave av denne) og det angis objektpeker til objektet.",
+      "UUID": "{A9108C2D-E777-40e3-9E9B-0B8D2CC3F7CC}",
+      "AttributeTypes": [
+        {
+          "Type": "CodeList",
+          "Name": "avvikstypeFullstendighet",
+          "SosiName": "FULLSTENDIGHET",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "CodeListURL": "https://register.geonorge.no/sosi-kodelister/geodatakvalitet/avvikkartdata/avvikstypefullstendighet.gml",
+          "Description": "angir type avvik innenfor kategorien fullstendighet (manglende objekt/overskytende objekt)",
+          "UUID": "{6C738AF7-5B1C-44c5-BFCA-F4A3AF9DF53E}"
+        },
+        {
+          "Type": "Bool",
+          "Name": "sikkerPåvisning",
+          "SosiName": "SIKKER_PÅVISNING",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "vurdering av om avviket er sikkert påvist",
+          "UUID": "{DE386A17-BAA5-4813-8680-8B3E5C0218C8}"
+        },
+        {
+          "Type": "CodeList",
+          "Name": "avvikshåndtering",
+          "SosiName": "AVVIKSHÅNDTERING",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "CodeListURL": "https://register.geonorge.no/sosi-kodelister/geodatakvalitet/avvikkartdata/avvikshandtering.gml",
+          "Description": "hvordan avviket skal håndteres. Det vil i de fleste tilfeller si hvem som har ansvar for å rette avviket.",
+          "UUID": "{70C8130F-1F27-4ec9-841F-E28C97C22E28}"
+        },
+        {
+          "Type": "String",
+          "Name": "avvikId",
+          "SosiName": "AVVIKID",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "Unik identifikasjon av avviket innenfor datasettet i form av et nummer e.l. Unik identifikasjon av det enkelte avvik vil gjøre det lettere å kommunisere om de enkelte avvikene og er spesielt nyttig der avvikene ikke knytter seg til unikt identifiserbare kartobjekter.",
+          "UUID": "{286D3F3D-502D-48ca-89D8-33CDE4387D4C}"
+        },
+        {
+          "Type": "String",
+          "Name": "avvikObjekttype",
+          "SosiName": "AVVIK_OBJEKTTYPE",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "hvilken objekttype avviket gjelder. .For veglenke eller andre typer generelle objekttyper bør den klassifiserende egenskapen angis i tillegg til objekttypen. F.eks. \u0022Veglenke - sti\u0022 eller \u0022Veglenke - enkelBilveg\u0022.",
+          "UUID": "{43F9766A-9383-4bad-96FD-ECFB45405265}"
+        },
+        {
+          "Type": "String",
+          "Name": "datasett",
+          "SosiName": "DATASETT",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "hvilket datasett avviket gjelder",
+          "UUID": "{7B69FD52-E4C2-4fad-9389-7C27D82F2081}"
+        },
+        {
+          "Type": "String",
+          "Name": "objektpeker",
+          "SosiName": "OBJEKTPEKER",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "referanse til hvilket objekt avviket gjelder der dette er mulig/hensiktsmessig å angi. Bruk lokalid eller ev. annen identifikasjon som identifiserer objektet unikt.",
+          "UUID": "{1EC25D2D-7A3F-4fe4-BB8E-D49FBB08EA53}"
+        },
+        {
+          "Type": "String",
+          "Name": "informasjon",
+          "SosiName": "INFORMASJON",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "ekstra beskrivende eller forklarende tekst til avviket",
+          "UUID": "{AD14C07D-8193-451f-A868-8AE8A0EFFCEF}"
+        },
+        {
+          "Type": "URI",
+          "Name": "link",
+          "SosiName": "LINK",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "Link til nettressurs med mer informasjon om avviket",
+          "UUID": "{C67EF68C-E840-407f-BAC6-0836F85F4783}"
+        }
+      ],
+      "GeometryTypes": [
+        {
+          "Name": "posisjon",
+          "Type": "GM_Point",
+          "Description": "avvikets posisjon.Der avviket er knyttet til et eksisterende kartobjekt velges et representasjonspunkt for geometrien til dette objektet. Der avviket er knyttet til en mangel i dataene etableres et punkt som viser hvor mangelen er.",
+          "SosiName": "PUNKT",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1
+        },
+        {
+          "Name": "utstrekning",
+          "Type": "GM_Curve",
+          "Description": "avvikets utstrekning.Kurve-geometri benyttes der avviket er knyttet til et objekt med Kurve-geometri.",
+          "SosiName": "KURVE",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1
+        },
+        {
+          "Name": "område",
+          "Type": "GM_Surface",
+          "Description": "avvikets område.Flate-geometri benyttes der avviket knyttes til et objekt med flate-geometri.",
+          "SosiName": "FLATE",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1
+        }
+      ]
+    },
+    {
+      "Name": "AvvikEgenskapskvalitet",
+      "Description": "avvik innenfor kategorien Egenskapkvalitet.Geometrien for objektet avviket er knyttet til (eller en forenklet utgave av denne) brukes som geometri for avviket. Objektpeker til objektet angis.",
+      "UUID": "{B766B738-7E40-443e-88F9-F5A12480B773}",
+      "AttributeTypes": [
+        {
+          "Type": "CodeList",
+          "Name": "avvikstypeEgenskapskvalitet",
+          "SosiName": "EGENSKAPSKVALITET",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "CodeListURL": "https://register.geonorge.no/sosi-kodelister/geodatakvalitet/avvikkartdata/avvikstypeegenskapskvalitet.gml",
+          "Description": "angir type avvik innenfor kategorien egenskapskvalitet (feilklassifisering e.l.)",
+          "UUID": "{55B38E63-276E-483b-A4A9-3ED4E0FAC7FC}"
+        },
+        {
+          "Type": "Bool",
+          "Name": "sikkerPåvisning",
+          "SosiName": "SIKKER_PÅVISNING",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "vurdering av om avviket er sikkert påvist",
+          "UUID": "{DE386A17-BAA5-4813-8680-8B3E5C0218C8}"
+        },
+        {
+          "Type": "CodeList",
+          "Name": "avvikshåndtering",
+          "SosiName": "AVVIKSHÅNDTERING",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "CodeListURL": "https://register.geonorge.no/sosi-kodelister/geodatakvalitet/avvikkartdata/avvikshandtering.gml",
+          "Description": "hvordan avviket skal håndteres. Det vil i de fleste tilfeller si hvem som har ansvar for å rette avviket.",
+          "UUID": "{70C8130F-1F27-4ec9-841F-E28C97C22E28}"
+        },
+        {
+          "Type": "String",
+          "Name": "avvikId",
+          "SosiName": "AVVIKID",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "Unik identifikasjon av avviket innenfor datasettet i form av et nummer e.l. Unik identifikasjon av det enkelte avvik vil gjøre det lettere å kommunisere om de enkelte avvikene og er spesielt nyttig der avvikene ikke knytter seg til unikt identifiserbare kartobjekter.",
+          "UUID": "{286D3F3D-502D-48ca-89D8-33CDE4387D4C}"
+        },
+        {
+          "Type": "String",
+          "Name": "avvikObjekttype",
+          "SosiName": "AVVIK_OBJEKTTYPE",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "hvilken objekttype avviket gjelder. .For veglenke eller andre typer generelle objekttyper bør den klassifiserende egenskapen angis i tillegg til objekttypen. F.eks. \u0022Veglenke - sti\u0022 eller \u0022Veglenke - enkelBilveg\u0022.",
+          "UUID": "{43F9766A-9383-4bad-96FD-ECFB45405265}"
+        },
+        {
+          "Type": "String",
+          "Name": "datasett",
+          "SosiName": "DATASETT",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "hvilket datasett avviket gjelder",
+          "UUID": "{7B69FD52-E4C2-4fad-9389-7C27D82F2081}"
+        },
+        {
+          "Type": "String",
+          "Name": "objektpeker",
+          "SosiName": "OBJEKTPEKER",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "referanse til hvilket objekt avviket gjelder der dette er mulig/hensiktsmessig å angi. Bruk lokalid eller ev. annen identifikasjon som identifiserer objektet unikt.",
+          "UUID": "{1EC25D2D-7A3F-4fe4-BB8E-D49FBB08EA53}"
+        },
+        {
+          "Type": "String",
+          "Name": "informasjon",
+          "SosiName": "INFORMASJON",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "ekstra beskrivende eller forklarende tekst til avviket",
+          "UUID": "{AD14C07D-8193-451f-A868-8AE8A0EFFCEF}"
+        },
+        {
+          "Type": "URI",
+          "Name": "link",
+          "SosiName": "LINK",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "Link til nettressurs med mer informasjon om avviket",
+          "UUID": "{C67EF68C-E840-407f-BAC6-0836F85F4783}"
+        }
+      ],
+      "GeometryTypes": [
+        {
+          "Name": "posisjon",
+          "Type": "GM_Point",
+          "Description": "avvikets posisjon.Der avviket er knyttet til et eksisterende kartobjekt velges et representasjonspunkt for geometrien til dette objektet. Der avviket er knyttet til en mangel i dataene etableres et punkt som viser hvor mangelen er.",
+          "SosiName": "PUNKT",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1
+        },
+        {
+          "Name": "utstrekning",
+          "Type": "GM_Curve",
+          "Description": "avvikets utstrekning.Kurve-geometri benyttes der avviket er knyttet til et objekt med Kurve-geometri.",
+          "SosiName": "KURVE",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1
+        },
+        {
+          "Name": "område",
+          "Type": "GM_Surface",
+          "Description": "avvikets område.Flate-geometri benyttes der avviket knyttes til et objekt med flate-geometri.",
+          "SosiName": "FLATE",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1
+        }
+      ]
+    },
+    {
+      "Name": "AvvikLogiskKonsistens",
+      "Description": "avvik innenfor kategorien Logisk konsistens.Geometrien for objektet avviket er knyttet til (eller en forenklet utgave av denne) brukes som geometri for avviket. Objektpeker til objektet angis.",
+      "UUID": "{F34037CE-4A28-4489-AD6B-BB20DA92EE77}",
+      "AttributeTypes": [
+        {
+          "Type": "CodeList",
+          "Name": "avvikstypeLogiskKonsistens",
+          "SosiName": "LOGISK_KONSISTENS",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "CodeListURL": "https://register.geonorge.no/sosi-kodelister/geodatakvalitet/avvikkartdata/avvikstypelogiskkonsistens.gml",
+          "Description": "angir type avvik innenfor kategorien Logisk konsistens",
+          "UUID": "{3E9DDC3B-D82D-4902-851A-EB6563A422AC}"
+        },
+        {
+          "Type": "Bool",
+          "Name": "sikkerPåvisning",
+          "SosiName": "SIKKER_PÅVISNING",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "vurdering av om avviket er sikkert påvist",
+          "UUID": "{DE386A17-BAA5-4813-8680-8B3E5C0218C8}"
+        },
+        {
+          "Type": "CodeList",
+          "Name": "avvikshåndtering",
+          "SosiName": "AVVIKSHÅNDTERING",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "CodeListURL": "https://register.geonorge.no/sosi-kodelister/geodatakvalitet/avvikkartdata/avvikshandtering.gml",
+          "Description": "hvordan avviket skal håndteres. Det vil i de fleste tilfeller si hvem som har ansvar for å rette avviket.",
+          "UUID": "{70C8130F-1F27-4ec9-841F-E28C97C22E28}"
+        },
+        {
+          "Type": "String",
+          "Name": "avvikId",
+          "SosiName": "AVVIKID",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "Unik identifikasjon av avviket innenfor datasettet i form av et nummer e.l. Unik identifikasjon av det enkelte avvik vil gjøre det lettere å kommunisere om de enkelte avvikene og er spesielt nyttig der avvikene ikke knytter seg til unikt identifiserbare kartobjekter.",
+          "UUID": "{286D3F3D-502D-48ca-89D8-33CDE4387D4C}"
+        },
+        {
+          "Type": "String",
+          "Name": "avvikObjekttype",
+          "SosiName": "AVVIK_OBJEKTTYPE",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "hvilken objekttype avviket gjelder. .For veglenke eller andre typer generelle objekttyper bør den klassifiserende egenskapen angis i tillegg til objekttypen. F.eks. \u0022Veglenke - sti\u0022 eller \u0022Veglenke - enkelBilveg\u0022.",
+          "UUID": "{43F9766A-9383-4bad-96FD-ECFB45405265}"
+        },
+        {
+          "Type": "String",
+          "Name": "datasett",
+          "SosiName": "DATASETT",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "hvilket datasett avviket gjelder",
+          "UUID": "{7B69FD52-E4C2-4fad-9389-7C27D82F2081}"
+        },
+        {
+          "Type": "String",
+          "Name": "objektpeker",
+          "SosiName": "OBJEKTPEKER",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "referanse til hvilket objekt avviket gjelder der dette er mulig/hensiktsmessig å angi. Bruk lokalid eller ev. annen identifikasjon som identifiserer objektet unikt.",
+          "UUID": "{1EC25D2D-7A3F-4fe4-BB8E-D49FBB08EA53}"
+        },
+        {
+          "Type": "String",
+          "Name": "informasjon",
+          "SosiName": "INFORMASJON",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "ekstra beskrivende eller forklarende tekst til avviket",
+          "UUID": "{AD14C07D-8193-451f-A868-8AE8A0EFFCEF}"
+        },
+        {
+          "Type": "URI",
+          "Name": "link",
+          "SosiName": "LINK",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "Link til nettressurs med mer informasjon om avviket",
+          "UUID": "{C67EF68C-E840-407f-BAC6-0836F85F4783}"
+        }
+      ],
+      "GeometryTypes": [
+        {
+          "Name": "posisjon",
+          "Type": "GM_Point",
+          "Description": "avvikets posisjon.Der avviket er knyttet til et eksisterende kartobjekt velges et representasjonspunkt for geometrien til dette objektet. Der avviket er knyttet til en mangel i dataene etableres et punkt som viser hvor mangelen er.",
+          "SosiName": "PUNKT",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1
+        },
+        {
+          "Name": "utstrekning",
+          "Type": "GM_Curve",
+          "Description": "avvikets utstrekning.Kurve-geometri benyttes der avviket er knyttet til et objekt med Kurve-geometri.",
+          "SosiName": "KURVE",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1
+        },
+        {
+          "Name": "område",
+          "Type": "GM_Surface",
+          "Description": "avvikets område.Flate-geometri benyttes der avviket knyttes til et objekt med flate-geometri.",
+          "SosiName": "FLATE",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1
+        }
+      ]
+    },
+    {
+      "Name": "AvvikStedfesting",
+      "Description": "avvik innenfor kategorien Stedfestingsnøyaktighet (jf. Geodatakvalitet).Krav til stedfesting gjøres ved at det stilles krav til maksimalt systematisk avvik, maksimalt tilfeldig avvik og andel grove feil. Ved kontroll av stedfestingsnøyaktighet sammenlignes dataene med en fasit slik at man kan regne ut systematiske og tilfeldige avvik og sammenligne med de gitte kravene. Avvikene i enkeltavvikene i en slik kontroll egner seg ikke for utveksling av avvik etter denne produktspesifikasjonen. Imidlertid kan de enkelte grovfeilene dokumenteres/utveklses ved bruk av denne spesifikasjonen.  .Geometrien for objektet avviket er knyttet til (eller en forenklet utgave av denne) brukes som geometri for avviket. Objektpeker til objektet angis.",
+      "UUID": "{A5A623B3-39CA-4c27-9B95-04787D579314}",
+      "AttributeTypes": [
+        {
+          "Type": "CodeList",
+          "Name": "avvikstypeStedfesting",
+          "SosiName": "STEDFESTING",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "CodeListURL": "https://register.geonorge.no/sosi-kodelister/geodatakvalitet/avvikkartdata/avvikstypestedfesting.gml",
+          "Description": "angir type avvik innenfor kategorien stedfestingskvalitet",
+          "UUID": "{4A21E7C7-4155-48fc-9221-68636E7B2864}"
+        },
+        {
+          "Type": "Bool",
+          "Name": "sikkerPåvisning",
+          "SosiName": "SIKKER_PÅVISNING",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "vurdering av om avviket er sikkert påvist",
+          "UUID": "{DE386A17-BAA5-4813-8680-8B3E5C0218C8}"
+        },
+        {
+          "Type": "CodeList",
+          "Name": "avvikshåndtering",
+          "SosiName": "AVVIKSHÅNDTERING",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "CodeListURL": "https://register.geonorge.no/sosi-kodelister/geodatakvalitet/avvikkartdata/avvikshandtering.gml",
+          "Description": "hvordan avviket skal håndteres. Det vil i de fleste tilfeller si hvem som har ansvar for å rette avviket.",
+          "UUID": "{70C8130F-1F27-4ec9-841F-E28C97C22E28}"
+        },
+        {
+          "Type": "String",
+          "Name": "avvikId",
+          "SosiName": "AVVIKID",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "Unik identifikasjon av avviket innenfor datasettet i form av et nummer e.l. Unik identifikasjon av det enkelte avvik vil gjøre det lettere å kommunisere om de enkelte avvikene og er spesielt nyttig der avvikene ikke knytter seg til unikt identifiserbare kartobjekter.",
+          "UUID": "{286D3F3D-502D-48ca-89D8-33CDE4387D4C}"
+        },
+        {
+          "Type": "String",
+          "Name": "avvikObjekttype",
+          "SosiName": "AVVIK_OBJEKTTYPE",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "hvilken objekttype avviket gjelder. .For veglenke eller andre typer generelle objekttyper bør den klassifiserende egenskapen angis i tillegg til objekttypen. F.eks. \u0022Veglenke - sti\u0022 eller \u0022Veglenke - enkelBilveg\u0022.",
+          "UUID": "{43F9766A-9383-4bad-96FD-ECFB45405265}"
+        },
+        {
+          "Type": "String",
+          "Name": "datasett",
+          "SosiName": "DATASETT",
+          "MultiplicityMin": 1,
+          "MultiplicityMax": 1,
+          "Description": "hvilket datasett avviket gjelder",
+          "UUID": "{7B69FD52-E4C2-4fad-9389-7C27D82F2081}"
+        },
+        {
+          "Type": "String",
+          "Name": "objektpeker",
+          "SosiName": "OBJEKTPEKER",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "referanse til hvilket objekt avviket gjelder der dette er mulig/hensiktsmessig å angi. Bruk lokalid eller ev. annen identifikasjon som identifiserer objektet unikt.",
+          "UUID": "{1EC25D2D-7A3F-4fe4-BB8E-D49FBB08EA53}"
+        },
+        {
+          "Type": "String",
+          "Name": "informasjon",
+          "SosiName": "INFORMASJON",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "ekstra beskrivende eller forklarende tekst til avviket",
+          "UUID": "{AD14C07D-8193-451f-A868-8AE8A0EFFCEF}"
+        },
+        {
+          "Type": "URI",
+          "Name": "link",
+          "SosiName": "LINK",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1,
+          "Description": "Link til nettressurs med mer informasjon om avviket",
+          "UUID": "{C67EF68C-E840-407f-BAC6-0836F85F4783}"
+        }
+      ],
+      "GeometryTypes": [
+        {
+          "Name": "posisjon",
+          "Type": "GM_Point",
+          "Description": "avvikets posisjon.Der avviket er knyttet til et eksisterende kartobjekt velges et representasjonspunkt for geometrien til dette objektet. Der avviket er knyttet til en mangel i dataene etableres et punkt som viser hvor mangelen er.",
+          "SosiName": "PUNKT",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1
+        },
+        {
+          "Name": "utstrekning",
+          "Type": "GM_Curve",
+          "Description": "avvikets utstrekning.Kurve-geometri benyttes der avviket er knyttet til et objekt med Kurve-geometri.",
+          "SosiName": "KURVE",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1
+        },
+        {
+          "Name": "område",
+          "Type": "GM_Surface",
+          "Description": "avvikets område.Flate-geometri benyttes der avviket knyttes til et objekt med flate-geometri.",
+          "SosiName": "FLATE",
+          "MultiplicityMin": 0,
+          "MultiplicityMax": 1
+        }
+      ]
+    }
+  ],
+  "Groups": {
+    "Name": "root",
+    "Group": [
+      {
+        "Name": "Avvik kartdata 1.0",
+        "Description": "Datamodell for tilbakemelding på avvik i kartdata. Omfatter både avvik funnet ved kontroll av kartdata i tråd med kvalitetsmodellen i standarden Geodatakvalitet og andre typer avvik i kartdata. Kan omfatte avvik internt i datasettet, avvik mellom kartdataene og terrenget eller avvik i forhold til et annet datasett. .Produktspesifkasjonen kan benyttes for utveksling av avvik i kartleggingsprosjekter og i kommunikasjon om datakvalitet mellom ulike parter i et samarbeid - som f.eks. Geovekst.",
+        "TargetTypes": [
+          "AvvikGenerell",
+          "AvvikKonsistenskontroller",
+          "AvvikFullstendighet",
+          "AvvikEgenskapskvalitet",
+          "AvvikLogiskKonsistens",
+          "AvvikStedfesting"
+        ]
+      }
+    ]
+  }
+}

@@ -12,7 +12,8 @@ from geocomponents.convert import _safe_id, convert_qms
 from geocomponents.descriptions.loader import resolve_dataset
 from geocomponents.descriptions.models import Commons, DatasetDef
 
-QMS_FILE = Path(__file__).resolve().parents[2] / "UML-schemas" / "FKBBane_50_qms.json"
+QMS_FILE = Path(__file__).resolve().parents[0] / "testdata" / "FKBBane_50_qms.json"
+DOMAIN_FILE = Path(__file__).resolve().parents[0] / "testdata" / "domene.yaml"
 
 
 @pytest.fixture(scope="module")
@@ -21,10 +22,15 @@ def qms_data():
 
 
 @pytest.fixture(scope="module")
+def domain_data():
+    return yaml.safe_load(DOMAIN_FILE.read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="module")
 def converted(qms_data):
     from geocomponents.convert import convert_qms
 
-    return yaml.safe_load(convert_qms(qms_data, "fkb_bane", 4326, True))
+    return yaml.safe_load(convert_qms(qms_data, None, "fkb_bane", 4326, True))
 
 
 # --------------------------------------------------------------------------
@@ -132,7 +138,17 @@ def test_convert_output_validates_as_geocomponents_dataset(qms_data):
     """Pre-code suspect (integration): the YAML must parse and resolve without
     error through the full description pipeline."""
 
-    yaml_str = convert_qms(qms_data, "fkb_bane", 4326, True)
+    yaml_str = convert_qms(qms_data, None, "fkb_bane", 4326, True)
     dataset = DatasetDef.model_validate(yaml.safe_load(yaml_str))
     resolved = resolve_dataset(dataset, Commons())
     assert len(resolved.collections) == 2
+
+
+# --------------------------------------------------------------------------
+#
+# --------------------------------------------------------------------------
+
+
+def test_convert_with_domain(qms_data, domain_data):
+    yaml_str = convert_qms(qms_data, domain_data, "fkb_bane", 4326, True)
+    assert yaml_str is not None

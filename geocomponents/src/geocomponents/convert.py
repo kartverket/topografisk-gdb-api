@@ -195,7 +195,9 @@ def _convert_feature_type(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-def convert_qms(data: dict, dataset_name: str, srid: int, has_z: bool) -> str:
+def convert_qms(
+    data: dict, domain: dict, dataset_name: str, srid: int, has_z: bool
+) -> str:
     """Convert a QMS schema dict to a geocomponents dataset YAML string."""
     dat_by_uuid = _build_dat_lookup(data)
     codelists: dict[str, dict] = {}
@@ -233,8 +235,9 @@ def _cli_main() -> None:  # pragma: no cover
     parser = argparse.ArgumentParser(
         description="Convert a QMS JSON schema to a geocomponents dataset YAML."
     )
-    parser.add_argument("input", type=Path, help="QMS JSON input file")
-    parser.add_argument("output", type=Path, help="YAML output file")
+    parser.add_argument("--uml", type=Path, help="QMS JSON input file")
+    parser.add_argument("--domain", type=Path, help="Domain YAML input file")
+    parser.add_argument("--output", type=Path, help="YAML output file")
     parser.add_argument(
         "--dataset-name", required=True, help="Dataset identifier (SafeIdentifier)"
     )
@@ -249,8 +252,11 @@ def _cli_main() -> None:  # pragma: no cover
     )
     args = parser.parse_args()
 
-    data = json.loads(args.input.read_text(encoding="utf-8"))
-    yaml_str = convert_qms(data, args.dataset_name, srid=args.srid, has_z=args.has_z)
+    data = json.loads(args.uml.read_text(encoding="utf-8"))
+    domain = json.loads(args.domain.read_text(encoding="utf-8"))
+    yaml_str = convert_qms(
+        data, domain, args.dataset_name, srid=args.srid, has_z=args.has_z
+    )
     args.output.write_text(yaml_str, encoding="utf-8")
     sys.stderr.write(f"Written: {args.output}\n")
 
