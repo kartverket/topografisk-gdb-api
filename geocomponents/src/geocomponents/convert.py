@@ -25,6 +25,12 @@ _TRANSLIT = str.maketrans(
 )
 
 
+# Prevents anchors and aliases in the YAML output.
+class NoAliasSafeDumper(yaml.SafeDumper):
+    def ignore_aliases(self, data):
+        return True
+
+
 def _safe_id(raw: str) -> str:
     """Lowercase + transliterate Norwegian chars → SafeIdentifier.
 
@@ -59,14 +65,6 @@ _GM_TO_GEOCOMPONENTS: dict[str, str] = {
     "GM_MultiPoint": "MultiPoint",
     "GM_MultiSurface": "MultiPolygon",
 }
-
-# DAT TypeName → scalar server_managed token for top-level fields.
-_DAT_SCALAR_SERVER_MANAGED: dict[str, str] = {
-    "oppdateringsdato": "timestamp_iso",
-}
-
-# DAT TypeName that triggers the FKB outward_identifier / versjonId convention.
-_FKB_IDENTIFIKASJON_TYPENAME = "Identifikasjon"
 
 
 # ---------------------------------------------------------------------------
@@ -131,10 +129,9 @@ def _convert_attr(
 
 def _convert_feature_type(
     ft: dict,
+    domain: dict | None,
     dat_by_uuid: dict[str, dict],
-    srid: int,
     codelists: dict[str, dict],
-    has_z: bool,
 ) -> dict:
     """Convert one QMS FeatureType to a geocomponents collection dict."""
     coll_name = _safe_id(ft["Name"])
@@ -146,34 +143,33 @@ def _convert_feature_type(
 
     fields: list[dict] = []
     outward_identifier: str | None = None
+    if domain is not None:
+        outward_identifier = (
+            domain.get("collections", {}).get(coll_name, {}).get("outward_identifier")
+            if domain.get("collections", {})
+            .get(coll_name, {})
+            .get("outward_identifier")
+            is not None
+            else domain.get("general").get("outward_identifier")
+            if domain.get("general").get("outward_identifier") is not None
+            else None
+        )
+
     server_managed: dict[str, str] = {}
+    if domain is not None:
+        server_managed = (
+            domain.get("collections", {}).get(coll_name, {}).get("server_managed", {})
+            if domain.get("collections", {}).get(coll_name, {}).get("server_managed")
+            is not None
+            else domain.get("general").get("server_managed", {})
+            if domain.get("general").get("server_managed") is not None
+            else {}
+        )
+
+    srid: int = domain.get("general", {}).get("srid", 4326) if domain else 4326
+    has_z: bool = domain.get("general", {}).get("has_z", False) if domain else False
 
     for attr in ft.get("AttributeTypes", []):
-        qms_type = attr.get("Type", "")
-        attr_name = _safe_id(attr["Name"])
-        dat = dat_by_uuid.get(attr.get("UUID", ""))
-
-        # Top-level scalar fields managed by the server (e.g. oppdateringsdato).
-        if dat and dat.get("TypeName") in _DAT_SCALAR_SERVER_MANAGED:
-            server_managed[attr_name] = _DAT_SCALAR_SERVER_MANAGED[dat["TypeName"]]
-            fld = _convert_attr(attr, dat_by_uuid, codelists)
-            if fld:
-                fields.append(fld)
-            continue
-
-        # FKB Identifikasjon struct → outward_identifier + server_managed versjonid.
-        if (
-            qms_type == "Struct"
-            and dat
-            and dat.get("TypeName") == _FKB_IDENTIFIKASJON_TYPENAME
-        ):
-            outward_identifier = f"{attr_name}.lokalid"
-            server_managed[f"{attr_name}.versjonid"] = "timestamp_iso"
-            fld = _convert_attr(attr, dat_by_uuid, codelists)
-            if fld:
-                fields.append(fld)
-            continue
-
         fld = _convert_attr(attr, dat_by_uuid, codelists)
         if fld:
             fields.append(fld)
@@ -195,18 +191,14 @@ def _convert_feature_type(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-def convert_qms(
-    data: dict, domain: dict, dataset_name: str, srid: int, has_z: bool
-) -> str:
+def convert_qms(data: dict, domain: dict | None, dataset_name: str) -> str:
     """Convert a QMS schema dict to a geocomponents dataset YAML string."""
     dat_by_uuid = _build_dat_lookup(data)
     codelists: dict[str, dict] = {}
     collections = []
 
     for ft in data.get("FeatureTypes", []):
-        collections.append(
-            _convert_feature_type(ft, dat_by_uuid, srid, codelists, has_z)
-        )
+        collections.append(_convert_feature_type(ft, domain, dat_by_uuid, codelists))
 
     obj_katalog = data.get("Objektkatalog", {})
     title = obj_katalog.get("ObjektkatalogFullstendigNavn") or dataset_name
@@ -221,7 +213,11 @@ def convert_qms(
         "codelists": list(codelists.values()),
     }
     return yaml.dump(
-        dataset, allow_unicode=True, sort_keys=False, default_flow_style=False
+        dataset,
+        Dumper=NoAliasSafeDumper,
+        allow_unicode=True,
+        sort_keys=False,
+        default_flow_style=False,
     )
 
 
@@ -235,28 +231,21 @@ def _cli_main() -> None:  # pragma: no cover
     parser = argparse.ArgumentParser(
         description="Convert a QMS JSON schema to a geocomponents dataset YAML."
     )
-    parser.add_argument("--uml", type=Path, help="QMS JSON input file")
+    parser.add_argument("--uml", required=True, type=Path, help="QMS JSON input file")
     parser.add_argument("--domain", type=Path, help="Domain YAML input file")
-    parser.add_argument("--output", type=Path, help="YAML output file")
+    parser.add_argument("--output", required=True, type=Path, help="YAML output file")
     parser.add_argument(
         "--dataset-name", required=True, help="Dataset identifier (SafeIdentifier)"
-    )
-    parser.add_argument(
-        "--srid", type=int, default=4326, help="Geometry SRID (default: 4326)"
-    )
-    parser.add_argument(
-        "--has-z",
-        type=bool,
-        default=True,
-        help="Geometries has z coordinates (default True)",
     )
     args = parser.parse_args()
 
     data = json.loads(args.uml.read_text(encoding="utf-8"))
-    domain = json.loads(args.domain.read_text(encoding="utf-8"))
-    yaml_str = convert_qms(
-        data, domain, args.dataset_name, srid=args.srid, has_z=args.has_z
+    domain = (
+        yaml.safe_load(args.domain.read_text(encoding="utf-8"))
+        if args.domain is not None
+        else None
     )
+    yaml_str = convert_qms(data, domain, args.dataset_name)
     args.output.write_text(yaml_str, encoding="utf-8")
     sys.stderr.write(f"Written: {args.output}\n")
 
