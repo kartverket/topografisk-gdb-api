@@ -12,18 +12,26 @@ from geocomponents.convert import _safe_id, convert_qms
 from geocomponents.descriptions.loader import resolve_dataset
 from geocomponents.descriptions.models import Commons, DatasetDef
 
-QMS_FILE = Path(__file__).resolve().parents[0] / "testdata" / "FKBBane_50_qms.json"
-DOMAIN_FILE = Path(__file__).resolve().parents[0] / "testdata" / "domene-fkb-bane.yaml"
+QMS_BANE_FILE = Path(__file__).resolve().parents[0] / "testdata" / "FKBBane_50_qms.json"
+DOMAIN_BANE_FILE = (
+    Path(__file__).resolve().parents[0] / "testdata" / "domene-fkb-bane.yaml"
+)
+
+QMS_TEST_FILE = Path(__file__).resolve().parents[0] / "testdata" / "uml-gm.json"
+DOMAIN_TEST_FILE = Path(__file__).resolve().parents[0] / "testdata" / "domene.yaml"
+EXPECTED_OUTPUT_FILE = (
+    Path(__file__).resolve().parents[0] / "expected" / "forventet.yaml"
+)
 
 
 @pytest.fixture(scope="module")
 def qms_data():
-    return json.loads(QMS_FILE.read_text(encoding="utf-8"))
+    return json.loads(QMS_BANE_FILE.read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="module")
 def domain_data():
-    return yaml.safe_load(DOMAIN_FILE.read_text(encoding="utf-8"))
+    return yaml.safe_load(DOMAIN_BANE_FILE.read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="module")
@@ -149,6 +157,9 @@ def test_convert_output_validates_as_geocomponents_dataset(qms_data):
 # --------------------------------------------------------------------------
 
 
-def test_convert_with_domain(qms_data, domain_data):
-    yaml_str = convert_qms(qms_data, domain_data, "fkb_bane")
-    assert yaml_str is not None
+def test_convert_with_domain():
+    uml = json.loads(QMS_TEST_FILE.read_text(encoding="utf-8"))
+    domain = yaml.safe_load(DOMAIN_TEST_FILE.read_text(encoding="utf-8"))
+    yaml_str = convert_qms(uml, domain, "eksempeldatasett")
+    expected = yaml.safe_load(EXPECTED_OUTPUT_FILE.read_text(encoding="utf-8"))
+    assert yaml.safe_load(yaml_str) == expected
