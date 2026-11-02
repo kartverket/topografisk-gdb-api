@@ -16,10 +16,13 @@ QMS_BANE_FILE = Path(__file__).resolve().parents[0] / "testdata" / "FKBBane_50_q
 DOMAIN_BANE_FILE = (
     Path(__file__).resolve().parents[0] / "testdata" / "domene-fkb-bane.yaml"
 )
+EXPECTED_BANE_OUTPUT_FILE = (
+    Path(__file__).resolve().parents[0] / "expected" / "fkb_bane.yaml"
+)
 
 QMS_TEST_FILE = Path(__file__).resolve().parents[0] / "testdata" / "uml-gm.json"
 DOMAIN_TEST_FILE = Path(__file__).resolve().parents[0] / "testdata" / "domene.yaml"
-EXPECTED_OUTPUT_FILE = (
+EXPECTED_TEST_OUTPUT_FILE = (
     Path(__file__).resolve().parents[0] / "expected" / "forventet.yaml"
 )
 
@@ -153,13 +156,21 @@ def test_convert_output_validates_as_geocomponents_dataset(qms_data):
 
 
 # --------------------------------------------------------------------------
-#
+# Test converter with dedicated domain file
 # --------------------------------------------------------------------------
 
 
-def test_convert_with_domain():
+def test_convert_with_simple_domain_data():
     uml = json.loads(QMS_TEST_FILE.read_text(encoding="utf-8"))
     domain = yaml.safe_load(DOMAIN_TEST_FILE.read_text(encoding="utf-8"))
     yaml_str = convert_qms(uml, domain, "eksempeldatasett")
-    expected = yaml.safe_load(EXPECTED_OUTPUT_FILE.read_text(encoding="utf-8"))
+    expected = yaml.safe_load(EXPECTED_TEST_OUTPUT_FILE.read_text(encoding="utf-8"))
+    assert yaml.safe_load(yaml_str) == expected
+
+
+def test_convert_with_bane_domain_data():
+    uml = json.loads(QMS_BANE_FILE.read_text(encoding="utf-8"))
+    domain = yaml.safe_load(DOMAIN_BANE_FILE.read_text(encoding="utf-8"))
+    yaml_str = convert_qms(uml, domain, "fkb_bane")
+    expected = yaml.safe_load(EXPECTED_BANE_OUTPUT_FILE.read_text(encoding="utf-8"))
     assert yaml.safe_load(yaml_str) == expected
