@@ -57,7 +57,7 @@ _QMS_SCALAR_TYPES: dict[str, str] = {
     "Number": "number",
 }
 
-_GM_TO_GEOCOMPONENTS: dict[str, str] = {
+_SOSI_TO_WKT: dict[str, str] = {
     "GM_Curve": "MultiLineString",
     "GM_Point": "MultiPoint",
     "GM_Surface": "MultiPolygon",
@@ -138,8 +138,10 @@ def _convert_feature_type(
     description = ft.get("Description", "")
 
     geo_types = ft.get("GeometryTypes", [])
-    gm_type = geo_types[0]["Type"] if geo_types else "GM_Curve"
-    geom_type = _GM_TO_GEOCOMPONENTS.get(gm_type, "LineString")
+    if not geo_types:
+        raise Exception("No geometry type specified for feature type")
+    geo_type_sosi = geo_types[0]["Type"]
+    geo_type = _SOSI_TO_WKT.get(geo_type_sosi)
 
     fields: list[dict] = []
     outward_identifier: str | None = None
@@ -178,7 +180,7 @@ def _convert_feature_type(
         "name": coll_name,
         "title": ft["Name"],
         "description": description,
-        "geometry": {"type": geom_type, "srid": srid, "has_z": has_z},
+        "geometry": {"type": geo_type, "srid": srid, "has_z": has_z},
     }
     if outward_identifier:
         coll["outward_identifier"] = outward_identifier
