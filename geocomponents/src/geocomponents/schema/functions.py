@@ -562,7 +562,7 @@ $disp$""",
         _comment_statement(
             "transaction(text, jsonb)",
             'Apply an atomic transaction document of the form {"semantic": "atomic", "transaction": [...]} where action is the closed set insert | update | replace | delete. '
-            "Returns a report whose shape is documented in geocomponents/README.md. "
+            "Returns a report whose shape is documented in geocomponents/docs/reference/transactions.md. "
             "For a data problem it rolls back to a savepoint and returns committed:false carrying the rejected item or document-level reason; it does not raise. "
             "Client-supplied feature ids are honored on insert here; ogc.feature_create strips them. "
             "Raises only for an unknown dataset, or a class-42 error from an undefined function, table, or column, which signals a broken deployment rather than bad input. "
