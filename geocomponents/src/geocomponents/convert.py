@@ -1,5 +1,4 @@
-"""Convert a QMS (SOSI Quality Metadata Schema) JSON file to a geocomponents
-dataset description YAML.
+"""Convert a QMS JSON file to a geocomponents dataset description YAML.
 
 An optional domain YAML supplies SRID, Z coordinates, outward identifiers, and
 server-managed fields. These are not inferred from QMS attribute type names.
