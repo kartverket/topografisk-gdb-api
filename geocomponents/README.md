@@ -17,6 +17,44 @@ You write a **description** (YAML) → run geocomponents → for each dataset yo
 The description is the single source of truth: the database and the API are both
 generated from it.
 
+## Generate a description from QMS
+
+The QMS converter can generate a dataset description from a QMS JSON schema.
+From the `geocomponents` directory, for example:
+
+```sh
+uv run python -m geocomponents.convert \
+  --uml ../UML-schemas/FKBBane_50_qms.json \
+  --domain ../UML-schemas/domene-fkb-bane.yaml \
+  --output ../descriptions/fkb_bane.yaml \
+  --dataset-name fkb_bane
+```
+
+`--uml`, `--output`, and `--dataset-name` are required. The output file is
+written as YAML (and overwritten if it exists). `--domain` is optional; it
+supplies conversion settings not inferred from QMS type names. For example:
+
+```yaml
+general:
+  srid: 5973
+  has_z: true
+  outward_identifier: identifikasjon.lokalid
+  server_managed:
+    identifikasjon.versjonid: timestamp_iso
+    oppdateringsdato: timestamp_iso
+collections:
+  spormidt:
+    outward_identifier: identifikasjon.lokalid
+```
+
+`general` applies to all collections. For `outward_identifier` and
+`server_managed`, a matching entry under `collections` takes precedence over
+the general value; a collection-level `server_managed` map **replaces** the
+general map rather than merging with it. Collection keys must match the
+generated, normalized collection names (lowercase, with Norwegian characters
+transliterated). `srid` and `has_z` are read from `general` only. If `--domain`
+is omitted, geometries use SRID 4326 and `has_z: false`.
+
 ## Describing a dataset
 
 A description is a **folder of YAML files**. Each file is one *dataset*; an

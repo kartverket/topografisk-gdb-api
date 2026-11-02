@@ -1,11 +1,11 @@
 """Convert a QMS (SOSI Quality Metadata Schema) JSON file to a geocomponents
 dataset description YAML.
 
-Tested against FKB-format QMS files (FKB-Bane 5.0). FKB-specific conventions:
-- Struct with DAT TypeName "Identifikasjon" → outward_identifier + server_managed versjonId.
-- Field with DAT TypeName "oppdateringsdato" → server_managed timestamp_iso.
-- Geometry GM_Curve → LineString.
-- Norwegian characters in identifiers are transliterated (ø→o, æ→ae, å→a).
+An optional domain YAML supplies SRID, Z coordinates, outward identifiers, and
+server-managed fields. These are not inferred from QMS attribute type names.
+Without a domain file, geometry defaults to SRID 4326 without Z coordinates.
+GM_Curve maps to MultiLineString. Norwegian characters in identifiers are
+transliterated (ø→o, æ→e, å→a).
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ import yaml
 # Identifier normalisation
 # ---------------------------------------------------------------------------
 _TRANSLIT = str.maketrans(
-    "øæåØÆÅéèêëàáâäíìîïóòôöúùûü",
-    "oaeOAEeeeeaaaaiiiioooouuuu",
+    "øæåØÆÅ",
+    "oeaOEA",
 )
 
 
@@ -222,7 +222,7 @@ def convert_qms(data: dict, domain: dict | None, dataset_name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# CLI entry point  (python -m geocomponents.convert or via typer in cli.py)
+# CLI entry point (python -m geocomponents.convert)
 # ---------------------------------------------------------------------------
 def _cli_main() -> None:  # pragma: no cover
     import argparse
