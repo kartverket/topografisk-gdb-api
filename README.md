@@ -23,8 +23,7 @@ System overview (Mermaid): [`ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 - [`descriptions/`](descriptions/) — shared dataset YAML declarations used by
   geocomponents and available for reuse by sibling projects.
 - [`geocomponents/`](geocomponents/) — the engine. Start with its
-  [README](geocomponents/README.md) for describing datasets and running
-  locally; see [DEPLOY.md](geocomponents/DEPLOY.md) for deployment.
+  [creating your first dataset](geocomponents/docs/tutorials/first-dataset.md) for learning how you can describe a dataset locally; see [Deploying geocomponents to SKIP](geocomponents/docs/how-to-guides/deploy.md) for deployment.
 - [`gcapi/`](gcapi/) — the canonical FastAPI edge service exposing one public
   OGC API over `geocomponents` and `gcjobs`.
 - [`gccore/`](gccore/) — a FastAPI service with Alembic-managed tables in the
