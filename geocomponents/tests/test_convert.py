@@ -26,6 +26,10 @@ EXPECTED_TEST_OUTPUT_FILE = (
     Path(__file__).resolve().parents[0] / "expected" / "forventet.yaml"
 )
 
+MALFORMED_DOMAIN_FILE = (
+    Path(__file__).resolve().parents[0] / "testdata" / "malformed-domain.yaml"
+)
+
 
 @pytest.fixture(scope="module")
 def qms_data():
@@ -156,7 +160,7 @@ def test_convert_output_validates_as_geocomponents_dataset(qms_data):
 
 
 # --------------------------------------------------------------------------
-# Test converter with dedicated domain file
+# Conversion with dedicated domain file
 # --------------------------------------------------------------------------
 
 
@@ -174,3 +178,15 @@ def test_convert_with_bane_domain_data():
     yaml_str = convert_qms(uml, domain, "fkb_bane")
     expected = yaml.safe_load(EXPECTED_BANE_OUTPUT_FILE.read_text(encoding="utf-8"))
     assert yaml.safe_load(yaml_str) == expected
+
+
+# --------------------------------------------------------------------------
+# Malformed domain file
+# --------------------------------------------------------------------------
+
+
+def test_convert_with_malformed_domain_data():
+    uml = json.loads(QMS_TEST_FILE.read_text(encoding="utf-8"))
+    domain = yaml.safe_load(MALFORMED_DOMAIN_FILE.read_text(encoding="utf-8"))
+    with pytest.raises(Exception) as _e:
+        convert_qms(uml, domain, "eksempeldatasett")
