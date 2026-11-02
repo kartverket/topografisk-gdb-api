@@ -129,7 +129,7 @@ def _convert_attr(
 
 def _convert_feature_type(
     ft: dict,
-    domain: dict | None,
+    domain: dict,
     dat_by_uuid: dict[str, dict],
     codelists: dict[str, dict],
 ) -> dict:
@@ -137,39 +137,37 @@ def _convert_feature_type(
     coll_name = _safe_id(ft["Name"])
     description = ft.get("Description", "")
 
-    geo_types = ft.get("GeometryTypes", [])
+    geo_types = ft.get("GeometryTypes")
     if not geo_types:
         raise Exception("No geometry type specified for feature type")
     geo_type_sosi = geo_types[0]["Type"]
     geo_type = _SOSI_TO_WKT.get(geo_type_sosi)
 
     fields: list[dict] = []
-    outward_identifier: str | None = None
-    if domain is not None:
-        outward_identifier = (
-            domain.get("collections", {}).get(coll_name, {}).get("outward_identifier")
-            if domain.get("collections", {})
-            .get(coll_name, {})
-            .get("outward_identifier")
-            is not None
-            else domain.get("general").get("outward_identifier")
-            if domain.get("general").get("outward_identifier") is not None
-            else None
-        )
+    outward_identifier: str | None = (
+        domain.get("collections", {}).get(coll_name, {}).get("outward_identifier")
+        if domain.get("collections", {}).get(coll_name, {}).get("outward_identifier")
+        is not None
+        else domain.get("general").get("outward_identifier")
+        if domain.get("general").get("outward_identifier") is not None
+        else None
+    )
 
-    server_managed: dict[str, str] = {}
-    if domain is not None:
-        server_managed = (
-            domain.get("collections", {}).get(coll_name, {}).get("server_managed", {})
-            if domain.get("collections", {}).get(coll_name, {}).get("server_managed")
-            is not None
-            else domain.get("general").get("server_managed", {})
-            if domain.get("general").get("server_managed") is not None
-            else {}
-        )
+    server_managed: dict[str, str] = (
+        domain.get("collections", {}).get(coll_name, {}).get("server_managed", {})
+        if domain.get("collections", {}).get(coll_name, {}).get("server_managed")
+        is not None
+        else domain.get("general").get("server_managed", {})
+        if domain.get("general").get("server_managed") is not None
+        else {}
+    )
 
-    srid: int = domain.get("general", {}).get("srid", 4326) if domain else 4326
-    has_z: bool = domain.get("general", {}).get("has_z", False) if domain else False
+    srid: int = domain.get("general", {}).get("srid")
+    if srid is None:
+        raise Exception("SRID must be specified in the domain file")
+    has_z: bool = domain.get("general", {}).get("has_z")
+    if has_z is None:
+        raise Exception("has_z must be specified in the domain file")
 
     for attr in ft.get("AttributeTypes", []):
         fld = _convert_attr(attr, dat_by_uuid, codelists)
@@ -193,7 +191,7 @@ def _convert_feature_type(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-def convert_qms(data: dict, domain: dict | None, dataset_name: str) -> str:
+def convert_qms(data: dict, domain: dict, dataset_name: str) -> str:
     """Convert a QMS schema dict to a geocomponents dataset YAML string."""
     dat_by_uuid = _build_dat_lookup(data)
     codelists: dict[str, dict] = {}
@@ -234,7 +232,9 @@ def _cli_main() -> None:  # pragma: no cover
         description="Convert a QMS JSON schema to a geocomponents dataset YAML."
     )
     parser.add_argument("--uml", required=True, type=Path, help="QMS JSON input file")
-    parser.add_argument("--domain", type=Path, help="Domain YAML input file")
+    parser.add_argument(
+        "--domain", required=True, type=Path, help="Domain YAML input file"
+    )
     parser.add_argument("--output", required=True, type=Path, help="YAML output file")
     parser.add_argument(
         "--dataset-name", required=True, help="Dataset identifier (SafeIdentifier)"
@@ -242,11 +242,7 @@ def _cli_main() -> None:  # pragma: no cover
     args = parser.parse_args()
 
     data = json.loads(args.uml.read_text(encoding="utf-8"))
-    domain = (
-        yaml.safe_load(args.domain.read_text(encoding="utf-8"))
-        if args.domain is not None
-        else None
-    )
+    domain = yaml.safe_load(args.domain.read_text(encoding="utf-8"))
     yaml_str = convert_qms(data, domain, args.dataset_name)
     args.output.write_text(yaml_str, encoding="utf-8")
     sys.stderr.write(f"Written: {args.output}\n")

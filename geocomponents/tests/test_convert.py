@@ -149,11 +149,11 @@ def test_shared_codelist_not_duplicated(converted):
 # --------------------------------------------------------------------------
 
 
-def test_convert_output_validates_as_geocomponents_dataset(qms_data):
+def test_convert_output_validates_as_geocomponents_dataset(qms_data, domain_data):
     """Pre-code suspect (integration): the YAML must parse and resolve without
     error through the full description pipeline."""
 
-    yaml_str = convert_qms(qms_data, None, "fkb_bane")
+    yaml_str = convert_qms(qms_data, domain_data, "fkb_bane")
     dataset = DatasetDef.model_validate(yaml.safe_load(yaml_str))
     resolved = resolve_dataset(dataset, Commons())
     assert len(resolved.collections) == 2
