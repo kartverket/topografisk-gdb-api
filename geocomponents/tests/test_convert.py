@@ -29,6 +29,17 @@ EXPECTED_TEST_OUTPUT_FILE = (
 MALFORMED_DOMAIN_FILE = (
     Path(__file__).resolve().parents[0] / "testdata" / "malformed-domain.yaml"
 )
+DOMAIN_MISSING_RSID_FILE = (
+    Path(__file__).resolve().parents[0] / "testdata" / "domain-missing-rsid.yaml"
+)
+DOMAIN_MISSING_HAS_Z_FILE = (
+    Path(__file__).resolve().parents[0] / "testdata" / "domain-missing-has_z.yaml"
+)
+DOMAIN_DUPLICATE_IDENTIFIER_FILE = (
+    Path(__file__).resolve().parents[0]
+    / "testdata"
+    / "domain-duplicate-identifier.yaml"
+)
 
 
 @pytest.fixture(scope="module")
@@ -190,3 +201,32 @@ def test_convert_with_malformed_domain_data():
     domain = yaml.safe_load(MALFORMED_DOMAIN_FILE.read_text(encoding="utf-8"))
     with pytest.raises(Exception) as _e:
         convert_qms(uml, domain, "eksempeldatasett")
+    assert "General section must be specified in the domain file" in str(_e.value)
+
+
+def test_convert_with_duplicate_identifier_domain_data():
+    uml = json.loads(QMS_TEST_FILE.read_text(encoding="utf-8"))
+    domain = yaml.safe_load(
+        DOMAIN_DUPLICATE_IDENTIFIER_FILE.read_text(encoding="utf-8")
+    )
+    with pytest.raises(Exception) as _e:
+        convert_qms(uml, domain, "eksempeldatasett")
+    assert "outward_identifier is defined in both general and collections" in str(
+        _e.value
+    )
+
+
+def test_convert_with_missing_rsid_domain_data():
+    uml = json.loads(QMS_TEST_FILE.read_text(encoding="utf-8"))
+    domain = yaml.safe_load(DOMAIN_MISSING_RSID_FILE.read_text(encoding="utf-8"))
+    with pytest.raises(Exception) as _e:
+        convert_qms(uml, domain, "eksempeldatasett")
+    assert "SRID must be specified in the domain file" in str(_e.value)
+
+
+def test_convert_with_missing_has_z_domain_data():
+    uml = json.loads(QMS_TEST_FILE.read_text(encoding="utf-8"))
+    domain = yaml.safe_load(DOMAIN_MISSING_HAS_Z_FILE.read_text(encoding="utf-8"))
+    with pytest.raises(Exception) as _e:
+        convert_qms(uml, domain, "eksempeldatasett")
+    assert "has_z must be specified in the domain file" in str(_e.value)

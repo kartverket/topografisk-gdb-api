@@ -143,24 +143,21 @@ def _convert_feature_type(
     geo_type_sosi = geo_types[0]["Type"]
     geo_type = _SOSI_TO_WKT.get(geo_type_sosi)
 
-    fields: list[dict] = []
-    outward_identifier: str | None = (
-        domain.get("collections", {}).get(coll_name, {}).get("outward_identifier")
-        if domain.get("collections", {}).get(coll_name, {}).get("outward_identifier")
-        is not None
-        else domain.get("general").get("outward_identifier")
-        if domain.get("general").get("outward_identifier") is not None
-        else None
-    )
+    if not domain.get("general"):
+        raise Exception("General section must be specified in the domain file")
+    general = domain.get("general", {})
+    collection = domain.get("collections", {}).get(coll_name, {})
 
-    server_managed: dict[str, str] = (
-        domain.get("collections", {}).get(coll_name, {}).get("server_managed", {})
-        if domain.get("collections", {}).get(coll_name, {}).get("server_managed")
-        is not None
-        else domain.get("general").get("server_managed", {})
-        if domain.get("general").get("server_managed") is not None
-        else {}
+    for key in ("outward_identifier", "server_managed"):
+        if key in general and key in collection:
+            raise ValueError(
+                f"{key} is defined in both general and collections.{coll_name}"
+            )
+
+    outward_identifier = collection.get(
+        "outward_identifier", general.get("outward_identifier")
     )
+    server_managed = collection.get("server_managed", general.get("server_managed", {}))
 
     srid: int = domain.get("general", {}).get("srid")
     if srid is None:
@@ -169,6 +166,7 @@ def _convert_feature_type(
     if has_z is None:
         raise Exception("has_z must be specified in the domain file")
 
+    fields: list[dict] = []
     for attr in ft.get("AttributeTypes", []):
         fld = _convert_attr(attr, dat_by_uuid, codelists)
         if fld:
