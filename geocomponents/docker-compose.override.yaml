@@ -33,7 +33,7 @@ services:
       DB_USER: geocomponents
       DB_PASSWORD: geocomponents
       GEOCOMPONENTS_DESCRIPTIONS: /app/descriptions
-      GEOCOMPONENTS_BASE_URL: http://localhost:8004
+      GEOCOMPONENTS_BASE_URL: ${GEOCOMPONENTS_BASE_URL:-http://localhost:8004}
     volumes:
       - ./src:/app/src:ro
       - type: bind
