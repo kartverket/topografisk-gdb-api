@@ -1,10 +1,9 @@
-"""Convert a QMS JSON file to a geocomponents dataset description YAML.
+"""Convert a QMS JSON file and a domain YAML file to a geocomponents dataset
+description YAML.
 
-An optional domain YAML supplies SRID, Z coordinates, outward identifiers, and
-server-managed fields. These are not inferred from QMS attribute type names.
-Without a domain file, geometry defaults to SRID 4326 without Z coordinates.
-GM_Curve maps to MultiLineString. Norwegian characters in identifiers are
-transliterated (ø→o, æ→e, å→a).
+The domain YAML file supplies SRID, Z coordinates, outward identifiers, and
+server-managed fields. Norwegian characters in identifiers are transliterated
+(ø→o, æ→e, å→a).
 """
 
 from __future__ import annotations
