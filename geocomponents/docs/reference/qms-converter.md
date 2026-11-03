@@ -3,7 +3,10 @@
 `geocomponents.convert` converts a QMS JSON schema into a geocomponents dataset
 description in YAML. The converter reads feature types, attribute types, and
 code lists from the QMS schema. Geometry settings and collection-specific
-identifier settings come from a separate domain YAML document.
+identifier settings come from a separate domain YAML document. Note that the
+use of the JSON schemas is a temporary measure, the format of the UML input file
+will be changed later. The important takeaway from this reference is the
+structure of the domain file.
 
 ## Python API
 
@@ -13,8 +16,7 @@ convert_qms(data: dict, domain: dict, dataset_name: str) -> str
 
 `data` is the parsed QMS JSON object, `domain` is the parsed domain YAML
 document, and `dataset_name` is the dataset identifier used in the output.
-The return value is a YAML string. Both `domain` and its `general` section are
-required.
+The return value is a YAML string.
 
 ## Command-line interface
 
@@ -29,26 +31,24 @@ python -m geocomponents.convert \
 ```
 
 All four options are required. The CLI reads JSON and YAML as UTF-8, writes the
-generated YAML as UTF-8, and reports the output path on standard error.
+generated YAML as UTF-8, and returns the output path of the generated file.
 
 ## Domain document
 
-The `general` mapping must define `srid` and `has_z`. It may also define
-`outward_identifier` and `server_managed`; these values apply to each
-collection unless overridden in that collection's entry under `collections`.
-For example:
+The `general` mapping must define `srid` and `has_z`. `outward_identifier`
+and `server_managed` can be defined for either the entire dataset under
+`general` or for each specific collection. The following is an example of
+a domain file:
 
 ```yaml
 general:
   srid: 5973
   has_z: true
-  outward_identifier: identifikasjon.lokalid
   server_managed:
     identifikasjon.versjonid: timestamp_iso
 collections:
   spormidt:
-    server_managed:
-      oppdateringsdato: timestamp_iso
+    outward_identifier: identifikasjon.lokalid
 ```
 
 Collection keys are normalized collection names. A collection-level
@@ -57,24 +57,7 @@ same key in `general`; doing so raises `ValueError`.
 
 ## Output structure
 
-The output dataset contains `name`, `title`, `description`, `collections`, and
-`codelists`.
-
-- `name` is the supplied `dataset_name`.
-- `title` is `Objektkatalog.ObjektkatalogFullstendigNavn`, or
-  `dataset_name` when that value is empty or absent.
-- `description` is the title followed by `Objektkatalog.Versjon` when a version
-  is present; otherwise it is the title.
-- Each QMS feature type becomes one collection. The collection `title` and
-  `description` are copied from the feature type, with an empty description
-  when absent. Its geometry includes `type`, `srid`, and `has_z`.
-- `outward_identifier` and `server_managed` are included when configured and
-  non-empty.
-- `fields` contains the converted attributes. `required: true` is included
-  when the QMS attribute's `MultiplicityMin` is at least 1.
-
-The YAML preserves Unicode, retains insertion order, and does not emit YAML
-aliases.
+The structure of the generated YAML file is documented in [Dataset descriptions](./dataset-descriptions.md).
 
 ## Identifier normalization
 
@@ -89,27 +72,6 @@ Collection, field, and codelist names are normalized as follows:
 
 Collection titles and descriptions retain their original QMS values.
 The dataset name is emitted exactly as supplied.
-
-## Attribute mappings
-
-| QMS attribute type | Output |
-| --- | --- |
-| `String`, `URI` | `type: string` |
-| `Integer` | `type: integer` |
-| `DateTime` | `type: timestamp` |
-| `Date` | `type: date` |
-| `Boolean` | `type: boolean` |
-| `Real`, `Number` | `type: number` |
-| `Struct` | `type: object` with recursively converted `fields` |
-| `CodeList` with a matching default attribute type and non-empty code list | `codelist` reference and a dataset-level code list |
-| `CodeList` without a matching non-empty code list | `type: string` |
-| Any other type | Omitted |
-
-For code lists, the matching entry in `DefaultAttributeTypes` is found by
-attribute UUID. Its `TypeName` supplies the normalized code-list name, and its
-`CodeList` values become `values` entries containing `code`. Repeated
-references to the same normalized name produce one dataset-level code list;
-the first discovered definition is retained.
 
 ## Geometry mappings
 
