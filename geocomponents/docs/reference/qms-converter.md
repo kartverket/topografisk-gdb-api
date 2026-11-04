@@ -8,16 +8,6 @@ use of the JSON schemas is a temporary measure, the format of the UML input file
 will be changed later. The important takeaway from this reference is the
 structure of the domain file.
 
-## Python API
-
-```python
-convert_qms(data: dict, domain: dict, dataset_name: str) -> str
-```
-
-`data` is the parsed QMS JSON object, `domain` is the parsed domain YAML
-document, and `dataset_name` is the dataset identifier used in the output.
-The return value is a YAML string.
-
 ## Command-line interface
 
 The module can be run with `python -m geocomponents.convert`:
@@ -35,25 +25,7 @@ generated YAML as UTF-8, and returns the output path of the generated file.
 
 ## Domain document
 
-The `general` mapping must define `srid` and `has_z`. `outward_identifier`
-and `server_managed` can be defined for either the entire dataset under
-`general` or for each specific collection. The following is an example of
-a domain file:
-
-```yaml
-general:
-  srid: 5973
-  has_z: true
-  server_managed:
-    identifikasjon.versjonid: timestamp_iso
-collections:
-  spormidt:
-    outward_identifier: identifikasjon.lokalid
-```
-
-Collection keys are normalized collection names. A collection-level
-`outward_identifier` or `server_managed` cannot be specified alongside the
-same key in `general`; doing so raises `ValueError`.
+The domain document is documented in [Domain document](./domain-document.md).
 
 ## Output structure
 
@@ -61,17 +33,7 @@ The structure of the generated YAML file is documented in [Dataset descriptions]
 
 ## Identifier normalization
 
-Collection, field, and codelist names are normalized as follows:
-
-1. Norwegian `ø`, `æ`, and `å` (uppercase or lowercase) are transliterated to
-   `o`, `e`, and `a`.
-2. The result is lowercased; characters outside `a`–`z`, `0`–`9`, and `_` are
-   replaced with `_`.
-3. Leading digits and underscores are removed. An empty result becomes `x`.
-4. The result is truncated to 40 characters.
-
-Collection titles and descriptions retain their original QMS values.
-The dataset name is emitted exactly as supplied.
+Collection, field, and codelist names are normalized to follow [dataset and collection names](./dataset-and-collection-names.md)
 
 ## Geometry mappings
 
