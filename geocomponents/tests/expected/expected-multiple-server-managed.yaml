@@ -11,12 +11,16 @@ collections:
     has_z: true
   outward_identifier: identifikasjon
   server_managed:
+    versjon: timestamp_iso
     oppdatert: timestamp_iso
   fields:
   - name: identifikasjon
     type: string
     required: true
   - name: oppdatert
+    type: timestamp
+    required: true
+  - name: versjon
     type: timestamp
     required: true
   - name: status
@@ -37,9 +41,14 @@ collections:
     type: MultiPoint
     srid: 25833
     has_z: true
+  server_managed:
+    oppdatert: timestamp_iso
   fields:
   - name: navn
     type: string
+    required: true
+  - name: oppdatert
+    type: timestamp
     required: true
 - name: flateobjekt
   title: Flateobjekt
@@ -48,9 +57,14 @@ collections:
     type: MultiPolygon
     srid: 25833
     has_z: true
+  server_managed:
+    oppdatert: timestamp_iso
   fields:
   - name: areal
     type: number
+  - name: oppdatert
+    type: timestamp
+    required: true
 codelists:
 - name: statuskode
   values:

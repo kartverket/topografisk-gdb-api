@@ -22,6 +22,7 @@
       "AttributeTypes": [
         { "Name": "identifikasjon", "Type": "String", "MultiplicityMin": 1 },
         { "Name": "oppdatert", "Type": "DateTime", "MultiplicityMin": 1 },
+        { "Name": "versjon", "Type": "DateTime", "MultiplicityMin": 1 },
         { "Name": "status", "Type": "CodeList", "UUID": "status-koder", "MultiplicityMin": 1 },
         {
           "Name": "detaljer",
@@ -39,7 +40,8 @@
       "Description": "Eksempel med punktgeometri.",
       "GeometryTypes": [{ "Name": "geometri", "Type": "GM_Point" }],
       "AttributeTypes": [
-        { "Name": "navn", "Type": "String", "MultiplicityMin": 1 }
+        { "Name": "navn", "Type": "String", "MultiplicityMin": 1 },
+        { "Name": "oppdatert", "Type": "DateTime", "MultiplicityMin": 1 }
       ]
     },
     {
@@ -47,7 +49,8 @@
       "Description": "Eksempel med flategeometri.",
       "GeometryTypes": [{ "Name": "geometri", "Type": "GM_Surface" }],
       "AttributeTypes": [
-        { "Name": "areal", "Type": "Real", "MultiplicityMin": 0 }
+        { "Name": "areal", "Type": "Real", "MultiplicityMin": 0 },
+        { "Name": "oppdatert", "Type": "DateTime", "MultiplicityMin": 1 }
       ]
     }
   ]
