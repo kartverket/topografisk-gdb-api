@@ -12,19 +12,67 @@ from geocomponents.convert import _safe_id, convert_qms
 from geocomponents.descriptions.loader import resolve_dataset
 from geocomponents.descriptions.models import Commons, DatasetDef
 
-QMS_FILE = Path(__file__).resolve().parents[2] / "UML-schemas" / "FKBBane_50_qms.json"
+QMS_BANE_FILE = Path(__file__).resolve().parents[0] / "testdata" / "FKBBane_50_qms.json"
+DOMAIN_BANE_FILE = (
+    Path(__file__).resolve().parents[0] / "testdata" / "domene-fkb-bane.yaml"
+)
+EXPECTED_BANE_OUTPUT_FILE = (
+    Path(__file__).resolve().parents[0] / "expected" / "fkb_bane.yaml"
+)
+
+QMS_TEST_FILE = Path(__file__).resolve().parents[0] / "testdata" / "uml-gm.json"
+
+MALFORMED_DOMAIN_FILE = (
+    Path(__file__).resolve().parents[0] / "testdata" / "malformed-domain.yaml"
+)
+DOMAIN_MISSING_RSID_FILE = (
+    Path(__file__).resolve().parents[0] / "testdata" / "domain-missing-srid.yaml"
+)
+DOMAIN_MISSING_HAS_Z_FILE = (
+    Path(__file__).resolve().parents[0] / "testdata" / "domain-missing-has_z.yaml"
+)
+DOMAIN_DUPLICATE_IDENTIFIER_FILE = (
+    Path(__file__).resolve().parents[0]
+    / "testdata"
+    / "domain-duplicate-identifier.yaml"
+)
+DOMAIN_DUPLICATE_SERVER_MANAGED_FILE = (
+    Path(__file__).resolve().parents[0]
+    / "testdata"
+    / "domain-duplicate-server-managed.yaml"
+)
+DOMAIN_MULTIPLE_SERVER_MANAGED_FILE = (
+    Path(__file__).resolve().parents[0]
+    / "testdata"
+    / "domain-multiple-server-managed.yaml"
+)
+DOMAIN_NONEXISTENT_SERVER_MANAGED_FILE = (
+    Path(__file__).resolve().parents[0]
+    / "testdata"
+    / "domain-nonexistent-server-managed.yaml"
+)
+EXPECTED_MULTIPLE_SERVER_MANAGED_OUTPUT_FILE = (
+    Path(__file__).resolve().parents[0]
+    / "expected"
+    / "expected-multiple-server-managed.yaml"
+)
 
 
 @pytest.fixture(scope="module")
 def qms_data():
-    return json.loads(QMS_FILE.read_text(encoding="utf-8"))
+    return json.loads(QMS_BANE_FILE.read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="module")
-def converted(qms_data):
+def domain_data():
+    return yaml.safe_load(DOMAIN_BANE_FILE.read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="module")
+def converted(qms_data, domain_data):
     from geocomponents.convert import convert_qms
 
-    return yaml.safe_load(convert_qms(qms_data, "fkb_bane", 4326, True))
+    return yaml.safe_load(convert_qms(qms_data, domain_data, "fkb_bane"))
 
 
 # --------------------------------------------------------------------------
@@ -128,11 +176,103 @@ def test_shared_codelist_not_duplicated(converted):
 # --------------------------------------------------------------------------
 
 
-def test_convert_output_validates_as_geocomponents_dataset(qms_data):
+def test_convert_output_validates_as_geocomponents_dataset(qms_data, domain_data):
     """Pre-code suspect (integration): the YAML must parse and resolve without
     error through the full description pipeline."""
 
-    yaml_str = convert_qms(qms_data, "fkb_bane", 4326, True)
+    yaml_str = convert_qms(qms_data, domain_data, "fkb_bane")
     dataset = DatasetDef.model_validate(yaml.safe_load(yaml_str))
     resolved = resolve_dataset(dataset, Commons())
     assert len(resolved.collections) == 2
+
+
+# --------------------------------------------------------------------------
+# Conversion with dedicated domain file
+# --------------------------------------------------------------------------
+
+
+def test_convert_with_bane_domain_data():
+    uml = json.loads(QMS_BANE_FILE.read_text(encoding="utf-8"))
+    domain = yaml.safe_load(DOMAIN_BANE_FILE.read_text(encoding="utf-8"))
+    yaml_str = convert_qms(uml, domain, "fkb_bane")
+    expected = yaml.safe_load(EXPECTED_BANE_OUTPUT_FILE.read_text(encoding="utf-8"))
+    assert yaml.safe_load(yaml_str) == expected
+
+
+def test_convert_with_multiple_server_managed_domain_data():
+    uml = json.loads(QMS_TEST_FILE.read_text(encoding="utf-8"))
+    domain = yaml.safe_load(
+        DOMAIN_MULTIPLE_SERVER_MANAGED_FILE.read_text(encoding="utf-8")
+    )
+    yaml_str = convert_qms(uml, domain, "eksempeldatasett")
+    expected = yaml.safe_load(
+        EXPECTED_MULTIPLE_SERVER_MANAGED_OUTPUT_FILE.read_text(encoding="utf-8")
+    )
+    assert yaml.safe_load(yaml_str) == expected
+
+
+# --------------------------------------------------------------------------
+# Malformed domain file
+# --------------------------------------------------------------------------
+
+
+def test_convert_with_malformed_domain_data():
+    uml = json.loads(QMS_TEST_FILE.read_text(encoding="utf-8"))
+    domain = yaml.safe_load(MALFORMED_DOMAIN_FILE.read_text(encoding="utf-8"))
+    with pytest.raises(Exception) as _e:
+        convert_qms(uml, domain, "eksempeldatasett")
+    assert "General section must be specified in the domain file" in str(_e.value)
+
+
+def test_convert_with_duplicate_identifier_domain_data():
+    uml = json.loads(QMS_TEST_FILE.read_text(encoding="utf-8"))
+    domain = yaml.safe_load(
+        DOMAIN_DUPLICATE_IDENTIFIER_FILE.read_text(encoding="utf-8")
+    )
+    with pytest.raises(Exception) as _e:
+        convert_qms(uml, domain, "eksempeldatasett")
+    assert "outward_identifier is defined in both general and collections" in str(
+        _e.value
+    )
+
+
+def test_convert_with_missing_rsid_domain_data():
+    uml = json.loads(QMS_TEST_FILE.read_text(encoding="utf-8"))
+    domain = yaml.safe_load(DOMAIN_MISSING_RSID_FILE.read_text(encoding="utf-8"))
+    with pytest.raises(Exception) as _e:
+        convert_qms(uml, domain, "eksempeldatasett")
+    assert "SRID must be specified in the domain file" in str(_e.value)
+
+
+def test_convert_with_missing_has_z_domain_data():
+    uml = json.loads(QMS_TEST_FILE.read_text(encoding="utf-8"))
+    domain = yaml.safe_load(DOMAIN_MISSING_HAS_Z_FILE.read_text(encoding="utf-8"))
+    with pytest.raises(Exception) as _e:
+        convert_qms(uml, domain, "eksempeldatasett")
+    assert "has_z must be specified in the domain file" in str(_e.value)
+
+
+def test_convert_with_duplicate_server_managed_domain_data():
+    uml = json.loads(QMS_TEST_FILE.read_text(encoding="utf-8"))
+    domain = yaml.safe_load(
+        DOMAIN_DUPLICATE_SERVER_MANAGED_FILE.read_text(encoding="utf-8")
+    )
+    with pytest.raises(Exception) as _e:
+        convert_qms(uml, domain, "eksempeldatasett")
+    assert (
+        "server_managed.versjon is defined in both general and collections.linjeobjekt"
+        in str(_e.value)
+    )
+
+
+def test_convert_with_nonexistent_server_managed_domain_data():
+    uml = json.loads(QMS_TEST_FILE.read_text(encoding="utf-8"))
+    domain = yaml.safe_load(
+        DOMAIN_NONEXISTENT_SERVER_MANAGED_FILE.read_text(encoding="utf-8")
+    )
+    with pytest.raises(Exception) as _e:
+        convert_qms(uml, domain, "eksempeldatasett")
+    assert (
+        "server_managed references a non-existent path in feature linjeobjekt"
+        in str(_e.value)
+    )

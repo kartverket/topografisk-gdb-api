@@ -1,0 +1,7 @@
+general:
+  srid: 5973
+  has_z: true
+  outward_identifier: identifikasjon.lokalid
+  server_managed:
+    identifikasjon.versjonid: timestamp_iso
+    oppdateringsdato: timestamp_iso
