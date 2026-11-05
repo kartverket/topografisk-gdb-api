@@ -1,6 +1,6 @@
 # 2. Use uv for Python dependencies
 
-Status: Accepted, RECORD DATE AT MERGE (recorded retroactively)
+Status: Accepted 2026-11-05 (recorded retroactively)
 
 ## Context
 

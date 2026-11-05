@@ -1,12 +1,12 @@
 # 4. Follow OGC API standards for the external interface
 
-Status: Accepted, RECORD DATE AT MERGE (recorded retroactively)
+Status: Accepted 2026-11-05 (recorded retroactively)
 
 ## Context
 
 Clients need a way to discover and work with geographic features.
 We want a stable, easy-to-use interface for simple and topological features.
-The organization favors open standards and wants transactional-style operations.
+The organization strongly favors open standards and requires transactional-style feature level operations.
 Users also want simpler topological edits: to split a surface, they should be able to send the splitting line rather than coordinate every feature-level change themselves.
 
 ## Decision

@@ -1,6 +1,6 @@
 # 3. Use Ruff for Python linting and formatting
 
-Status: Accepted, RECORD DATE AT MERGE (recorded retroactively)
+Status: Accepted 2026-11-05 (recorded retroactively)
 
 ## Context
 
