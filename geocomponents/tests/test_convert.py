@@ -46,6 +46,11 @@ DOMAIN_MULTIPLE_SERVER_MANAGED_FILE = (
     / "testdata"
     / "domain-multiple-server-managed.yaml"
 )
+DOMAIN_NONEXISTENT_SERVER_MANAGED_FILE = (
+    Path(__file__).resolve().parents[0]
+    / "testdata"
+    / "domain-nonexistent-server-managed.yaml"
+)
 EXPECTED_MULTIPLE_SERVER_MANAGED_OUTPUT_FILE = (
     Path(__file__).resolve().parents[0]
     / "expected"
@@ -256,5 +261,18 @@ def test_convert_with_duplicate_server_managed_domain_data():
         convert_qms(uml, domain, "eksempeldatasett")
     assert (
         "server_managed.versjon is defined in both general and collections.linjeobjekt"
+        in str(_e.value)
+    )
+
+
+def test_convert_with_nonexistent_server_managed_domain_data():
+    uml = json.loads(QMS_TEST_FILE.read_text(encoding="utf-8"))
+    domain = yaml.safe_load(
+        DOMAIN_NONEXISTENT_SERVER_MANAGED_FILE.read_text(encoding="utf-8")
+    )
+    with pytest.raises(Exception) as _e:
+        convert_qms(uml, domain, "eksempeldatasett")
+    assert (
+        "server_managed references a non-existent path in feature linjeobjekt"
         in str(_e.value)
     )

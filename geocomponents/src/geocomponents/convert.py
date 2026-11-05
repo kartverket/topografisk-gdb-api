@@ -180,7 +180,7 @@ def _convert_feature_type(
     return coll
 
 
-def _get_outward_identifier(ft: dict, general: dict, collection: dict) -> str:
+def _get_outward_identifier(ft: dict, general: dict, collection: dict) -> str | None:
     if _OUTWARD_IDENTIFIER in general and _OUTWARD_IDENTIFIER in collection:
         raise ValueError(
             f"{_OUTWARD_IDENTIFIER} is defined in both general and collections.{_safe_id(ft['Name'])}"
@@ -222,7 +222,7 @@ def _get_outward_identifier(ft: dict, general: dict, collection: dict) -> str:
     return outward_identifier
 
 
-def _get_server_managed(ft: dict, general: dict, collection: dict) -> dict:
+def _get_server_managed(ft: dict, general: dict, collection: dict) -> dict | None:
     for key in collection.get(_SERVER_MANAGED, {}):
         if key in general.get(_SERVER_MANAGED, {}):
             raise ValueError(
@@ -262,7 +262,7 @@ def _get_server_managed(ft: dict, general: dict, collection: dict) -> dict:
 
     if not all(server_managed_present):
         raise ValueError(
-            f"{_SERVER_MANAGED} references a non-existent path in feature {ft}"
+            f"{_SERVER_MANAGED} references a non-existent path in feature {_safe_id(ft['Name'])}"
         )
 
     return server_managed
