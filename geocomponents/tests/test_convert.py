@@ -221,7 +221,7 @@ def test_convert_with_malformed_domain_data():
     domain = yaml.safe_load(MALFORMED_DOMAIN_FILE.read_text(encoding="utf-8"))
     with pytest.raises(Exception) as _e:
         convert_qms(uml, domain, "eksempeldatasett")
-    assert "General section must be specified in the domain file" in str(_e.value)
+    assert str(_e.value) == "General section must be specified in the domain file"
 
 
 def test_convert_with_duplicate_identifier_domain_data():
@@ -231,8 +231,9 @@ def test_convert_with_duplicate_identifier_domain_data():
     )
     with pytest.raises(Exception) as _e:
         convert_qms(uml, domain, "eksempeldatasett")
-    assert "outward_identifier is defined in both general and collections" in str(
-        _e.value
+    assert (
+        str(_e.value)
+        == "Collection domain setting 'outward_identifier' conflicts with general domain setting"
     )
 
 
@@ -241,7 +242,7 @@ def test_convert_with_missing_rsid_domain_data():
     domain = yaml.safe_load(DOMAIN_MISSING_RSID_FILE.read_text(encoding="utf-8"))
     with pytest.raises(Exception) as _e:
         convert_qms(uml, domain, "eksempeldatasett")
-    assert "SRID must be specified in the domain file" in str(_e.value)
+    assert str(_e.value) == "SRID must be specified in the general domain settings"
 
 
 def test_convert_with_missing_has_z_domain_data():
@@ -249,7 +250,7 @@ def test_convert_with_missing_has_z_domain_data():
     domain = yaml.safe_load(DOMAIN_MISSING_HAS_Z_FILE.read_text(encoding="utf-8"))
     with pytest.raises(Exception) as _e:
         convert_qms(uml, domain, "eksempeldatasett")
-    assert "has_z must be specified in the domain file" in str(_e.value)
+    assert str(_e.value) == "has_z must be specified in the general domain settings"
 
 
 def test_convert_with_duplicate_server_managed_domain_data():
@@ -260,8 +261,8 @@ def test_convert_with_duplicate_server_managed_domain_data():
     with pytest.raises(Exception) as _e:
         convert_qms(uml, domain, "eksempeldatasett")
     assert (
-        "server_managed.versjon is defined in both general and collections.linjeobjekt"
-        in str(_e.value)
+        str(_e.value)
+        == "Collection domain setting 'server_managed.versjon' conflicts with general domain setting"
     )
 
 
@@ -273,6 +274,6 @@ def test_convert_with_nonexistent_server_managed_domain_data():
     with pytest.raises(Exception) as _e:
         convert_qms(uml, domain, "eksempeldatasett")
     assert (
-        "server_managed references a non-existent path in feature linjeobjekt"
-        in str(_e.value)
+        str(_e.value)
+        == "server_managed references a non-existent path in feature linjeobjekt"
     )
