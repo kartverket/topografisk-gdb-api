@@ -51,6 +51,11 @@ DOMAIN_NONEXISTENT_SERVER_MANAGED_FILE = (
     / "testdata"
     / "domain-nonexistent-server-managed.yaml"
 )
+DOMAIN_CAPITALIZED_IDENTIFIER_FILE = (
+    Path(__file__).resolve().parents[0]
+    / "testdata"
+    / "domain-capitalized-identifier.yaml"
+)
 EXPECTED_MULTIPLE_SERVER_MANAGED_OUTPUT_FILE = (
     Path(__file__).resolve().parents[0]
     / "expected"
@@ -203,6 +208,18 @@ def test_convert_with_multiple_server_managed_domain_data():
     uml = json.loads(QMS_TEST_FILE.read_text(encoding="utf-8"))
     domain = yaml.safe_load(
         DOMAIN_MULTIPLE_SERVER_MANAGED_FILE.read_text(encoding="utf-8")
+    )
+    yaml_str = convert_qms(uml, domain, "eksempeldatasett")
+    expected = yaml.safe_load(
+        EXPECTED_MULTIPLE_SERVER_MANAGED_OUTPUT_FILE.read_text(encoding="utf-8")
+    )
+    assert yaml.safe_load(yaml_str) == expected
+
+
+def test_convert_with_capitalized_outward_identifier():
+    uml = json.loads(QMS_TEST_FILE.read_text(encoding="utf-8"))
+    domain = yaml.safe_load(
+        DOMAIN_CAPITALIZED_IDENTIFIER_FILE.read_text(encoding="utf-8")
     )
     yaml_str = convert_qms(uml, domain, "eksempeldatasett")
     expected = yaml.safe_load(
