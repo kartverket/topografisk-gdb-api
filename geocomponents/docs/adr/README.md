@@ -7,3 +7,4 @@ The decisions below are numbered in the order they were recorded. Retrospective 
 3. [Use Ruff for Python linting and formatting](./0003-use_ruff_for_python_code_quality.md)
 4. [Follow OGC API standards for the external interface](./0004_follow_ogc_api_standards.md)
 5. [Use PostGIS for spatial data](./0005-use_postgis_for_spatial_data.md)
+6. [Use declarative dataset descriptions](./0006-use_declarative_dataset_descriptions.md)
