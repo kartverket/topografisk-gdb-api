@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import yaml
@@ -136,48 +137,147 @@ def _convert_feature_type(
     codelists: dict[str, dict],
 ) -> dict:
     """Convert one QMS FeatureType to a geocomponents collection dict."""
-    coll_name = _safe_id(ft["Name"])
-    description = ft.get("Description", "")
+    collection_name, collection = parse_qms_collection(
+        ft, dat_by_uuid, codelists, _safe_id
+    )
 
-    geo_types = ft.get("GeometryTypes")
-    if not geo_types:
+    if domain.get("general") is None:
+        raise Exception("General section must be specified in the domain file")
+    general_domain_settings = parse_domain_general(domain.get("general"), _safe_id)
+    _collection_name_from_domain, collection_domain_settings = parse_domain_collection(
+        collection_name,
+        domain.get("collections", {}).get(collection_name, {}),
+        _safe_id,
+    )
+
+    for setting, value in collection_domain_settings.items():
+        if isinstance(value, dict):
+            for sub_setting, _sub_value in value.items():
+                if (
+                    general_domain_settings.get(setting) is not None
+                    and general_domain_settings[setting].get(sub_setting) is not None
+                ):
+                    raise Exception(
+                        f"Collection domain setting '{setting}.{sub_setting}' conflicts with general domain setting"
+                    )
+        elif general_domain_settings.get(setting) is not None:
+            raise Exception(
+                f"Collection domain setting '{setting}' conflicts with general domain setting"
+            )
+
+    collection["geometry"]["srid"] = general_domain_settings["srid"]
+    collection["geometry"]["has_z"] = general_domain_settings["has_z"]
+
+    outward_identifer = collection_domain_settings.get(
+        _OUTWARD_IDENTIFIER
+    ) or general_domain_settings.get(_OUTWARD_IDENTIFIER)
+    if outward_identifer is not None:
+        collection["outward_identifier"] = outward_identifer
+
+    server_managed = {}
+    for key, value in collection_domain_settings.get("server_managed", {}).items():
+        server_managed[key] = value
+    for key, value in general_domain_settings.get("server_managed", {}).items():
+        server_managed[key] = value
+    collection["server_managed"] = server_managed
+
+    return collection
+
+
+def parse_qms_collection(
+    collection: dict,
+    dat_by_uuid: dict[str, dict],
+    codelists: dict[str, dict],
+    normalizer: Callable[[str], str],
+) -> tuple[str, dict]:
+    """Build a collection description with only the normalized fields emitted from QMS.
+
+    returns (collection_name, normalised_collection_description)
+    """
+    name = normalizer(collection["Name"])
+    description = collection.get("Description", "")
+
+    geo_types = collection.get("GeometryTypes")
+    if geo_types is None:
         raise Exception("No geometry type specified for feature type")
     geo_type_sosi = geo_types[0]["Type"]
     geo_type = _SOSI_TO_WKT.get(geo_type_sosi)
 
-    if not domain.get("general"):
-        raise Exception("General section must be specified in the domain file")
-    general = domain["general"]
-    collection = domain.get("collections", {}).get(coll_name, {})
-
-    outward_identifier = _get_outward_identifier(ft, general, collection)
-    server_managed = _get_server_managed(ft, general, collection)
-
-    srid: int = domain["general"].get("srid")
-    if srid is None:
-        raise Exception("SRID must be specified in the domain file")
-    has_z: bool = domain["general"].get("has_z")
-    if has_z is None:
-        raise Exception("has_z must be specified in the domain file")
-
     fields: list[dict] = []
-    for attr in ft.get("AttributeTypes", []):
-        fld = _convert_attr(attr, dat_by_uuid, codelists)
-        if fld:
-            fields.append(fld)
+    for attr in collection.get("AttributeTypes", []):
+        field = _convert_attr(attr, dat_by_uuid, codelists)
+        if field:
+            fields.append(field)
 
-    coll: dict = {
-        "name": coll_name,
-        "title": ft["Name"],
+    normalized_collection: dict = {
+        "name": name,
+        "title": collection["Name"],
         "description": description,
-        "geometry": {"type": geo_type, "srid": srid, "has_z": has_z},
+        "geometry": {"type": geo_type},
+        "fields": fields,
     }
-    if outward_identifier:
-        coll[_OUTWARD_IDENTIFIER] = outward_identifier
-    if server_managed:
-        coll[_SERVER_MANAGED] = server_managed
-    coll["fields"] = fields
-    return coll
+
+    return name, normalized_collection
+
+
+def parse_domain_general(settings: dict, normalizer: Callable[[str], str]) -> dict:
+    """Normalize field paths in general domain settings.
+
+    returns normalised_settings
+    """
+    srid = settings.get("srid")
+    if srid is None:
+        raise ValueError("SRID must be specified in the general domain settings")
+    has_z = settings.get("has_z")
+    if has_z is None:
+        raise ValueError("has_z must be specified in the general domain settings")
+
+    outward_identifier = settings.get(_OUTWARD_IDENTIFIER)
+    if outward_identifier is not None:
+        outward_identifier = normalizer(outward_identifier)
+
+    server_managed = settings.get(_SERVER_MANAGED)
+    if server_managed is not None:
+        for key, value in server_managed.items():
+            server_managed[key] = normalizer(value)
+
+    normalized_settings = {
+        "srid": srid,
+        "has_z": has_z,
+    }
+    if outward_identifier is not None:
+        normalized_settings[_OUTWARD_IDENTIFIER] = outward_identifier
+    if server_managed is not None:
+        normalized_settings[_SERVER_MANAGED] = server_managed
+
+    return normalized_settings
+
+
+def parse_domain_collection(
+    name: str, settings: dict, normalizer: Callable[[str], str]
+) -> tuple[str, dict]:
+    """Normalise collection name and collection-specific settings.
+
+    returns (collection_name, normalised_settings)
+    """
+    name = normalizer(name)
+
+    outward_identifier = settings.get(_OUTWARD_IDENTIFIER)
+    if outward_identifier is not None:
+        outward_identifier = normalizer(outward_identifier)
+
+    server_managed = settings.get(_SERVER_MANAGED)
+    if server_managed is not None:
+        for key, value in server_managed.items():
+            server_managed[key] = normalizer(value)
+
+    normalized_collection = {}
+    if outward_identifier is not None:
+        normalized_collection[_OUTWARD_IDENTIFIER] = outward_identifier
+    if server_managed is not None:
+        normalized_collection[_SERVER_MANAGED] = server_managed
+
+    return name, normalized_collection
 
 
 def _get_outward_identifier(ft: dict, general: dict, collection: dict) -> str | None:
