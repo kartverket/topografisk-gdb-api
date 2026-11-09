@@ -93,10 +93,6 @@ def test_safe_id_transliterates_capital_o_with_stroke_and_lowercases():
     assert _safe_id("høydereferanse") == "hoydereferanse"
 
 
-def test_safe_id_preserves_periods():
-    assert _safe_id("foo.bar-baz") == "foo.bar_baz"
-
-
 # --------------------------------------------------------------------------
 # Collection structure
 # --------------------------------------------------------------------------

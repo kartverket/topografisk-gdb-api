@@ -41,7 +41,7 @@ def _safe_id(raw: str) -> str:
     underscores. Result is capped at 40 characters (SafeIdentifier max length).
     """
     s = raw.translate(_TRANSLIT).lower()
-    s = re.sub(r"[^a-z0-9_.]", "_", s)
+    s = re.sub(r"[^a-z0-9_]", "_", s)
     s = s.lstrip("0123456789_") or "x"
     return s[:40]
 
@@ -242,7 +242,11 @@ def _parse_domain_general(settings: dict, normalizer: Callable[[str], str]) -> d
 
     outward_identifier = settings.get(_OUTWARD_IDENTIFIER)
     if outward_identifier is not None:
-        outward_identifier = normalizer(outward_identifier)
+        outward_identifier_array = outward_identifier.split(".")
+        normalised_identifier_array = []
+        for identifier_part in outward_identifier_array:
+            normalised_identifier_array.append(normalizer(identifier_part))
+        outward_identifier = ".".join(normalised_identifier_array)
 
     server_managed = settings.get(_SERVER_MANAGED)
     if server_managed is not None:
@@ -272,7 +276,11 @@ def _parse_domain_collection(
 
     outward_identifier = settings.get(_OUTWARD_IDENTIFIER)
     if outward_identifier is not None:
-        outward_identifier = normalizer(outward_identifier)
+        outward_identifier_array = outward_identifier.split(".")
+        normalised_identifier_array = []
+        for identifier_part in outward_identifier_array:
+            normalised_identifier_array.append(normalizer(identifier_part))
+        outward_identifier = ".".join(normalised_identifier_array)
 
     server_managed = settings.get(_SERVER_MANAGED)
     if server_managed is not None:
