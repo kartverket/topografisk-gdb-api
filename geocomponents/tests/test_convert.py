@@ -93,6 +93,10 @@ def test_safe_id_transliterates_capital_o_with_stroke_and_lowercases():
     assert _safe_id("høydereferanse") == "hoydereferanse"
 
 
+def test_safe_id_preserves_periods():
+    assert _safe_id("foo.bar-baz") == "foo.bar_baz"
+
+
 # --------------------------------------------------------------------------
 # Collection structure
 # --------------------------------------------------------------------------
@@ -262,7 +266,7 @@ def test_convert_with_duplicate_server_managed_domain_data():
         convert_qms(uml, domain, "eksempeldatasett")
     assert (
         str(_e.value)
-        == "Collection domain setting 'server_managed.versjon' conflicts with general domain setting"
+        == "Collection domain setting 'versjon' conflicts with general domain setting"
     )
 
 
@@ -275,5 +279,5 @@ def test_convert_with_nonexistent_server_managed_domain_data():
         convert_qms(uml, domain, "eksempeldatasett")
     assert (
         str(_e.value)
-        == "server_managed references a non-existent path in feature linjeobjekt"
+        == "{'created_at': 'timestamp_iso'} references a non-existent path in feature linjeobjekt"
     )

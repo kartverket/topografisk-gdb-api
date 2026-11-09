@@ -41,7 +41,7 @@ def _safe_id(raw: str) -> str:
     underscores. Result is capped at 40 characters (SafeIdentifier max length).
     """
     s = raw.translate(_TRANSLIT).lower()
-    s = re.sub(r"[^a-z0-9_]", "_", s)
+    s = re.sub(r"[^a-z0-9_.]", "_", s)
     s = s.lstrip("0123456789_") or "x"
     return s[:40]
 
@@ -151,19 +151,7 @@ def _convert_feature_type(
     )
 
     for setting, value in collection_domain_settings.items():
-        if isinstance(value, dict):
-            for sub_setting, _sub_value in value.items():
-                if (
-                    general_domain_settings.get(setting) is not None
-                    and general_domain_settings[setting].get(sub_setting) is not None
-                ):
-                    raise Exception(
-                        f"Collection domain setting '{setting}.{sub_setting}' conflicts with general domain setting"
-                    )
-        elif general_domain_settings.get(setting) is not None:
-            raise Exception(
-                f"Collection domain setting '{setting}' conflicts with general domain setting"
-            )
+        _compare_settings(general_domain_settings, {setting: value})
 
     collection["geometry"]["srid"] = general_domain_settings["srid"]
     collection["geometry"]["has_z"] = general_domain_settings["has_z"]
@@ -172,16 +160,36 @@ def _convert_feature_type(
         _OUTWARD_IDENTIFIER
     ) or general_domain_settings.get(_OUTWARD_IDENTIFIER)
     if outward_identifer is not None:
-        collection["outward_identifier"] = outward_identifer
+        if not _outward_identifier_exists_in_qms(collection, outward_identifer):
+            raise Exception(
+                f"{outward_identifer} references a non-existent path in feature {collection['name']}"
+            )
+        collection[_OUTWARD_IDENTIFIER] = outward_identifer
 
     server_managed = {}
     for key, value in collection_domain_settings.get("server_managed", {}).items():
         server_managed[key] = value
     for key, value in general_domain_settings.get("server_managed", {}).items():
         server_managed[key] = value
-    collection["server_managed"] = server_managed
+
+    if server_managed != {}:
+        if not _server_managed_exists_in_qms(collection, server_managed):
+            raise Exception(
+                f"{server_managed} references a non-existent path in feature {collection['name']}"
+            )
+        collection["server_managed"] = server_managed
 
     return collection
+
+
+def _compare_settings(general_setting: dict, collection_setting: dict):
+    for setting, value in collection_setting.items():
+        if isinstance(value, dict):
+            _compare_settings(general_setting.get(setting, {}), value)
+        elif general_setting.get(setting) is not None:
+            raise Exception(
+                f"Collection domain setting '{setting}' conflicts with general domain setting"
+            )
 
 
 def parse_qms_collection(
@@ -278,6 +286,54 @@ def parse_domain_collection(
         normalized_collection[_SERVER_MANAGED] = server_managed
 
     return name, normalized_collection
+
+
+def _outward_identifier_exists_in_qms(
+    collection: dict, outward_identifier: str
+) -> bool:
+    outward_identifier_array = outward_identifier.split(".")
+    for attribute in collection["fields"]:
+        if len(outward_identifier_array) == _FKB_ATTRIBUTE_STRUCT_DEPTH:
+            if (
+                attribute["name"] == outward_identifier_array[0]
+                and "fields" in attribute
+                and any(
+                    sub_attr["name"] == outward_identifier_array[1]
+                    for sub_attr in attribute["fields"]
+                )
+            ):
+                return True
+        elif (
+            len(outward_identifier_array) == 1
+            and attribute["name"] == outward_identifier_array[0]
+        ):
+            return True
+    return False
+
+
+def _server_managed_exists_in_qms(collection: dict, server_managed: dict) -> bool:
+    server_managed_list = []
+    for key in server_managed:
+        server_managed_list.append(key.split("."))
+
+    server_managed_present = [False] * len(server_managed_list)
+    for i, key in enumerate(server_managed_list):
+        for attribute in collection["fields"]:
+            if len(key) == _FKB_ATTRIBUTE_STRUCT_DEPTH:
+                if (
+                    attribute["name"] == key[0]
+                    and "fields" in attribute
+                    and any(
+                        sub_attr["name"] == key[1] for sub_attr in attribute["fields"]
+                    )
+                ):
+                    server_managed_present[i] = True
+                    break
+            elif len(key) == 1 and attribute["name"] == key[0]:
+                server_managed_present[i] = True
+                break
+
+    return all(server_managed_present)
 
 
 def _get_outward_identifier(ft: dict, general: dict, collection: dict) -> str | None:
