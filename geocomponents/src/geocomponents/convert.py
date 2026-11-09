@@ -137,14 +137,14 @@ def _convert_feature_type(
     codelists: dict[str, dict],
 ) -> dict:
     """Convert one QMS FeatureType to a geocomponents collection dict."""
-    collection_name, collection = parse_qms_collection(
+    collection_name, collection = _parse_qms_collection(
         ft, dat_by_uuid, codelists, _safe_id
     )
 
     if domain.get("general") is None:
         raise Exception("General section must be specified in the domain file")
-    general_domain_settings = parse_domain_general(domain.get("general"), _safe_id)
-    _collection_name_from_domain, collection_domain_settings = parse_domain_collection(
+    general_domain_settings = _parse_domain_general(domain.get("general"), _safe_id)
+    _collection_name_from_domain, collection_domain_settings = _parse_domain_collection(
         collection_name,
         domain.get("collections", {}).get(collection_name, {}),
         _safe_id,
@@ -192,7 +192,7 @@ def _compare_settings(general_setting: dict, collection_setting: dict):
             )
 
 
-def parse_qms_collection(
+def _parse_qms_collection(
     collection: dict,
     dat_by_uuid: dict[str, dict],
     codelists: dict[str, dict],
@@ -228,7 +228,7 @@ def parse_qms_collection(
     return name, normalized_collection
 
 
-def parse_domain_general(settings: dict, normalizer: Callable[[str], str]) -> dict:
+def _parse_domain_general(settings: dict, normalizer: Callable[[str], str]) -> dict:
     """Normalize field paths in general domain settings.
 
     returns normalised_settings
@@ -261,7 +261,7 @@ def parse_domain_general(settings: dict, normalizer: Callable[[str], str]) -> di
     return normalized_settings
 
 
-def parse_domain_collection(
+def _parse_domain_collection(
     name: str, settings: dict, normalizer: Callable[[str], str]
 ) -> tuple[str, dict]:
     """Normalise collection name and collection-specific settings.
@@ -334,94 +334,6 @@ def _server_managed_exists_in_qms(collection: dict, server_managed: dict) -> boo
                 break
 
     return all(server_managed_present)
-
-
-def _get_outward_identifier(ft: dict, general: dict, collection: dict) -> str | None:
-    if _OUTWARD_IDENTIFIER in general and _OUTWARD_IDENTIFIER in collection:
-        raise ValueError(
-            f"{_OUTWARD_IDENTIFIER} is defined in both general and collections.{_safe_id(ft['Name'])}"
-        )
-
-    outward_identifier = collection.get(
-        _OUTWARD_IDENTIFIER, general.get(_OUTWARD_IDENTIFIER)
-    )
-
-    if not outward_identifier:
-        return None
-
-    outward_identifier_array = outward_identifier.split(".")
-
-    outward_identifier_present = False
-    for attribute in ft["AttributeTypes"]:
-        if len(outward_identifier_array) == _FKB_ATTRIBUTE_STRUCT_DEPTH:
-            if (
-                _safe_id(attribute["Name"]) == _safe_id(outward_identifier_array[0])
-                and "AttributeTypes" in attribute
-                and any(
-                    _safe_id(sub_attr["Name"]) == _safe_id(outward_identifier_array[1])
-                    for sub_attr in attribute["AttributeTypes"]
-                )
-            ):
-                outward_identifier_present = True
-                break
-        elif len(outward_identifier_array) == 1 and _safe_id(
-            attribute["Name"]
-        ) == _safe_id(outward_identifier_array[0]):
-            outward_identifier_present = True
-            break
-
-    if not outward_identifier_present:
-        raise ValueError(
-            f"{_OUTWARD_IDENTIFIER} references a non-existent path '{outward_identifier}' in feature {_safe_id(ft['Name'])}"
-        )
-
-    return outward_identifier
-
-
-def _get_server_managed(ft: dict, general: dict, collection: dict) -> dict | None:
-    for key in collection.get(_SERVER_MANAGED, {}):
-        if key in general.get(_SERVER_MANAGED, {}):
-            raise ValueError(
-                f"{_SERVER_MANAGED}.{key} is defined in both general and collections.{_safe_id(ft['Name'])}"
-            )
-
-    server_managed = {}
-    for key in collection.get(_SERVER_MANAGED, {}):
-        server_managed[key] = collection[_SERVER_MANAGED][key]
-    for key in general.get(_SERVER_MANAGED, {}):
-        server_managed[key] = general[_SERVER_MANAGED][key]
-
-    if not server_managed:
-        return None
-
-    server_managed_list = []
-    for key in server_managed:
-        server_managed_list.append(key.split("."))
-
-    server_managed_present = [False] * len(server_managed_list)
-    for i, key in enumerate(server_managed_list):
-        for attribute in ft["AttributeTypes"]:
-            if len(key) == _FKB_ATTRIBUTE_STRUCT_DEPTH:
-                if (
-                    _safe_id(attribute["Name"]) == _safe_id(key[0])
-                    and "AttributeTypes" in attribute
-                    and any(
-                        _safe_id(sub_attr["Name"]) == _safe_id(key[1])
-                        for sub_attr in attribute["AttributeTypes"]
-                    )
-                ):
-                    server_managed_present[i] = True
-                    break
-            elif len(key) == 1 and _safe_id(attribute["Name"]) == _safe_id(key[0]):
-                server_managed_present[i] = True
-                break
-
-    if not all(server_managed_present):
-        raise ValueError(
-            f"{_SERVER_MANAGED} references a non-existent path in feature {_safe_id(ft['Name'])}"
-        )
-
-    return server_managed
 
 
 # ---------------------------------------------------------------------------
