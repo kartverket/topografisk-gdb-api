@@ -4,6 +4,7 @@ Use these pages to look up the exact description keys and database behavior.
 
 ## Descriptions
 
+- [QMS converter](./qms-converter.md) documents the QMS JSON to dataset YAML conversion API, CLI, mappings, and domain settings.
 - [Dataset descriptions](./dataset-descriptions.md) cover dataset-level keys.
 - [Collection descriptions](./collection-descriptions.md) cover collections and generated columns.
 - [Field descriptions](./field-descriptions.md) cover attributes, nested fields, and built-in types.
