@@ -1,6 +1,6 @@
 # 7. One API per declared dataset
 
-Status: Proposed (recorded retroactively)
+Status: Accepted 2026-11-10 (recorded retroactively)
 
 ## Context
 

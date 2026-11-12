@@ -1,6 +1,6 @@
 # 6. Use declarative dataset descriptions
 
-Status: Proposed (recorded retroactively)
+Status: Accepted 2026-11-10 (recorded retroactively)
 
 ## Context
 
