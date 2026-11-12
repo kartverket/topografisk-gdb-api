@@ -10,3 +10,4 @@ The decisions below are numbered in the order they were recorded. Retrospective 
 6. [Use declarative dataset descriptions](./0006-use_declarative_dataset_descriptions.md)
 7. [One API per declared dataset](./0007-one_api_per_dataset.md)
 8. [Split API and database into separate components](./0008-api_db_components.md)
+9. [Use pygeoapi for the OGC API](./0009-use_pygeoapi_for_ogc_api.md)
