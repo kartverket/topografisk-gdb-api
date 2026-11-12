@@ -8,3 +8,5 @@ The decisions below are numbered in the order they were recorded. Retrospective 
 4. [Follow OGC API standards for the external interface](./0004_follow_ogc_api_standards.md)
 5. [Use PostGIS for spatial data](./0005-use_postgis_for_spatial_data.md)
 6. [Use declarative dataset descriptions](./0006-use_declarative_dataset_descriptions.md)
+7. [One API per declared dataset](./0007-one_api_per_dataset.md)
+8. [Split API and database into separate components](./0008-api_db_components.md)
