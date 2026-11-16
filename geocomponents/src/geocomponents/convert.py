@@ -24,7 +24,6 @@ _TRANSLIT = str.maketrans(
 )
 
 _OUTWARD_IDENTIFIER = "outward_identifier"
-_FKB_ATTRIBUTE_STRUCT_DEPTH = 2
 _SERVER_MANAGED = "server_managed"
 
 
@@ -303,7 +302,7 @@ def _outward_identifier_exists_in_qms(
 ) -> bool:
     outward_identifier_array = outward_identifier.split(".")
     for attribute in collection["fields"]:
-        if len(outward_identifier_array) == _FKB_ATTRIBUTE_STRUCT_DEPTH:
+        if len(outward_identifier_array) > 1:
             if (
                 attribute["name"] == outward_identifier_array[0]
                 and "fields" in attribute
@@ -329,7 +328,7 @@ def _server_managed_exists_in_qms(collection: dict, server_managed: dict) -> boo
     server_managed_present = [False] * len(server_managed_list)
     for i, key in enumerate(server_managed_list):
         for attribute in collection["fields"]:
-            if len(key) == _FKB_ATTRIBUTE_STRUCT_DEPTH:
+            if len(key) > 1:
                 if (
                     attribute["name"] == key[0]
                     and "fields" in attribute
