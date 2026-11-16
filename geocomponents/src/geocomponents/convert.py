@@ -82,6 +82,7 @@ def _convert_attr(
     attr: dict,
     dat_by_uuid: dict[str, dict],
     codelists: dict[str, dict],  # name → codelist dict; mutated
+    normalizer: callable[[str], str],
 ) -> dict | None:
     """Convert one QMS AttributeType entry to a geocomponents field dict.
 
@@ -89,13 +90,13 @@ def _convert_attr(
     Codelists discovered are registered into *codelists* (keyed by name, deduped).
     """
     qms_type = attr.get("Type", "")
-    name = _safe_id(attr["Name"])
+    name = normalizer(attr["Name"])
     required = attr.get("MultiplicityMin", 0) >= 1
 
     if qms_type == "CodeList":
         dat = dat_by_uuid.get(attr.get("UUID", ""))
         if dat and dat.get("CodeList"):
-            cl_name = _safe_id(dat["TypeName"])
+            cl_name = normalizer(dat["TypeName"])
             if cl_name not in codelists:
                 codelists[cl_name] = {
                     "name": cl_name,
@@ -112,7 +113,7 @@ def _convert_attr(
         sub_attrs = attr.get("AttributeTypes", [])
         sub_fields = []
         for sub in sub_attrs:
-            sf = _convert_attr(sub, dat_by_uuid, codelists)
+            sf = _convert_attr(sub, dat_by_uuid, codelists, normalizer)
             if sf:
                 sub_fields.append(sf)
         fld = {"name": name, "type": "object"}
@@ -135,19 +136,20 @@ def _convert_feature_type(
     domain: dict,
     dat_by_uuid: dict[str, dict],
     codelists: dict[str, dict],
+    normalizer: Callable[[str], str],
 ) -> dict:
     """Convert one QMS FeatureType to a geocomponents collection dict."""
     collection_name, collection = _parse_qms_collection(
-        ft, dat_by_uuid, codelists, _safe_id
+        ft, dat_by_uuid, codelists, normalizer
     )
 
     if domain.get("general") is None:
         raise Exception("General section must be specified in the domain file")
-    general_domain_settings = _parse_domain_general(domain.get("general"), _safe_id)
+    general_domain_settings = _parse_domain_general(domain.get("general"), normalizer)
     _collection_name_from_domain, collection_domain_settings = _parse_domain_collection(
         collection_name,
         domain.get("collections", {}).get(collection_name, {}),
-        _safe_id,
+        normalizer,
     )
 
     for setting, value in collection_domain_settings.items():
@@ -213,7 +215,7 @@ def _parse_qms_collection(
 
     fields: list[dict] = []
     for attr in collection.get("AttributeTypes", []):
-        field = _convert_attr(attr, dat_by_uuid, codelists)
+        field = _convert_attr(attr, dat_by_uuid, codelists, normalizer)
         if field:
             fields.append(field)
 
@@ -354,7 +356,9 @@ def convert_qms(data: dict, domain: dict, dataset_name: str) -> str:
     collections = []
 
     for ft in data.get("FeatureTypes", []):
-        collections.append(_convert_feature_type(ft, domain, dat_by_uuid, codelists))
+        collections.append(
+            _convert_feature_type(ft, domain, dat_by_uuid, codelists, _safe_id)
+        )
 
     obj_katalog = data.get("Objektkatalog", {})
     title = obj_katalog.get("ObjektkatalogFullstendigNavn") or dataset_name
