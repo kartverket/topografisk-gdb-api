@@ -8,12 +8,12 @@ WORKDIR /app
 
 # Dependency layer — cached until pyproject/uv.lock change.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --locked --no-dev --no-install-project
 
 # Project layer — install geocomponents itself.
 COPY src ./src
 COPY README.md ./
-RUN uv sync --frozen --no-dev
+RUN uv sync --locked --no-dev
 
 # ---- runtime: slim, just the venv + src, non-root ----
 FROM python:3.14-slim AS runtime
