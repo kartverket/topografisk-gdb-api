@@ -89,6 +89,8 @@ select = [
     "RET",     # flake8-return: cleanup return/raise flow
     "C4",      # flake8-comprehensions: drop needless list()/dict()/set() wraps
     "PIE",     # flake8-pie: misc small correctness lints
+    "PT011",   # require specific exceptions or message matching in pytest.raises
+    "TRY002",  # avoid raising Exception or BaseException directly
     # --- Security ---
     "S",       # flake8-bandit: subprocess, hardcoded creds, SQLi, yaml.load, ...
     # --- Style / consistency ---
