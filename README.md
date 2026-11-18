@@ -156,3 +156,7 @@ job resource under the same dataset-local `/jobs/{jobID}` path.
 # Technical details
 
 We are currently using imresamu/postgis:17-3.6-alpine instead of the official postgis/postgis:17-3.6-alpine image for running locally as this resolves missing ARM64 compability in official image.
+
+# Attributions
+
+* Diátaxis agent skill by Keith Patton ([GitHub link](https://github.com/keithpatton/diataxis-agent-skill/tree/main)).

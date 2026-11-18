@@ -7,4 +7,4 @@ Documentation is organized into the following sections:
 - [How-to guides](./how-to-guides/README.md) help you apply existing knowledge to accomplish a specific task.
 This could be setting up your machine to [get started developing](./how-to-guides/get-started-developing.md) or setting up more complex datasets.
 - [Reference](./reference/README.md) provides exact details to look up.
-- [Architecture decision records](./adr/0001-record_architectural_decisions.md) record decisions and their reasons, starting with the decision to use ADRs.
+- [Architecture decision records](./adr/README.md) record decisions and their reasons.
