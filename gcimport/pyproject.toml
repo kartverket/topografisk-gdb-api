@@ -53,6 +53,8 @@ select = [
     "RET",
     "C4",
     "PIE",
+    "PT011",
+    "TRY002",
     "S",
     "I",
     "UP",
