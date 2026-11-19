@@ -62,6 +62,16 @@ EXPECTED_MULTIPLE_SERVER_MANAGED_OUTPUT_FILE = (
     / "expected-multiple-server-managed.yaml"
 )
 
+UML_CAPITAL_NAME_FILE = (
+    Path(__file__).resolve().parents[0] / "testdata" / "uml-capital-name.json"
+)
+EXPECTED_CAPITAL_NAME_OUTPUT_FILE = (
+    Path(__file__).resolve().parents[0] / "expected" / "expected-capital-name.yaml"
+)
+DOMAIN_CAPITAL_NAME_FILE = (
+    Path(__file__).resolve().parents[0] / "testdata" / "domain-capital-name.yaml"
+)
+
 
 @pytest.fixture(scope="module")
 def qms_data():
@@ -294,3 +304,11 @@ def test_convert_with_nonexistent_server_managed_domain_data():
         str(_e.value)
         == "{'created_at': 'timestamp_iso'} references a non-existent path in feature linjeobjekt"
     )
+
+
+def test_convert_with_normalized_keys():
+    uml = json.loads(UML_CAPITAL_NAME_FILE.read_text(encoding="utf-8"))
+    domain = yaml.safe_load(DOMAIN_CAPITAL_NAME_FILE.read_text(encoding="utf-8"))
+    yaml_str = convert_qms(uml, domain, "eksempel")
+    expected_yaml_str = EXPECTED_CAPITAL_NAME_OUTPUT_FILE.read_text(encoding="utf-8")
+    assert yaml.safe_load(yaml_str) == yaml.safe_load(expected_yaml_str)

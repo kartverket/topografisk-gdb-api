@@ -1,0 +1,6 @@
+general:
+  srid: 25833
+  has_z: true
+collections:
+  Eksempel:
+    outward_identifier: identifikasjon

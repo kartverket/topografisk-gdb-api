@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import yaml
@@ -142,24 +142,12 @@ def _convert_feature_type(
         ft, dat_by_uuid, codelists, normalizer
     )
 
-    if domain.get("general") is None:
-        raise Exception("General section must be specified in the domain file")
-    general_domain_settings = _parse_domain_general(domain.get("general"), normalizer)
-    _collection_name_from_domain, collection_domain_settings = _parse_domain_collection(
-        collection_name,
-        domain.get("collections", {}).get(collection_name, {}),
-        normalizer,
-    )
+    collection["geometry"]["srid"] = domain["general"]["srid"]
+    collection["geometry"]["has_z"] = domain["general"]["has_z"]
 
-    for setting, value in collection_domain_settings.items():
-        _compare_settings(general_domain_settings, {setting: value})
-
-    collection["geometry"]["srid"] = general_domain_settings["srid"]
-    collection["geometry"]["has_z"] = general_domain_settings["has_z"]
-
-    outward_identifer = collection_domain_settings.get(
+    outward_identifer = domain.get("collections", {}).get(collection_name, {}).get(
         _OUTWARD_IDENTIFIER
-    ) or general_domain_settings.get(_OUTWARD_IDENTIFIER)
+    ) or domain["general"].get(_OUTWARD_IDENTIFIER)
     if outward_identifer is not None:
         if not _outward_identifier_exists_in_qms(collection, outward_identifer):
             raise Exception(
@@ -168,9 +156,14 @@ def _convert_feature_type(
         collection[_OUTWARD_IDENTIFIER] = outward_identifer
 
     server_managed = {}
-    for key, value in collection_domain_settings.get("server_managed", {}).items():
+    for key, value in (
+        domain.get("collections", {})
+        .get(collection_name, {})
+        .get("server_managed", {})
+        .items()
+    ):
         server_managed[key] = value
-    for key, value in general_domain_settings.get("server_managed", {}).items():
+    for key, value in domain["general"].get("server_managed", {}).items():
         server_managed[key] = value
 
     if server_managed != {}:
@@ -190,6 +183,44 @@ def _compare_settings(general_setting: dict, collection_setting: dict):
         elif general_setting.get(setting) is not None:
             raise Exception(
                 f"Collection domain setting '{setting}' conflicts with general domain setting"
+            )
+
+
+def _parse_outward_identifier(
+    outward_identifier: str, normalizer: Callable[[str], str]
+) -> str | None:
+    outward_identifier_array = outward_identifier.split(".")
+    normalised_identifier_array = []
+    for identifier_part in outward_identifier_array:
+        normalised_identifier_array.append(normalizer(identifier_part))
+    return ".".join(normalised_identifier_array)
+
+
+def _domain_pre_validation(domain: dict) -> None:
+    if domain.get("general") is None:
+        raise Exception("General section must be specified in the domain file")
+    if domain["general"].get("srid") is None:
+        raise ValueError("SRID must be specified in the general domain settings")
+    if domain["general"].get("has_z") is None:
+        raise ValueError("has_z must be specified in the general domain settings")
+
+
+def _domain_post_validation(domain: dict) -> None:
+    general = domain["general"]
+    for collection in domain.get("collections", {}).values():
+        if _OUTWARD_IDENTIFIER in general and _OUTWARD_IDENTIFIER in collection:
+            raise ValueError(
+                "Collection domain setting 'outward_identifier' conflicts with general domain setting"
+            )
+
+        duplicate_paths = (
+            general.get(_SERVER_MANAGED, {}).keys()
+            & collection.get(_SERVER_MANAGED, {}).keys()
+        )
+        if duplicate_paths:
+            path = sorted(duplicate_paths)[0]
+            raise ValueError(
+                f"Collection domain setting '{path}' conflicts with general domain setting"
             )
 
 
@@ -225,74 +256,6 @@ def _parse_qms_collection(
         "geometry": {"type": geo_type},
         "fields": fields,
     }
-
-    return name, normalized_collection
-
-
-def _parse_domain_general(settings: dict, normalizer: Callable[[str], str]) -> dict:
-    """Normalize field paths in general domain settings.
-
-    returns normalised_settings
-    """
-    srid = settings.get("srid")
-    if srid is None:
-        raise ValueError("SRID must be specified in the general domain settings")
-    has_z = settings.get("has_z")
-    if has_z is None:
-        raise ValueError("has_z must be specified in the general domain settings")
-
-    outward_identifier = settings.get(_OUTWARD_IDENTIFIER)
-    if outward_identifier is not None:
-        outward_identifier_array = outward_identifier.split(".")
-        normalised_identifier_array = []
-        for identifier_part in outward_identifier_array:
-            normalised_identifier_array.append(normalizer(identifier_part))
-        outward_identifier = ".".join(normalised_identifier_array)
-
-    server_managed = settings.get(_SERVER_MANAGED)
-    if server_managed is not None:
-        for key, value in server_managed.items():
-            server_managed[key] = normalizer(value)
-
-    normalized_settings = {
-        "srid": srid,
-        "has_z": has_z,
-    }
-    if outward_identifier is not None:
-        normalized_settings[_OUTWARD_IDENTIFIER] = outward_identifier
-    if server_managed is not None:
-        normalized_settings[_SERVER_MANAGED] = server_managed
-
-    return normalized_settings
-
-
-def _parse_domain_collection(
-    name: str, settings: dict, normalizer: Callable[[str], str]
-) -> tuple[str, dict]:
-    """Normalise collection name and collection-specific settings.
-
-    returns (collection_name, normalised_settings)
-    """
-    name = normalizer(name)
-
-    outward_identifier = settings.get(_OUTWARD_IDENTIFIER)
-    if outward_identifier is not None:
-        outward_identifier_array = outward_identifier.split(".")
-        normalised_identifier_array = []
-        for identifier_part in outward_identifier_array:
-            normalised_identifier_array.append(normalizer(identifier_part))
-        outward_identifier = ".".join(normalised_identifier_array)
-
-    server_managed = settings.get(_SERVER_MANAGED)
-    if server_managed is not None:
-        for key, value in server_managed.items():
-            server_managed[key] = normalizer(value)
-
-    normalized_collection = {}
-    if outward_identifier is not None:
-        normalized_collection[_OUTWARD_IDENTIFIER] = outward_identifier
-    if server_managed is not None:
-        normalized_collection[_SERVER_MANAGED] = server_managed
 
     return name, normalized_collection
 
@@ -348,11 +311,15 @@ def _server_managed_exists_in_qms(collection: dict, server_managed: dict) -> boo
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-def convert_qms(data: dict, domain: dict, dataset_name: str) -> str:
+def convert_qms(data: dict, domain_raw: dict, dataset_name: str) -> str:
     """Convert a QMS schema dict to a geocomponents dataset YAML string."""
     dat_by_uuid = _build_dat_lookup(data)
     codelists: dict[str, dict] = {}
     collections = []
+
+    _domain_pre_validation(domain_raw)
+    domain = _normalize_tree(domain_raw, _safe_id)
+    _domain_post_validation(domain)
 
     for ft in data.get("FeatureTypes", []):
         collections.append(
@@ -378,6 +345,51 @@ def convert_qms(data: dict, domain: dict, dataset_name: str) -> str:
         sort_keys=False,
         default_flow_style=False,
     )
+
+
+def _normalize_tree(obj, normalizer):
+    if isinstance(obj, Mapping):
+        result = {}
+        for key, value in obj.items():
+            if normalizer(key) == _OUTWARD_IDENTIFIER:
+                result[_OUTWARD_IDENTIFIER] = _parse_outward_identifier(
+                    value, normalizer
+                )
+                continue
+            if normalizer(key) == _SERVER_MANAGED:
+                normalized_paths = {}
+                for path, strategy in value.items():
+                    normalized_path = ".".join(
+                        normalizer(part) for part in path.split(".")
+                    )
+                    if normalized_path in normalized_paths:
+                        raise ValueError(
+                            f"Key collision after normalization: {normalized_path!r}"
+                        )
+                    normalized_paths[normalized_path] = _normalize_tree(
+                        strategy, normalizer
+                    )
+                result[_SERVER_MANAGED] = normalized_paths
+                continue
+            new_key = _normalize_tree(key, normalizer)
+            if new_key in result:
+                raise ValueError(f"Key collision after normalization: {new_key!r}")
+            result[new_key] = _normalize_tree(value, normalizer)
+        return result
+
+    if isinstance(obj, list):
+        return [_normalize_tree(item, normalizer) for item in obj]
+
+    if isinstance(obj, tuple):
+        return tuple(_normalize_tree(item, normalizer) for item in obj)
+
+    if isinstance(obj, set):
+        return {_normalize_tree(item, normalizer) for item in obj}
+
+    if isinstance(obj, int):
+        return obj
+
+    return normalizer(obj)
 
 
 # ---------------------------------------------------------------------------
