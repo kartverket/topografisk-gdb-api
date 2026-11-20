@@ -12,7 +12,7 @@ If the file is absent, datasets have no shared definitions.
 | `code_lists` | list | [Code lists](#code-lists) | Optional; empty list | Allowed values referenced by `codelist` on a field. |
 
 A collection cannot declare a field with the same name as a `base_fields` entry.
-The built-in `id`, `geometry`, `created_at`, and `updated_at` columns are separate from `base_fields`.
+The built-in `id` and `geometry` columns are separate from `base_fields`.
 
 ## Named types
 

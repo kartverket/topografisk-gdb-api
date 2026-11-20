@@ -1,5 +1,5 @@
 # Shared definitions every collection in every dataset inherits from.
-# (id / geometry / created_at / updated_at columns are always added by the
+# (id / geometry columns are always added by the
 # schema builder; base_fields below are *extra* shared attributes.)
 
 base_fields:

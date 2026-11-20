@@ -315,13 +315,11 @@ def test_golden_parcels_feature_shape(conn):
         )
         feat = _item(cur, "cadastre", "parcels", fid)
         assert feat["geometry"]["type"] == "MultiPolygon"
-        assert {
+        assert set(feat["properties"]) == {
             "label",
             "municipality",
             "status",
             "area_m2",
             "source",
-            "created_at",
-            "updated_at",
-        } <= set(feat["properties"])
+        }
         cur.execute("select ogc.feature_delete(%s,%s,%s)", ("cadastre", "parcels", fid))
