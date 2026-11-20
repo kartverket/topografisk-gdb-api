@@ -10,7 +10,7 @@ import pytest
 from conftest import _schema_conn
 
 from geocomponents.descriptions.loader import resolve_dataset
-from geocomponents.descriptions.models import Commons, DatasetDef
+from geocomponents.descriptions.models import DatasetDef
 from geocomponents.schema.build import build_schema_plan
 
 _DS = "test_nested_write"
@@ -36,6 +36,7 @@ _DATASET = resolve_dataset(
                                 {
                                     "name": "namespace",
                                     "type": "string",
+                                    "max_length": 7,
                                     "required": True,
                                 },
                                 {
@@ -66,7 +67,6 @@ _DATASET = resolve_dataset(
             ],
         }
     ),
-    Commons(),
 )
 
 
@@ -157,6 +157,28 @@ def test_required_nested_children_present_are_accepted(nested_conn):
         "method": "survey",
         "accuracy": 2,
     }
+
+
+def test_nested_string_length_is_enforced_on_create_and_update(nested_conn):
+    fid = _create(nested_conn, _valid_feature())
+    with pytest.raises(psycopg.Error, match=r"identification\.namespace"):
+        _create(
+            nested_conn,
+            _feature(
+                identification={"namespace": "too-long"},
+                quality={"method": "survey"},
+            ),
+        )
+    with pytest.raises(psycopg.Error, match=r"identification\.namespace"):
+        _update(
+            nested_conn,
+            fid,
+            {"properties": {"identification": {"namespace": "too-long"}}},
+        )
+    assert (
+        _fetch(nested_conn, fid)["properties"]["identification"]["namespace"]
+        == "example"
+    )
 
 
 def test_server_contributions_satisfy_required_nested_children(nested_conn):

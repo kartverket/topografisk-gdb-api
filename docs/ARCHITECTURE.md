@@ -169,7 +169,7 @@ YAML descriptions remain the source of truth. The engine still breaks cleanly in
 ```mermaid
 flowchart LR
   subgraph Descriptions
-    YAML["descriptions/*.yaml<br/>cadastre, fkb_bane, bygning, hydro, commons"]
+    YAML["descriptions/*.yaml<br/>cadastre, fkb_bane, bygning, hydro"]
     LOAD["loader + resolved models"]
   end
 

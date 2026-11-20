@@ -23,4 +23,3 @@ Every collection has these columns without declaring them in `fields`:
 | --- | --- |
 | `id` | UUID primary key; generated when no ID is supplied. |
 | `geometry` | Shape column with the type, SRID, and Z dimension specified by `geometry`. |
-| `created_at`, `updated_at` | Write timestamps maintained by the database. |

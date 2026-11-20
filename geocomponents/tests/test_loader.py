@@ -14,7 +14,6 @@ from geocomponents.descriptions.loader import (
     resolve_dataset,
 )
 from geocomponents.descriptions.models import (
-    Commons,
     DatasetDef,
     FieldDef,
     RelationshipDef,
@@ -401,7 +400,7 @@ def _derived_shape(
 
 @pytest.mark.parametrize("case", BOUNDS_RESOLVE_CASES, ids=lambda case: case.id)
 def test_collection_bounds_resolve_and_reach_plan(case):
-    resolved = resolve_dataset(DatasetDef.model_validate(case.raw), Commons())
+    resolved = resolve_dataset(DatasetDef.model_validate(case.raw))
     coll = next(c for c in resolved.collections if c.name == case.collection_name)
     assert coll.bounds == case.expected
 
@@ -416,7 +415,7 @@ def test_collection_bounds_resolve_and_reach_plan(case):
 def test_collection_bounds_reject_invalid_shape_or_resolution(case):
     with pytest.raises(case.error_type, match=case.error_fragment):
         dataset = DatasetDef.model_validate(case.raw)
-        resolve_dataset(dataset, Commons())
+        resolve_dataset(dataset)
 
 
 @pytest.mark.parametrize("case", EXTRA_KEY_REJECT_CASES, ids=lambda case: case.id)
@@ -425,18 +424,11 @@ def test_unknown_description_keys_are_rejected(case):
         DatasetDef.model_validate(case.raw)
 
 
-def test_commons_base_field_is_inherited_by_every_collection():
-    datasets = load_resolved_datasets(DESCRIPTIONS)
-    for d in datasets:
-        for coll in d.collections:
-            assert "source" in {f.name for f in coll.fields}, coll.name
-
-
-def test_type_ref_and_codelist_resolve_to_sql_types():
+def test_string_length_and_codelist_resolve_to_sql_types():
     cad = next(d for d in load_resolved_datasets(DESCRIPTIONS) if d.name == "cadastre")
     parcels = next(c for c in cad.collections if c.name == "parcels")
     by_name = {f.name: f for f in parcels.fields}
-    assert by_name["municipality"].sql_type == "varchar(4)"  # type_ref
+    assert by_name["municipality"].sql_type == "varchar(4)"
     assert by_name["status"].sql_type == "text"  # codelist -> text
     assert by_name["status"].codelist == "parcel_status"
 
@@ -449,20 +441,6 @@ def test_relationship_resolves_to_target_collection():
     ]
 
 
-def test_unknown_type_ref_raises_clear_error():
-    commons = Commons()
-    dataset = DatasetDef.model_validate(
-        {
-            "name": "x",
-            "collections": [
-                {"name": "c", "fields": [{"name": "f", "type_ref": "nope"}]}
-            ],
-        }
-    )
-    with pytest.raises(DescriptionError, match="unknown type 'nope'"):
-        resolve_dataset(dataset, commons)
-
-
 def test_relationship_to_unknown_collection_raises():
     dataset = DatasetDef.model_validate(
         {
@@ -473,7 +451,7 @@ def test_relationship_to_unknown_collection_raises():
         }
     )
     with pytest.raises(DescriptionError, match="unknown collection 'ghost'"):
-        resolve_dataset(dataset, Commons())
+        resolve_dataset(dataset)
 
 
 @pytest.mark.parametrize("geometry_type", ["LineString", "Point"])
@@ -512,7 +490,7 @@ def test_footprint_derived_geometry_requires_multipolygon(geometry_type, tmp_pat
 
 @pytest.mark.parametrize("case", DERIVED_RESOLVE_CASES, ids=lambda case: case.id)
 def test_collection_derived_resolves(case):
-    resolved = resolve_dataset(DatasetDef.model_validate(case.raw), Commons())
+    resolved = resolve_dataset(DatasetDef.model_validate(case.raw))
     coll = next(c for c in resolved.collections if c.name == case.collection_name)
     assert _derived_shape(coll) == case.expected
 
@@ -526,7 +504,7 @@ def test_collection_derived_rejects_invalid_resolution(case):
     )
     with expectation:
         dataset = DatasetDef.model_validate(case.raw)
-        resolve_dataset(dataset, Commons())
+        resolve_dataset(dataset)
 
 
 @pytest.mark.parametrize("case", COLLECTION_NAME_CASES, ids=lambda case: case.id)
@@ -543,7 +521,7 @@ def test_collection_name_reserves_generated_table_names(case):
         else nullcontext()
     )
     with expectation:
-        resolve_dataset(dataset, Commons())
+        resolve_dataset(dataset)
 
 
 def test_existing_descriptions_still_resolve_with_reserved_name_guard():
@@ -553,7 +531,7 @@ def test_existing_descriptions_still_resolve_with_reserved_name_guard():
 
 def test_topology_fixture_resolves_with_bounds_and_strict_models():
     dataset = DatasetDef.model_validate(_topology_fixture_raw())
-    resolved = resolve_dataset(dataset, Commons())
+    resolved = resolve_dataset(dataset)
     assert [coll.name for coll in resolved.collections] == [
         "surface",
         "surface2",
@@ -643,7 +621,7 @@ def test_bygning_dataset_resolves_expected_geometry_and_upsert_field():
 def test_unknown_process_raises_clear_error():
     dataset = DatasetDef.model_validate({"name": "x", "processes": ["nope"]})
     with pytest.raises(DescriptionError, match="unknown process"):
-        resolve_dataset(dataset, Commons())
+        resolve_dataset(dataset)
 
 
 # --------------------------------------------------------------------------
@@ -746,7 +724,7 @@ def _dataset_with_object_field(extra_collection_keys=None):
 
 
 def test_object_field_resolves_to_jsonb_with_sub_fields():
-    ds = resolve_dataset(_dataset_with_object_field(), Commons())
+    ds = resolve_dataset(_dataset_with_object_field())
     coll = ds.collections[0]
     kvalitet = next(f for f in coll.fields if f.name == "kvalitet")
     assert kvalitet.sql_type == "jsonb"
@@ -781,7 +759,7 @@ def test_depth2_nesting_resolves_correctly():
             ],
         }
     )
-    ds = resolve_dataset(dataset, Commons())
+    ds = resolve_dataset(dataset)
     outer = ds.collections[0].fields[0]
     assert outer.sql_type == "jsonb"
     inner = outer.sub_fields[0]
@@ -804,7 +782,7 @@ def test_enum_propagates_to_resolved_field():
             ],
         }
     )
-    ds = resolve_dataset(dataset, Commons())
+    ds = resolve_dataset(dataset)
     medium = ds.collections[0].fields[0]
     assert medium.enum == ("T", "U", "V")
 
@@ -823,12 +801,12 @@ def test_indexable_propagates_to_resolved_field():
             ],
         }
     )
-    ds = resolve_dataset(dataset, Commons())
+    ds = resolve_dataset(dataset)
     assert ds.collections[0].fields[0].indexable is True
 
 
-def test_error_message_contains_full_path_for_nested_bad_type_ref():
-    """where context must compose so the error names the sub-field path."""
+def test_error_message_contains_full_path_for_nested_bad_type():
+    """Resolution errors name the full sub-field path."""
     dataset = DatasetDef.model_validate(
         {
             "name": "myds",
@@ -839,7 +817,7 @@ def test_error_message_contains_full_path_for_nested_bad_type_ref():
                         {
                             "name": "kvalitet",
                             "type": "object",
-                            "fields": [{"name": "method", "type_ref": "no_such_type"}],
+                            "fields": [{"name": "method", "type": "no_such_type"}],
                         }
                     ],
                 }
@@ -847,29 +825,7 @@ def test_error_message_contains_full_path_for_nested_bad_type_ref():
         }
     )
     with pytest.raises(DescriptionError, match="kvalitet"):
-        resolve_dataset(dataset, Commons())
-
-
-def test_dataset_codelist_takes_precedence_over_commons():
-    """Dataset-local codelists must shadow a commons codelist of the same name."""
-    commons = Commons.model_validate(
-        {"code_lists": [{"name": "medium", "values": [{"code": "COMMONS_ONLY"}]}]}
-    )
-    dataset = DatasetDef.model_validate(
-        {
-            "name": "x",
-            "codelists": [{"name": "medium", "values": [{"code": "DATASET_VALUE"}]}],
-            "collections": [
-                {"name": "c", "fields": [{"name": "f", "codelist": "medium"}]}
-            ],
-        }
-    )
-    ds = resolve_dataset(dataset, commons)
-    # The field resolves successfully (both sources have "medium"), and the
-    # dataset codelist is used. We can't directly inspect which was picked
-    # from ResolvedField, but the key assertion is that it resolves at all
-    # and that adding a dataset codelist doesn't break the lookup.
-    assert ds.collections[0].fields[0].codelist == "medium"
+        resolve_dataset(dataset)
 
 
 def test_outward_identifier_dot_path_validated_against_fields():
@@ -893,7 +849,7 @@ def test_outward_identifier_dot_path_validated_against_fields():
         }
     )
     with pytest.raises(DescriptionError, match="outward_identifier"):
-        resolve_dataset(dataset, Commons())
+        resolve_dataset(dataset)
 
 
 def test_server_managed_dot_path_validated_against_fields():
@@ -911,7 +867,7 @@ def test_server_managed_dot_path_validated_against_fields():
         }
     )
     with pytest.raises(DescriptionError, match="server_managed"):
-        resolve_dataset(dataset, Commons())
+        resolve_dataset(dataset)
 
 
 def test_outward_identifier_and_server_managed_stored_on_resolved_collection():
@@ -941,7 +897,7 @@ def test_outward_identifier_and_server_managed_stored_on_resolved_collection():
             ],
         }
     )
-    ds = resolve_dataset(dataset, Commons())
+    ds = resolve_dataset(dataset)
     coll = ds.collections[0]
     assert coll.outward_identifier_path == "identifikasjon.lokalid"
     assert coll.server_managed_paths["identifikasjon.versjonid"] == "timestamp_iso"
@@ -952,8 +908,7 @@ def test_outward_identifier_and_server_managed_stored_on_resolved_collection():
 # --------------------------------------------------------------------------
 
 
-def test_codelist_defined_only_in_dataset_resolves():
-    """Dataset-local codelist with no commons counterpart must resolve."""
+def test_codelist_resolves():
     dataset = DatasetDef.model_validate(
         {
             "name": "x",
@@ -963,42 +918,21 @@ def test_codelist_defined_only_in_dataset_resolves():
             ],
         }
     )
-    ds = resolve_dataset(dataset, Commons())
+    ds = resolve_dataset(dataset)
     assert ds.collections[0].fields[0].codelist == "medium"
 
 
-def test_codelist_only_in_commons_still_resolves():
-    """Adding dataset.codelists must not break the existing commons lookup path."""
-    commons = Commons.model_validate(
-        {"code_lists": [{"name": "existing", "values": [{"code": "A"}]}]}
-    )
-    dataset = DatasetDef.model_validate(
-        {
-            "name": "x",
-            "collections": [
-                {"name": "c", "fields": [{"name": "f", "codelist": "existing"}]}
-            ],
-        }
-    )
-    ds = resolve_dataset(dataset, commons)
-    assert ds.collections[0].fields[0].codelist == "existing"
-
-
 # --------------------------------------------------------------------------
-# FieldDef: exactly one of type / type_ref / codelist
+# FieldDef: exactly one of type / codelist
 # --------------------------------------------------------------------------
 @pytest.mark.parametrize(
     "fld",
     [
-        {"name": "f", "type": "string", "type_ref": "x"},
         {"name": "f", "type": "string", "codelist": "c"},
-        {"name": "f", "type_ref": "x", "codelist": "c"},
-        {"name": "f", "type": "string", "type_ref": "x", "codelist": "c"},
     ],
 )
 def test_field_rejects_multiple_type_sources(fld):
-    """Setting more than one silently prioritized codelist > type_ref > type
-    in the resolver, hiding authoring mistakes. Reject at parse time."""
+    """Reject ambiguous type declarations before resolving fields."""
     with pytest.raises(ValidationError):
         FieldDef.model_validate(fld)
 
@@ -1035,7 +969,7 @@ def test_codelist_values_populated_from_declared_codes():
             ],
         }
     )
-    ds = resolve_dataset(dataset, Commons())
+    ds = resolve_dataset(dataset)
     assert ds.collections[0].fields[0].codelist_values == ("ASFALT", "GRUS", "STEIN")
 
 
@@ -1051,5 +985,5 @@ def test_codelist_with_no_values_gives_empty_codelist_values():
             ],
         }
     )
-    ds = resolve_dataset(dataset, Commons())
+    ds = resolve_dataset(dataset)
     assert ds.collections[0].fields[0].codelist_values == ()

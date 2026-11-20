@@ -5,7 +5,6 @@ from fixtures.description_cache import resolved_dataset
 
 from geocomponents.descriptions.loader import resolve_dataset
 from geocomponents.descriptions.models import (
-    Commons,
     DatasetDef,
     ResolvedCollection,
     ResolvedDataset,
@@ -74,7 +73,7 @@ def _synthetic_plan(
 
 def _topology_fixture_plan() -> SchemaPlan:
     raw = yaml.safe_load(TOPOLOGY_FIXTURE.read_text(encoding="utf-8"))
-    return build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw), Commons()))
+    return build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw)))
 
 
 def test_dispatch_exposes_all_feature_entrypoints_taking_dataset_and_collection():

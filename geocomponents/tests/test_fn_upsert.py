@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from http import HTTPStatus
 from pathlib import Path
+from uuid import uuid4
 
 import orjson
 import psycopg
@@ -17,7 +18,7 @@ from starlette.testclient import TestClient
 
 from geocomponents.api.pygeoapi_provider import PygeoapiProvider
 from geocomponents.descriptions.loader import resolve_dataset
-from geocomponents.descriptions.models import Commons, DatasetDef
+from geocomponents.descriptions.models import DatasetDef
 from geocomponents.gateway.mounter import build_gateway
 from geocomponents.schema.build import build_schema_plan
 
@@ -26,7 +27,7 @@ _FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "oi_fixture.yaml"
 
 def _load_dataset():
     raw = yaml.safe_load(_FIXTURE_PATH.read_text(encoding="utf-8"))
-    return resolve_dataset(DatasetDef.model_validate(raw), Commons())
+    return resolve_dataset(DatasetDef.model_validate(raw))
 
 
 _DATASET = _load_dataset()
@@ -64,6 +65,20 @@ def test_upsert_without_outward_identifier_sub_key_is_rejected(oi_client, conn):
         cur.execute(
             "select ogc.feature_upsert(%s, %s, %s)",
             ("test_oid", "with_oi", orjson.dumps(_feature()).decode()),
+        )
+    assert exc.value.sqlstate == "P0001"
+
+
+def test_upsert_enforces_declared_string_length(oi_client, conn):
+    feature = _feature(str(uuid4()))
+    feature["properties"]["label"] = "12345"
+    with (
+        pytest.raises(psycopg.Error, match=r"label.*max_length") as exc,
+        conn.cursor() as cur,
+    ):
+        cur.execute(
+            "select ogc.feature_upsert(%s, %s, %s)",
+            ("test_oid", "with_oi", orjson.dumps(feature).decode()),
         )
     assert exc.value.sqlstate == "P0001"
 

@@ -4,8 +4,8 @@ Mapping rules (the heart of "description owns the names"):
 
 * dataset            -> PostgreSQL schema (named after the dataset)
 * collection         -> table inside that schema
-* every collection   -> id (uuid PK) + geometry + created_at/updated_at columns
-* commons + own fields -> attribute columns
+* every collection   -> id (uuid PK) + geometry column
+* declared fields    -> attribute columns
 * relationship       -> rows in ``<ds>.association_role``
 * each collection    -> one function name per operation (``<table>_<op>``)
 """
@@ -59,9 +59,7 @@ def _standard_columns() -> list[ColumnPlan]:
     return [
         ColumnPlan(
             "id", "uuid", nullable=False, primary_key=True, default="gen_random_uuid()"
-        ),
-        ColumnPlan("created_at", "timestamptz", nullable=False, default="now()"),
-        ColumnPlan("updated_at", "timestamptz", nullable=False, default="now()"),
+        )
     ]
 
 
@@ -78,6 +76,7 @@ def _nested_field_plan(
         required=field.required,
         server_supplied=field_path in server_supplied_paths,
         codelist_values=field.codelist_values,
+        max_length=field.max_length,
         fields=tuple(
             _nested_field_plan(
                 child,
@@ -118,7 +117,7 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
 
             # The standalone `outward_identifier:` key is stored separately from
             # `server_managed_paths`.  If it targets a sub-field of this JSONB
-            # column, apply the same strip-on-write / inject-on-read behaviour.
+            # column, apply the same strip-on-write / inject-on-read behavior.
             if coll.outward_identifier_path is not None:
                 oi_parts = coll.outward_identifier_path.split(".", 1)
                 if len(oi_parts) == 2 and oi_parts[0] == fld.name:  # noqa: PLR2004
@@ -175,6 +174,7 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
                     fld.sql_type,
                     nullable=not fld.required,
                     auto_increment=fld.auto_increment,
+                    max_length=fld.max_length,
                     codelist_values=fld.codelist_values,
                     server_write_expr=server_write_expr,
                 )

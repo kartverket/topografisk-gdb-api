@@ -118,6 +118,7 @@ class NestedFieldPlan:
     server_supplied: bool = False
     codelist_values: tuple[str, ...] = ()
     fields: tuple[NestedFieldPlan, ...] = ()
+    max_length: int | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +129,7 @@ class ColumnPlan:
     primary_key: bool = False
     default: str | None = None
     auto_increment: bool = False
+    max_length: int | None = None
     # JSONB-only: keys stripped from incoming feature properties before storing.
     strip_keys: tuple[str, ...] = ()
     # JSONB-only: key injected as id::text in the GeoJSON read response.

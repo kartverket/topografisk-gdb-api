@@ -2,13 +2,13 @@
 
 Two layers live here:
 
-* **Raw** Pydantic models (``Commons``, ``Dataset`` ...) that validate the
+* **Raw** Pydantic models (``DatasetDef``, ``CollectionDef`` ...) that validate the
   *shape of a description document* — names present, field types known, refs
   resolvable. They do **not** validate feature data.
 * **Resolved** dataclasses (``ResolvedDataset`` ...) produced by the loader
-  after merging commons, inheriting the base schema, and turning type tokens
-  into concrete SQL types. Everything downstream (schema generation, the API
-  adapter) reads the resolved layer, so it never deals with commons indirection.
+  after resolving code-list references and turning type tokens into concrete
+  SQL types. Everything downstream (schema generation, the API adapter) reads
+  the resolved layer.
 
 The resolved layer is intentionally DB-neutral: ``sql_type`` happens to be a
 PostgreSQL type here, but the concept (a column with a type) is generic.
@@ -23,7 +23,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 # --------------------------------------------------------------------------
-# Builtin scalar types -> PostgreSQL column types. FieldType.sql_type overrides.
+# Builtin scalar types -> PostgreSQL column types.
 # --------------------------------------------------------------------------
 BUILTIN_SQL_TYPES: dict[str, str] = {
     "string": "text",
@@ -70,14 +70,6 @@ SafeIdentifier = Annotated[
 # --------------------------------------------------------------------------
 # Raw description documents (validated structure, not data)
 # --------------------------------------------------------------------------
-class FieldType(BaseModel):
-    """A named, reusable attribute type referenced across collections."""
-
-    name: SafeIdentifier
-    sql_type: str
-    description: str | None = None
-
-
 class CodeListValue(BaseModel):
     code: str
     label: str | None = None
@@ -98,8 +90,8 @@ _VALID_SERVER_MANAGED_TOKENS: frozenset[str] = frozenset(
 class FieldDef(BaseModel):
     """One attribute of a collection.
 
-    Exactly one of ``type`` (builtin token), ``type_ref`` (a ``FieldType``
-    name) or ``codelist`` (a ``CodeList`` name) selects the column type.
+    Exactly one of ``type`` (builtin token) or ``codelist`` (a ``CodeList``
+    name) selects the column type.
     For ``type: object``, ``fields`` must be non-empty and defines the
     nested sub-fields (stored as JSONB at arbitrary depth).
     """
@@ -108,8 +100,8 @@ class FieldDef(BaseModel):
 
     name: SafeIdentifier
     type: str | None = None
-    type_ref: str | None = None
     codelist: str | None = None
+    max_length: int | None = Field(default=None, gt=0)
     required: bool = False
     auto_increment: bool = False
     description: str | None = None
@@ -121,26 +113,15 @@ class FieldDef(BaseModel):
     indexable: bool = False
 
     @model_validator(mode="after")
-    def _exactly_one_type_source(self):
-        if self.type == "object":
-            if not self.fields:
-                raise ValueError(
-                    "field with type='object' must have at least one sub-field "
-                    "in 'fields'"
-                )
-            if self.type_ref is not None or self.codelist is not None:
-                raise ValueError(
-                    "field with type='object' must not also set type_ref or codelist"
-                )
-        else:
-            n_set = sum(
-                x is not None for x in (self.type, self.type_ref, self.codelist)
+    def _validate_field(self):
+        if (self.type is None) == (self.codelist is None):
+            raise ValueError("field must set exactly one of type / codelist")
+        if self.type == "object" and not self.fields:
+            raise ValueError(
+                "field with type='object' must have at least one sub-field in 'fields'"
             )
-            if n_set != 1:
-                raise ValueError(
-                    "field must set exactly one of type / type_ref / codelist "
-                    f"(got {n_set})"
-                )
+        if self.max_length is not None and self.type != "string":
+            raise ValueError("max_length is only supported for string fields")
         if self.auto_increment and self.type != "integer":
             raise ValueError("auto_increment is only supported for integer fields")
         return self
@@ -270,19 +251,6 @@ class CollectionDef(BaseModel):
         return self
 
 
-class Commons(BaseModel):
-    """Shared definitions inherited by every collection in every dataset.
-
-    ``base_fields`` are extra attributes every collection gets (on top of the
-    always-present id/geometry/audit columns). ``field_types`` and
-    ``code_lists`` are the reusable vocabularies fields may reference.
-    """
-
-    base_fields: list[FieldDef] = Field(default_factory=list)
-    field_types: list[FieldType] = Field(default_factory=list)
-    code_lists: list[CodeList] = Field(default_factory=list)
-
-
 class DatasetDef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -314,6 +282,7 @@ class ResolvedField:
     indexable: bool = False
     # Actual code values from the referenced CodeList (used for DB validation).
     codelist_values: tuple[str, ...] = field(default_factory=tuple)
+    max_length: int | None = None
 
 
 @dataclass(frozen=True)
