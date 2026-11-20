@@ -17,7 +17,7 @@ import yaml
 from conftest import _schema_conn
 
 from geocomponents.descriptions.loader import resolve_dataset
-from geocomponents.descriptions.models import Commons, DatasetDef
+from geocomponents.descriptions.models import DatasetDef
 from geocomponents.schema import functions, postgis
 from geocomponents.schema.build import build_schema_plan
 
@@ -189,7 +189,7 @@ def _topology_fixture_raw_without_bounds() -> dict:
 
 
 def _load_plan_from_raw(raw: dict):
-    return build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw), Commons()))
+    return build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw)))
 
 
 def _case_schema_key(raw: dict) -> str:
@@ -2339,7 +2339,7 @@ def test_no_link_properties_collection_generates_unchanged_sql():
         "name": "x",
         "collections": [{"name": "c", "geometry": {"type": "Point", "srid": 4326}}],
     }
-    plan = build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw), Commons()))
+    plan = build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw)))
     coll = plan.collections[0]
     assert coll.roles == ()
 
@@ -3702,7 +3702,7 @@ def test_upsert_rejects_declared_link_property(db):
             },
         ],
     }
-    plan = build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw), Commons()))
+    plan = build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw)))
     doc_plan = next(c for c in plan.collections if c.collection_name == "doc")
     assert doc_plan.upsert_field is not None
     assert doc_plan.roles

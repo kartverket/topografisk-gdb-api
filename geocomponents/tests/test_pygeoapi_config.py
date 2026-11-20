@@ -271,6 +271,13 @@ def test_field_schema_jsonb_depth2_nesting_recurses():
     assert schema["properties"]["inner"]["properties"]["x"]["type"] == "string"
 
 
+def test_field_schema_advertises_string_length_at_nested_levels():
+    inner = ResolvedField("name", "varchar(4)", max_length=4)
+    outer = ResolvedField("details", "jsonb", sub_fields=(inner,))
+    assert _field_schema(inner) == {"type": "string", "maxLength": 4}
+    assert _field_schema(outer)["properties"]["name"] == _field_schema(inner)
+
+
 def test_field_schema_codelist_values_wins_over_doc_enum():
     """Pre-code suspect: when both codelist_values and enum are set,
     codelist_values (enforced) must appear in the schema enum — not the doc hint."""

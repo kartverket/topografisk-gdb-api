@@ -22,7 +22,8 @@ collections:
         type: string
         required: true
       - name: municipality
-        type_ref: municipality_code
+        type: string
+        max_length: 4
       - name: status
         codelist: parcel_status
       - name: area_m2
@@ -57,3 +58,11 @@ collections:
     fields:
       - name: code
         type: string
+
+codelists:
+  - name: parcel_status
+    values:
+      - code: active
+        label: Active
+      - code: retired
+        label: Retired

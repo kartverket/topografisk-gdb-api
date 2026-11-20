@@ -6,8 +6,6 @@ from pathlib import Path
 
 import yaml
 
-COMMONS_FILENAME = "commons.yaml"
-
 
 class DescriptionError(ValueError):
     """Raised when a shared dataset description is invalid for gcjobs."""
@@ -48,9 +46,6 @@ def load_dataset_descriptions(
     seen_names: set[str] = set()
 
     for path in sorted(resolved_dir.glob("*.yaml")):
-        if path.name == COMMONS_FILENAME:
-            continue
-
         raw_dataset = _read_yaml(path)
         raw_name = raw_dataset.get("name")
         if not isinstance(raw_name, str) or not raw_name.strip():
