@@ -740,6 +740,27 @@ def _enum_checks(writable: list[ColumnPlan], *, guarded_by_presence: bool) -> li
     return checks
 
 
+def _length_checks(
+    writable: list[ColumnPlan], *, guarded_by_presence: bool
+) -> list[str]:
+    checks: list[str] = []
+    for col in writable:
+        if col.max_length is None:
+            continue
+        key = _quote_key(col.name)
+        value_expr = f"feature->'properties'->>'{key}'"
+        presence = (
+            f"feature->'properties' ? '{key}' and " if guarded_by_presence else ""
+        )
+        checks.append(
+            f"  if {presence}char_length({value_expr}) > {col.max_length} then\n"
+            f"    raise exception 'field {col.name}: exceeds max_length {col.max_length}' "
+            "using errcode = 'P0001';\n"
+            "  end if;"
+        )
+    return checks
+
+
 def _json_value_expr(parent_expr: str, key: str) -> str:
     return f"({parent_expr}->'{_quote_key(key)}')"
 
@@ -771,7 +792,12 @@ def _nested_field_checks(
         "double precision": "number",
         "boolean": "boolean",
         "jsonb": "object",
-    }[field.sql_type]
+    }.get(field.sql_type)
+    if expected_json_type is None:
+        if field.sql_type.startswith("varchar("):
+            expected_json_type = "string"
+        else:
+            raise ValueError(f"unknown nested field SQL type: {field.sql_type}")
     checks.append(
         f"  if {parent_expr} ? '{key}' "
         f"and jsonb_typeof({value_expr}) not in ('null', '{expected_json_type}') then\n"
@@ -779,6 +805,14 @@ def _nested_field_checks(
         "using errcode = 'P0001';\n"
         "  end if;"
     )
+    if field.max_length is not None:
+        checks.append(
+            f"  if jsonb_typeof({value_expr}) = 'string' "
+            f"and char_length({value_expr} #>> '{{}}') > {field.max_length} then\n"
+            f"    raise exception 'field {path}: exceeds max_length {field.max_length}' "
+            "using errcode = 'P0001';\n"
+            "  end if;"
+        )
 
     if field.sql_type == "integer":
         number_text = f"({value_expr} #>> '{{}}')"
@@ -1901,6 +1935,7 @@ def _fn_create(plan: CollectionPlan) -> str:
     validations = [
         id_checks,
         *_enum_checks(writable, guarded_by_presence=False),
+        *_length_checks(writable, guarded_by_presence=False),
         *_nested_checks(writable, guarded_by_presence=False),
         *_geom_checks(plan, guarded_by_presence=False),
     ]
@@ -1986,6 +2021,7 @@ def _fn_upsert(plan: CollectionPlan) -> str:
     validations = [
         id_checks,
         *_enum_checks(writable, guarded_by_presence=False),
+        *_length_checks(writable, guarded_by_presence=False),
         *_nested_checks(writable, guarded_by_presence=False),
         *_geom_checks(plan, guarded_by_presence=False),
     ]
@@ -2023,6 +2059,7 @@ def _fn_replace(plan: CollectionPlan) -> str:
     set_clause = ",\n      ".join(sets)
     validations = [
         *_enum_checks(writable, guarded_by_presence=False),
+        *_length_checks(writable, guarded_by_presence=False),
         *_nested_checks(writable, guarded_by_presence=False),
         *_geom_checks(plan, guarded_by_presence=False),
     ]
@@ -2092,6 +2129,7 @@ def _fn_update(plan: CollectionPlan) -> str:
     set_clause = ",\n      ".join(sets)
     validations = [
         *_enum_checks(writable, guarded_by_presence=True),
+        *_length_checks(writable, guarded_by_presence=True),
         *_nested_checks(writable, guarded_by_presence=True),
         *_geom_checks(plan, guarded_by_presence=True),
     ]

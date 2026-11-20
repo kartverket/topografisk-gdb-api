@@ -11,7 +11,6 @@ Use these pages to look up the exact description keys and database behavior.
 - [Dataset and collection names](./dataset-and-collection-names.md) cover naming rules.
 - [Relationship descriptions](./relationship-descriptions.md) cover links between features.
 - [Server-managed fields](./server-managed-fields.md) cover values provided by the server.
-- [Shared definitions](./shared-definitions.md) cover reusable fields, types, and code lists.
 - [Process descriptions](./process-descriptions.md) cover exposed processes.
 
 ## Database interface

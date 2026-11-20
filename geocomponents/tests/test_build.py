@@ -145,7 +145,7 @@ def test_standard_columns_and_geometry_present():
     plan = _cadastre_plan()
     parcels = next(c for c in plan.collections if c.collection_name == "parcels")
     names = {col.name for col in parcels.table.columns}
-    assert names == {"id", "source", "label", "municipality", "status", "area_m2"}
+    assert names == {"id", "label", "municipality", "status", "area_m2"}
     assert parcels.table.id_column == "id"
     assert parcels.table.geometry.geometry_type == "MultiPolygon"
     assert parcels.table.geometry.srid == WGS84_SRID

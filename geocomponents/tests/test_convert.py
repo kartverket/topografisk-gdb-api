@@ -10,7 +10,7 @@ import yaml
 
 from geocomponents.convert import _safe_id, convert_qms
 from geocomponents.descriptions.loader import resolve_dataset
-from geocomponents.descriptions.models import Commons, DatasetDef
+from geocomponents.descriptions.models import DatasetDef
 
 QMS_FILE = Path(__file__).resolve().parents[2] / "UML-schemas" / "FKBBane_50_qms.json"
 
@@ -134,5 +134,5 @@ def test_convert_output_validates_as_geocomponents_dataset(qms_data):
 
     yaml_str = convert_qms(qms_data, "fkb_bane", 4326, True)
     dataset = DatasetDef.model_validate(yaml.safe_load(yaml_str))
-    resolved = resolve_dataset(dataset, Commons())
+    resolved = resolve_dataset(dataset)
     assert len(resolved.collections) == 2

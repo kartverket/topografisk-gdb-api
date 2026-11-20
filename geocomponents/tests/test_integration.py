@@ -32,7 +32,7 @@ PARCEL = {
         "type": "MultiPolygon",
         "coordinates": [[[[10, 55], [10, 56], [11, 56], [11, 55], [10, 55]]]],
     },
-    "properties": {"label": "integration", "source": "test"},
+    "properties": {"label": "integration"},
 }
 # Self-intersecting (bowtie) polygon — ST_IsValid returns false.
 _INVALID_GEOM = {
@@ -62,7 +62,6 @@ BYGNING = {
         "oppdateringsdato": "2026-08-07T12:00:00Z",
         "datafangstdato": "2026-08-07T12:00:00Z",
         "objtype": "BygningBru",
-        "source": "test",
     },
 }
 
@@ -89,7 +88,6 @@ BYGNING_OMRADE = {
         "oppdateringsdato": "2026-08-07T12:00:00Z",
         "datafangstdato": "2026-08-07T12:00:00Z",
         "objtype": "AnnenBygning",
-        "source": "test",
     },
 }
 
@@ -112,7 +110,6 @@ BYGNING_SENTERLINJE = {
         "datafangstdato": "2026-08-07T12:00:00Z",
         "objtype": "Hjelpelinje3D",
         "tredniva": "2",
-        "source": "test",
     },
 }
 
@@ -134,7 +131,6 @@ BYGNING_POSISJON = {
         "bygningstype": 241,
         "bygningsstatus": "IG",
         "kommunenummer": "3437",
-        "source": "test",
     },
 }
 # --------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 """Load + validate + resolve dataset descriptions.
 
-Pipeline: read YAML -> validate raw structure (Pydantic) -> merge the commons
-base schema into every collection, resolve type/codelist/relationship refs ->
+Pipeline: read YAML -> validate raw structure (Pydantic) -> resolve
+codelist/relationship refs ->
 return DB-neutral ``ResolvedDataset`` objects.
 
 This is the layer a future GML/UML -> description factory would target: it just
@@ -19,10 +19,8 @@ from geocomponents.descriptions.models import (
     BUILTIN_SQL_TYPES,
     CodeList,
     CollectionDef,
-    Commons,
     DatasetDef,
     FieldDef,
-    FieldType,
     ResolvedCollection,
     ResolvedDataset,
     ResolvedDerivedDef,
@@ -51,19 +49,11 @@ class PreparedCollection:
 
 
 def _read_yaml(path: Path) -> dict:
-    # Pin UTF-8; host locale defaults would mojibake Norwegian å/ø/æ.
     with path.open(encoding="utf-8") as fh:
         data = yaml.safe_load(fh) or {}
     if not isinstance(data, dict):
         raise DescriptionError(f"{path}: expected a mapping at the top level")
     return data
-
-
-def load_commons(path: Path) -> Commons:
-    try:
-        return Commons.model_validate(_read_yaml(path))
-    except Exception as exc:
-        raise DescriptionError(f"invalid commons file {path}: {exc}") from exc
 
 
 def load_dataset(path: Path) -> DatasetDef:
@@ -85,7 +75,6 @@ def _validate_collection_name(name: str, *, where: str) -> None:
 # --------------------------------------------------------------------------
 def _resolve_field(
     fld: FieldDef,
-    types: dict[str, FieldType],
     codelists: dict[str, CodeList],
     *,
     where: str,
@@ -96,7 +85,7 @@ def _resolve_field(
         # name the full field path (e.g. "… / field 'kvalitet' / field 'x'").
         child_where = f"{where} / field '{fld.name}'"
         sub = tuple(
-            _resolve_field(sf, types, codelists, where=child_where) for sf in fld.fields
+            _resolve_field(sf, codelists, where=child_where) for sf in fld.fields
         )
         return ResolvedField(
             fld.name,
@@ -127,20 +116,6 @@ def _resolve_field(
             codelist_values=tuple(v.code for v in cl.values),
         )
 
-    if fld.type_ref is not None:
-        if fld.type_ref not in types:
-            raise DescriptionError(
-                f"{where}: field '{fld.name}' references unknown type '{fld.type_ref}'"
-            )
-        return ResolvedField(
-            fld.name,
-            types[fld.type_ref].sql_type,
-            fld.required,
-            auto_increment=fld.auto_increment,
-            enum=tuple(fld.enum),
-            indexable=fld.indexable,
-        )
-
     if fld.type is not None:
         if fld.type not in BUILTIN_SQL_TYPES:
             raise DescriptionError(
@@ -149,14 +124,17 @@ def _resolve_field(
             )
         return ResolvedField(
             fld.name,
-            BUILTIN_SQL_TYPES[fld.type],
+            f"varchar({fld.max_length})"
+            if fld.type == "string" and fld.max_length is not None
+            else BUILTIN_SQL_TYPES[fld.type],
             fld.required,
             auto_increment=fld.auto_increment,
             enum=tuple(fld.enum),
             indexable=fld.indexable,
+            max_length=fld.max_length,
         )
 
-    # FieldDef enforces "exactly one of type / type_ref / codelist" at parse time,
+    # FieldDef enforces "exactly one of type / codelist" at parse time,
     # so this branch is unreachable.
     raise AssertionError(
         f"{where}: field '{fld.name}' has no type source (should be unreachable)"
@@ -332,11 +310,8 @@ def _validate_bounds(
         )
 
 
-def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
-    types = {t.name: t for t in commons.field_types}
-    # Dataset-local codelists take precedence over commons codelists.
-    codelists: dict[str, CodeList] = {c.name: c for c in commons.code_lists}
-    codelists.update({c.name: c for c in dataset.codelists})
+def resolve_dataset(dataset: DatasetDef) -> ResolvedDataset:
+    codelists: dict[str, CodeList] = {c.name: c for c in dataset.codelists}
     targeted_collections = {
         rel.target for coll in dataset.collections for rel in coll.relationships
     }
@@ -357,17 +332,14 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
         where = f"dataset '{dataset.name}' / collection '{coll.name}'"
         _validate_collection_name(coll.name, where=where)
 
-        # Shared base schema: commons.base_fields are prepended, then the
-        # collection's own fields. (id/geometry/audit columns are added later
-        # by the schema builder, not modelled as ordinary fields.)
-        merged_fields: list[FieldDef] = [*commons.base_fields, *coll.fields]
+        # id and geometry are added later by the schema builder.
         seen: set[str] = set()
         resolved_fields: list[ResolvedField] = []
-        for fld in merged_fields:
+        for fld in coll.fields:
             if fld.name in seen:
                 raise DescriptionError(f"{where}: duplicate field name '{fld.name}'")
             seen.add(fld.name)
-            resolved_fields.append(_resolve_field(fld, types, codelists, where=where))
+            resolved_fields.append(_resolve_field(fld, codelists, where=where))
 
         resolved_tuple = tuple(resolved_fields)
         if coll.outward_identifier:
@@ -398,9 +370,7 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
                 f"{where}: resolved upsert field references unknown field "
                 f"'{resolved_upsert_field}'"
             )
-        auto_increment_fields = {
-            fld.name for fld in merged_fields if fld.auto_increment
-        }
+        auto_increment_fields = {fld.name for fld in coll.fields if fld.auto_increment}
         if (
             resolved_upsert_field is not None
             and upsert_alias_paths[resolved_upsert_field] in auto_increment_fields
@@ -478,20 +448,13 @@ def resolve_dataset(dataset: DatasetDef, commons: Commons) -> ResolvedDataset:
 
 def load_resolved_datasets(
     descriptions_dir: Path,
-    commons_filename: str = "commons.yaml",
 ) -> list[ResolvedDataset]:
     """Read every ``*.yaml`` in ``descriptions_dir``, validate, and return the
-    resolved datasets with the optional ``commons.yaml`` merged into them,
-    sorted by name.
+    resolved datasets sorted by name.
     """
 
     descriptions_dir = Path(descriptions_dir)
-    commons_path = descriptions_dir / commons_filename
-    commons = load_commons(commons_path) if commons_path.exists() else Commons()
-
     datasets: list[ResolvedDataset] = []
     for path in sorted(descriptions_dir.glob("*.yaml")):
-        if path.name == commons_filename:
-            continue
-        datasets.append(resolve_dataset(load_dataset(path), commons))
+        datasets.append(resolve_dataset(load_dataset(path)))
     return datasets

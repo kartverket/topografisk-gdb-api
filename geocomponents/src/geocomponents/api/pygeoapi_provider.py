@@ -97,6 +97,8 @@ def _field_schema(fld: ResolvedField) -> dict:
             "properties": {sf.name: _field_schema(sf) for sf in fld.sub_fields},
         }
     schema: dict = {"type": _json_type(fld.sql_type)}
+    if fld.max_length is not None:
+        schema["maxLength"] = fld.max_length
     # Enforced codelist values take priority over documentation-only enum hints.
     values = fld.codelist_values or fld.enum
     if values:
