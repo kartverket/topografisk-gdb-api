@@ -4,7 +4,7 @@ Mapping rules (the heart of "description owns the names"):
 
 * dataset            -> PostgreSQL schema (named after the dataset)
 * collection         -> table inside that schema
-* every collection   -> id (uuid PK) + geometry + created_at/updated_at columns
+* every collection   -> id (uuid PK) + geometry column
 * commons + own fields -> attribute columns
 * relationship       -> rows in ``<ds>.association_role``
 * each collection    -> one function name per operation (``<table>_<op>``)
@@ -59,9 +59,7 @@ def _standard_columns() -> list[ColumnPlan]:
     return [
         ColumnPlan(
             "id", "uuid", nullable=False, primary_key=True, default="gen_random_uuid()"
-        ),
-        ColumnPlan("created_at", "timestamptz", nullable=False, default="now()"),
-        ColumnPlan("updated_at", "timestamptz", nullable=False, default="now()"),
+        )
     ]
 
 

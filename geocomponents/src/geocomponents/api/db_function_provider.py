@@ -141,19 +141,9 @@ class DbFunctionProvider(BaseProvider):
 
         Drives the OpenAPI POST/PUT request body and the ``/schema`` endpoint, so
         the docs show the exact geometry type and attributes a feature carries.
-        Server-managed columns (``created_at``/``updated_at``) are read-only.
+        Declared fields are included in the feature properties schema.
         """
         properties = {name: dict(spec) for name, spec in self._field_defs.items()}
-        properties["created_at"] = {
-            "type": "string",
-            "format": "date-time",
-            "readOnly": True,
-        }
-        properties["updated_at"] = {
-            "type": "string",
-            "format": "date-time",
-            "readOnly": True,
-        }
         schema = {
             "type": "object",
             "required": ["type", "geometry", "properties"],

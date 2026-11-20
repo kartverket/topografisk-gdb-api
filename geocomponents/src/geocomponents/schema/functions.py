@@ -37,8 +37,6 @@ from geocomponents.schema.plan import (
     TablePlan,
 )
 
-# Audit columns are server-managed; never written from incoming features.
-_AUDIT = ("created_at", "updated_at")
 _SCHEMA_DIR = Path(__file__).resolve().parent
 
 
@@ -599,7 +597,7 @@ def _writable_columns(table: TablePlan) -> list[ColumnPlan]:
     return [
         c
         for c in table.property_columns
-        if c.name not in _AUDIT and not c.auto_increment and not c.server_write_expr
+        if not c.auto_increment and not c.server_write_expr
     ]
 
 
@@ -1984,7 +1982,6 @@ def _fn_upsert(plan: CollectionPlan) -> str:
     sets = [f'"{t.geometry.name}" = excluded."{t.geometry.name}"']
     sets += [f'"{c.name}" = excluded."{c.name}"' for c in writable]
     sets += [f'"{c.name}" = {c.server_write_expr}' for c in sw]
-    sets.append('"updated_at" = now()')
     set_clause = ",\n      ".join(sets)
     validations = [
         id_checks,
@@ -2023,7 +2020,6 @@ def _fn_replace(plan: CollectionPlan) -> str:
     sets = [f'"{t.geometry.name}" = {_geometry_replace_value(plan)}']
     sets += [f'"{c.name}" = {_prop_read(c)}' for c in writable]
     sets += [f'"{c.name}" = {c.server_write_expr}' for c in sw]
-    sets.append('"updated_at" = now()')
     set_clause = ",\n      ".join(sets)
     validations = [
         *_enum_checks(writable, guarded_by_presence=False),
@@ -2093,7 +2089,6 @@ def _fn_update(plan: CollectionPlan) -> str:
         )
     # server_write columns are always refreshed on any write, unconditionally.
     sets += [f'"{c.name}" = {c.server_write_expr}' for c in sw]
-    sets.append('"updated_at" = now()')
     set_clause = ",\n      ".join(sets)
     validations = [
         *_enum_checks(writable, guarded_by_presence=True),
