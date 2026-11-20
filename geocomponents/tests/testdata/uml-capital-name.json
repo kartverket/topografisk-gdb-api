@@ -1,0 +1,18 @@
+{
+    "FeatureTypes": [
+        {
+            "Name": "Eksempel",
+            "GeometryTypes": [
+                {
+                    "Type": "GM_Point"
+                }
+            ],
+            "AttributeTypes": [
+                {
+                    "Name": "identifikasjon",
+                    "Type": "String"
+                }
+            ]
+        }
+    ]
+}

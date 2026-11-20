@@ -1,0 +1,16 @@
+name: eksempel
+title: eksempel
+description: eksempel
+collections:
+- name: eksempel
+  title: Eksempel
+  description: ''
+  geometry:
+    type: MultiPoint
+    srid: 25833
+    has_z: true
+  outward_identifier: identifikasjon
+  fields:
+  - name: identifikasjon
+    type: string
+codelists: []

@@ -1,0 +1,180 @@
+name: fkb_bane
+title: FKB-Bane
+description: FKB-Bane 5.0
+collections:
+- name: jernbaneplattformkant
+  title: Jernbaneplattformkant
+  description: yttergrense av konstruksjon til bruk ved av-/påstigning for passasjerer
+    eller ved av-/pålasting av gods
+  geometry:
+    type: MultiLineString
+    srid: 5973
+    has_z: true
+  outward_identifier: identifikasjon.lokalid
+  server_managed:
+    identifikasjon.versjonid: timestamp_iso
+    oppdateringsdato: timestamp_iso
+  fields:
+  - name: medium
+    codelist: medium
+    required: true
+  - name: eksternpeker
+    type: string
+  - name: kvalitet
+    type: object
+    required: true
+    fields:
+    - name: datafangstmetode
+      codelist: datafangstmetode
+      required: true
+    - name: noyaktighet
+      type: integer
+    - name: synbarhet
+      codelist: synbarhet
+    - name: datafangstmetodehoyde
+      codelist: datafangstmetode
+    - name: noyaktighethoyde
+      type: integer
+  - name: identifikasjon
+    type: object
+    required: true
+    fields:
+    - name: lokalid
+      type: string
+      required: true
+    - name: navnerom
+      type: string
+      required: true
+    - name: versjonid
+      type: string
+  - name: oppdateringsdato
+    type: timestamp
+    required: true
+  - name: sluttdato
+    type: timestamp
+  - name: datafangstdato
+    type: date
+    required: true
+  - name: verifiseringsdato
+    type: date
+  - name: registreringsversjon
+    codelist: registreringsversjon
+  - name: informasjon
+    type: string
+- name: spormidt
+  title: Spormidt
+  description: teoretisk linje midt mellom skinnestrengene
+  geometry:
+    type: MultiLineString
+    srid: 5973
+    has_z: true
+  outward_identifier: identifikasjon.lokalid
+  server_managed:
+    identifikasjon.versjonid: timestamp_iso
+    oppdateringsdato: timestamp_iso
+  fields:
+  - name: jernbanetype
+    codelist: jernbanetype
+    required: true
+  - name: hoydereferanse
+    codelist: hoydereferanse
+    required: true
+  - name: medium
+    codelist: medium
+    required: true
+  - name: eksternpeker
+    type: string
+  - name: kvalitet
+    type: object
+    required: true
+    fields:
+    - name: datafangstmetode
+      codelist: datafangstmetode
+      required: true
+    - name: noyaktighet
+      type: integer
+    - name: synbarhet
+      codelist: synbarhet
+    - name: datafangstmetodehoyde
+      codelist: datafangstmetode
+    - name: noyaktighethoyde
+      type: integer
+  - name: identifikasjon
+    type: object
+    required: true
+    fields:
+    - name: lokalid
+      type: string
+      required: true
+    - name: navnerom
+      type: string
+      required: true
+    - name: versjonid
+      type: string
+  - name: oppdateringsdato
+    type: timestamp
+    required: true
+  - name: sluttdato
+    type: timestamp
+  - name: datafangstdato
+    type: date
+    required: true
+  - name: verifiseringsdato
+    type: date
+  - name: registreringsversjon
+    codelist: registreringsversjon
+  - name: informasjon
+    type: string
+codelists:
+- name: medium
+  values:
+  - code: T
+  - code: X
+  - code: D
+  - code: I
+  - code: U
+  - code: V
+  - code: B
+  - code: L
+- name: datafangstmetode
+  values:
+  - code: byg
+  - code: ukj
+  - code: pla
+  - code: sat
+  - code: gen
+  - code: fot
+  - code: dig
+  - code: lan
+- name: synbarhet
+  values:
+  - code: '2'
+  - code: '3'
+  - code: '0'
+  - code: '1'
+- name: registreringsversjon
+  values:
+  - code: '2014-03-01'
+  - code: '2022-07-01'
+  - code: '2020-01-01'
+  - code: '2018-01-01'
+  - code: '2022-01-01'
+  - code: '2011-01-01'
+  - code: '2007-01-01'
+  - code: '2016-06-01'
+  - code: '2009-03-10'
+  - code: '2015-01-01'
+  - code: '2013-01-01'
+  - code: '2011-12-01'
+- name: jernbanetype
+  values:
+  - code: S
+  - code: K
+  - code: F
+  - code: J
+  - code: T
+- name: hoydereferanse
+  values:
+  - code: fot
+  - code: ukjent
+  - code: topp
