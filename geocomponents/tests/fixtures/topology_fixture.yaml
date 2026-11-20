@@ -23,7 +23,7 @@ collections:
       - property: boundedByShared
         target: border2
       - property: describedByNote
-        target: border3
+        target: NotatÅ
       - property: boundedByConditional
         target: border4
 
@@ -79,8 +79,8 @@ collections:
           - name: lokalid
             type: string
 
-  - name: border3
-    title: Border3
+  - name: NotatÅ
+    title: NotatÅ
     description: ''
     feature_model: topology
     geometry:

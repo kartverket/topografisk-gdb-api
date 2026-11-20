@@ -6,42 +6,28 @@ Should be gathered with other tests in the future
 from __future__ import annotations
 
 from http import HTTPStatus
-from pathlib import Path
 from uuid import uuid4
 
 import orjson
 import psycopg
 import pytest
-import yaml
 from conftest import _schema_conn
 from starlette.testclient import TestClient
 
 from geocomponents.api.pygeoapi_provider import PygeoapiProvider
-from geocomponents.descriptions.loader import resolve_dataset
-from geocomponents.descriptions.models import DatasetDef
 from geocomponents.gateway.mounter import build_gateway
 from geocomponents.schema.build import build_schema_plan
 
-_FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "oi_fixture.yaml"
-
-
-def _load_dataset():
-    raw = yaml.safe_load(_FIXTURE_PATH.read_text(encoding="utf-8"))
-    return resolve_dataset(DatasetDef.model_validate(raw))
-
-
-_DATASET = _load_dataset()
-
-_API = "/datasets/test_oid/ogc_api"
+_API = "/datasets/EksempelDatasett/ogc_api"
 _GEOM = {"type": "LineString", "coordinates": [[10.0, 55.0], [11.0, 56.0]]}
 
 
-@pytest.fixture(scope="module")
-def oi_client(db):
-    with _schema_conn(db, build_schema_plan(_DATASET)):
+@pytest.fixture
+def oi_client(db, simple_dataset):
+    with _schema_conn(db, build_schema_plan(simple_dataset)):
         yield TestClient(
             build_gateway(
-                [_DATASET],
+                [simple_dataset],
                 PygeoapiProvider(dsn=db),
                 base_url="http://localhost:8000",
             )
@@ -64,7 +50,7 @@ def test_upsert_without_outward_identifier_sub_key_is_rejected(oi_client, conn):
     with pytest.raises(psycopg.Error) as exc, conn.cursor() as cur:
         cur.execute(
             "select ogc.feature_upsert(%s, %s, %s)",
-            ("test_oid", "with_oi", orjson.dumps(_feature()).decode()),
+            ("EksempelDatasett", "with_oi", orjson.dumps(_feature()).decode()),
         )
     assert exc.value.sqlstate == "P0001"
 
@@ -78,7 +64,7 @@ def test_upsert_enforces_declared_string_length(oi_client, conn):
     ):
         cur.execute(
             "select ogc.feature_upsert(%s, %s, %s)",
-            ("test_oid", "with_oi", orjson.dumps(feature).decode()),
+            ("EksempelDatasett", "with_oi", orjson.dumps(feature).decode()),
         )
     assert exc.value.sqlstate == "P0001"
 
@@ -96,7 +82,11 @@ def test_feature_upserted_by_outward_identifier_is_reachable_by_it(oi_client, co
     with conn.cursor() as cur:
         cur.execute(
             "select ogc.feature_upsert(%s, %s, %s)",
-            ("test_oid", "with_oi", orjson.dumps(_feature(_BANE_UUID)).decode()),
+            (
+                "EksempelDatasett",
+                "with_oi",
+                orjson.dumps(_feature(_BANE_UUID)).decode(),
+            ),
         )
     r = oi_client.get(f"{_API}/collections/with_oi/items/{_BANE_UUID}?f=json")
     assert r.status_code == HTTPStatus.OK

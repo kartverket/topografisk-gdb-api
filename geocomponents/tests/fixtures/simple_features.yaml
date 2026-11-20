@@ -1,6 +1,6 @@
-name: test_oid
-title: outward_identifier (OI) Contract Test
-description: Fixture for outward-identifier-is-the-id contract tests.
+name: EksempelDatasett
+title: Example simple features
+description: Simple features with and without a projected identifier.
 processes:
   - upsert-batch
 
@@ -23,12 +23,19 @@ collections:
           - name: testoi
             type: string
 
-  - name: no_oi
-    title: No OI
-    description: ''
+  - name: NårwegiænØbject
+    title: Example object
+    description: 'Simple feature with norwegian letters and camelCase'
     geometry:
       type: LineString
       srid: 4326
     fields:
-      - name: label
+      - name: feltØ
         type: string
+        indexable: true
+      - name: egenskaper
+        type: object
+        fields:
+          - name: verdiÅ
+            type: integer
+            indexable: true

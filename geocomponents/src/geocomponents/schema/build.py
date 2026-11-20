@@ -127,7 +127,7 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
                     id_inject_key = sub_key
 
             # Functional indexes for directly indexable sub-fields.
-            # SafeIdentifier guarantees no single quotes in key names.
+            # Description names contain no quotes in JSON keys.
             for sf in fld.sub_fields:
                 if sf.indexable:
                     expr = f"(\"{fld.name}\"->>'{sf.name}')"

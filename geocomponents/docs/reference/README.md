@@ -8,7 +8,7 @@ Use these pages to look up the exact description keys and database behavior.
 - [Collection descriptions](./collection-descriptions.md) cover collections and generated columns.
 - [Field descriptions](./field-descriptions.md) cover attributes, nested fields, and built-in types.
 - [Geometry descriptions](./geometry-descriptions.md) cover geometry settings and derived geometries.
-- [Dataset and collection names](./dataset-and-collection-names.md) cover naming rules.
+- [Dataset, collection, and field names](./dataset-and-collection-names.md) cover naming rules.
 - [Relationship descriptions](./relationship-descriptions.md) cover links between features.
 - [Server-managed fields](./server-managed-fields.md) cover values provided by the server.
 - [Process descriptions](./process-descriptions.md) cover exposed processes.

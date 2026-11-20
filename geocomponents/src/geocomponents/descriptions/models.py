@@ -22,6 +22,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from geocomponents.descriptions.naming import LegalName, validate_unique_names
+
 # --------------------------------------------------------------------------
 # Builtin scalar types -> PostgreSQL column types.
 # --------------------------------------------------------------------------
@@ -56,17 +58,6 @@ FeatureModel = Literal["simple", "topology"]
 BoundsValue = Literal[1, 2]
 
 
-# Names flowing into generated SQL are validated at parse time so authoring
-# errors surface as pydantic ValidationErrors, not cryptic PG syntax failures
-# during DDL apply. Domain-facing names like ``FKB-AR5`` will be translated to
-# conforming identifiers upstream by the planned descriptor generator; do NOT
-# relax this pattern here.
-SafeIdentifier = Annotated[
-    str,
-    StringConstraints(pattern=r"^[a-z_][a-z0-9_]*$", min_length=1, max_length=40),
-]
-
-
 # --------------------------------------------------------------------------
 # Raw description documents (validated structure, not data)
 # --------------------------------------------------------------------------
@@ -78,7 +69,7 @@ class CodeListValue(BaseModel):
 class CodeList(BaseModel):
     """A shared controlled vocabulary referenced by fields."""
 
-    name: SafeIdentifier
+    name: LegalName
     values: list[CodeListValue] = Field(default_factory=list)
 
 
@@ -98,7 +89,7 @@ class FieldDef(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: SafeIdentifier
+    name: LegalName
     type: str | None = None
     codelist: str | None = None
     max_length: int | None = Field(default=None, gt=0)
@@ -124,6 +115,9 @@ class FieldDef(BaseModel):
             raise ValueError("max_length is only supported for string fields")
         if self.auto_increment and self.type != "integer":
             raise ValueError("auto_increment is only supported for integer fields")
+        validate_unique_names(
+            (field.name for field in self.fields), where="nested fields"
+        )
         return self
 
 
@@ -150,7 +144,7 @@ class DerivedRoleDef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: RelationshipPropertyName
-    when: SafeIdentifier | None = None
+    when: LegalName | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -207,18 +201,18 @@ class RelationshipDef(BaseModel):
     ``property`` is property-name on the source feature; ``target`` names
     the collection this property points at. Property names are stored verbatim
     (UML spelling, including uppercase and ø/å); ``target`` must be a
-    ``SafeIdentifier`` because it becomes a table reference.
+    a legal name because it becomes a table reference.
     """
 
     property: str
-    target: SafeIdentifier
+    target: LegalName
     description: str | None = None
 
 
 class CollectionDef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: SafeIdentifier
+    name: LegalName
     title: str | None = None
     description: str | None = None
     feature_model: FeatureModel = "simple"
@@ -238,6 +232,14 @@ class CollectionDef(BaseModel):
 
     @model_validator(mode="after")
     def _validate_collection(self):
+        names = [field.name for field in self.fields]
+        validate_unique_names(
+            [*names, *(rel.property for rel in self.relationships)],
+            where=f"collection {self.name!r} fields and relationships",
+        )
+        for name in names:
+            if name.casefold() in {"id", "geometry"}:
+                raise ValueError(f"field {name!r} is reserved for a generated column")
         invalid_tokens = {
             v
             for v in self.server_managed.values()
@@ -254,7 +256,7 @@ class CollectionDef(BaseModel):
 class DatasetDef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: SafeIdentifier
+    name: LegalName
     title: str | None = None
     description: str | None = None
     processes: list[str] = Field(default_factory=list)
@@ -262,6 +264,18 @@ class DatasetDef(BaseModel):
     # Named codelists defined within this dataset.  Fields reference them by
     # name via ``codelist: name``; values are used for DB-level validation.
     codelists: list[CodeList] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_names(self):
+        validate_unique_names(
+            [*(collection.name for collection in self.collections), *self.processes],
+            where=f"dataset {self.name!r} collections and processes",
+        )
+        validate_unique_names(
+            (codelist.name for codelist in self.codelists),
+            where=f"dataset {self.name!r} codelists",
+        )
+        return self
 
 
 # --------------------------------------------------------------------------

@@ -313,13 +313,13 @@ BOUNDS_RESOLVE_CASES = [
     BoundsResolveCase(
         "missing-bounds-records-no-rule",
         _topology_fixture_raw(),
-        "border3",
+        "NotatÅ",
         None,
     ),
     BoundsResolveCase(
         "targeted-only-by-non-boundary-is-accepted",
-        _with_collection_bounds("border3", 1),
-        "border3",
+        _with_collection_bounds("NotatÅ", 1),
+        "NotatÅ",
         1,
     ),
 ]
@@ -537,7 +537,7 @@ def test_topology_fixture_resolves_with_bounds_and_strict_models():
         "surface2",
         "border1",
         "border2",
-        "border3",
+        "NotatÅ",
         "border4",
     ]
 
@@ -625,16 +625,18 @@ def test_unknown_process_raises_clear_error():
 
 
 # --------------------------------------------------------------------------
-# SafeIdentifier constraint on name-shaped fields (Comments 4 + 5)
+# Names in dataset descriptions
 # --------------------------------------------------------------------------
 @pytest.mark.parametrize(
     "bad_name",
     [
         "fkb-bane",  # hyphen (reviewer's flagship example)
-        "ArealressursGrense",  # uppercase / mixed case
+        "FKB Bane",  # spaces
+        "éclair",  # letters outside the supported Norwegian set
         "1cadastre",  # leading digit
         "",  # empty
-        "a" * 41,  # over PG-safe length (40)
+        "a" * 41,  # over 40 bytes
+        "æ" * 21,  # 42 UTF-8 bytes
     ],
 )
 def test_dataset_name_rejects_invalid_sql_identifiers(bad_name):
@@ -659,18 +661,19 @@ def test_relationship_target_rejects_invalid_sql_identifier():
         "_x",
         "cadastre",
         "arealressurs_grense",
+        "ArealressursGrense",
+        "datafangstmetodeHøyde",
+        "ÆØÅ",
+        "æ" * 20,  # 40 UTF-8 bytes
         "a" * 40,
     ],
 )
-def test_safe_identifier_accepts_conformant_names(good_name):
-    """Positive control for the accepted shape: snake_case up to 40 chars,
-    optionally starting with an underscore, digits allowed after the first
-    character."""
+def test_legal_name_preserves_original_spelling(good_name):
     ds = DatasetDef.model_validate({"name": good_name})
     assert ds.name == good_name
 
 
-def test_safe_identifier_propagates_through_nested_models():
+def test_legal_name_propagates_through_nested_models():
     """The constraint must apply to nested lists of models: a bad ``FieldDef``
     name inside an otherwise valid dataset should be caught at the outer
     parse, not silently accepted."""
@@ -688,7 +691,7 @@ def test_safe_identifier_propagates_through_nested_models():
         )
 
 
-def test_safe_identifier_surfaces_via_file_loader(tmp_path):
+def test_legal_name_surfaces_via_file_loader(tmp_path):
     """The constraint must fire via the file-loading path, not just via direct
     ``model_validate``. ``load_dataset`` wraps ``ValidationError`` as
     ``DescriptionError``."""
@@ -698,8 +701,64 @@ def test_safe_identifier_surfaces_via_file_loader(tmp_path):
         load_dataset(p)
 
 
+def test_fields_differing_only_in_case_are_rejected(simple_description):
+    fields = simple_description["collections"][1]["fields"]
+    fields.append({"name": "FELTø", "type": "string"})
+    with pytest.raises(ValidationError, match="conflict"):
+        DatasetDef.model_validate(simple_description)
+
+
+def test_nested_fields_differing_only_in_case_are_rejected(simple_description):
+    fields = simple_description["collections"][1]["fields"][1]["fields"]
+    fields.append({"name": "VERDIå", "type": "integer"})
+    with pytest.raises(ValidationError, match="conflict"):
+        DatasetDef.model_validate(simple_description)
+
+
+def test_same_nested_field_name_is_allowed_in_different_objects(simple_description):
+    fields = simple_description["collections"][1]["fields"]
+    fields.append(
+        {
+            "name": "andreEgenskaper",
+            "type": "object",
+            "fields": [{"name": "verdiÅ", "type": "integer"}],
+        }
+    )
+    assert len(DatasetDef.model_validate(simple_description).collections[1].fields) == 3
+
+
+def test_collection_and_process_names_share_the_api_namespace(simple_description):
+    simple_description["processes"].append("hello")
+    simple_description["collections"].append({"name": "Hello"})
+    with pytest.raises(ValidationError, match="conflict"):
+        DatasetDef.model_validate(simple_description)
+
+
+def test_collection_names_differing_only_in_case_are_rejected(simple_description):
+    simple_description["collections"].append({"name": "nårwegiænøbject"})
+    with pytest.raises(ValidationError, match="conflict"):
+        DatasetDef.model_validate(simple_description)
+
+
+def test_generated_names_are_reserved_ignoring_case(simple_description):
+    simple_description["name"] = "OGC"
+    with pytest.raises(DescriptionError, match="reserved"):
+        resolve_dataset(DatasetDef.model_validate(simple_description))
+    simple_description["name"] = "EksempelDatasett"
+    simple_description["collections"][1]["name"] = "Association"
+    with pytest.raises(DescriptionError, match="reserved"):
+        resolve_dataset(DatasetDef.model_validate(simple_description))
+
+
+def test_dataset_names_are_unique_across_files_ignoring_case(tmp_path):
+    (tmp_path / "a.yaml").write_text("name: Example\n", encoding="utf-8")
+    (tmp_path / "b.yaml").write_text("name: example\n", encoding="utf-8")
+    with pytest.raises(DescriptionError, match="conflict"):
+        load_resolved_datasets(tmp_path)
+
+
 # --------------------------------------------------------------------------
-# Nested object fields (Commit 2)
+# Nested object fields
 # --------------------------------------------------------------------------
 
 
@@ -944,7 +1003,7 @@ def test_field_rejects_no_type_source():
 
 
 # --------------------------------------------------------------------------
-# codelist_values flow (Commit 5 prerequisite)
+# codelist_values flow
 # --------------------------------------------------------------------------
 
 

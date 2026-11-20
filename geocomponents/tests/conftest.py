@@ -14,10 +14,24 @@ from contextlib import contextmanager
 import psycopg
 import pytest
 from fixtures.description_cache import resolved_datasets
+from fixtures.simple_description import expected_simple_description
 
 from geocomponents.config import database_dsn
+from geocomponents.descriptions.loader import resolve_dataset
+from geocomponents.descriptions.models import DatasetDef
 from geocomponents.schema import functions, postgis
 from geocomponents.schema.build import build_schema_plan
+
+
+@pytest.fixture
+def simple_description() -> dict:
+    return expected_simple_description()
+
+
+@pytest.fixture
+def simple_dataset(simple_description):
+    return resolve_dataset(DatasetDef.model_validate(simple_description))
+
 
 # Host-run tests target the local compose DB unless DB_* is already set (e.g. in
 # CI). This lives in the test harness so production config stays fail-loud.
@@ -36,10 +50,16 @@ def _schema_conn(
     db: str, plan, *, with_functions: bool = True, drop_on_exit: bool = True
 ):
     """Drop schema, apply plan, yield an autocommit connection; optionally drop on exit."""
+    if with_functions:
+        functions.function_statements(plan)
     conn = psycopg.connect(db, autocommit=False)
     try:
         with conn.transaction():
-            conn.execute(f"drop schema if exists {plan.schema_name} cascade")
+            conn.execute(
+                psycopg.sql.SQL("drop schema if exists {} cascade").format(
+                    psycopg.sql.Identifier(plan.schema_name)
+                )
+            )
         postgis.apply_tables(conn, plan)
         if with_functions:
             functions.apply_functions(conn, plan)
@@ -48,7 +68,11 @@ def _schema_conn(
     finally:
         if not conn.closed:
             if drop_on_exit:
-                conn.execute(f"drop schema if exists {plan.schema_name} cascade")
+                conn.execute(
+                    psycopg.sql.SQL("drop schema if exists {} cascade").format(
+                        psycopg.sql.Identifier(plan.schema_name)
+                    )
+                )
             conn.close()
 
 
@@ -70,7 +94,11 @@ def db(datasets):
         # Fresh slate so re-runs after signature changes don't leave stale overloads.
         conn.autocommit = True
         for d in datasets:
-            conn.execute(f"drop schema if exists {d.name} cascade")
+            conn.execute(
+                psycopg.sql.SQL("drop schema if exists {} cascade").format(
+                    psycopg.sql.Identifier(d.name)
+                )
+            )
         conn.execute("drop schema if exists topogdb cascade")
         conn.execute("drop schema if exists ogc cascade")
         conn.autocommit = False

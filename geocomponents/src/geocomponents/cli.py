@@ -57,13 +57,15 @@ def apply_schema():
     from geocomponents.schema.build import build_schema_plan
 
     datasets = _load_datasets()
+    plans = [(dataset, build_schema_plan(dataset)) for dataset in datasets]
+    for _dataset, plan in plans:
+        functions.function_statements(plan)
     with psycopg.connect(config.database_dsn()) as conn:
         functions.apply_topogdb(conn)
         typer.echo("applied topogdb schema")
         functions.apply_dispatch(conn)
         typer.echo("applied dispatch layer (ogc.feature_*)")
-        for d in datasets:
-            plan = build_schema_plan(d)
+        for d, plan in plans:
             postgis.apply_tables(conn, plan)
             functions.apply_functions(conn, plan)
             typer.secho(
