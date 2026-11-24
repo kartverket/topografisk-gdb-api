@@ -18,7 +18,7 @@ gcapi = "gcapi.cli:app"
 [dependency-groups]
 dev = [
     "pytest>=8.0",
-    "ruff==0.17.4",
+    "ruff==0.17.6",
 ]
 
 [build-system]
