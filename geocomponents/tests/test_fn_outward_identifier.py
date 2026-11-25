@@ -11,24 +11,25 @@ import psycopg
 import pytest
 import yaml
 from conftest import _schema_conn
+from starlette.testclient import TestClient
 
-from geocomponents.descriptions.loader import resolve_dataset
-from geocomponents.descriptions.models import DatasetDef
+from geocomponents.api.pygeoapi_provider import PygeoapiProvider
+from geocomponents.gateway.mounter import build_gateway
 from geocomponents.schema.build import build_schema_plan
 
-_FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "oi_fixture.yaml"
+_FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "simple_features.yaml"
 
 
-def _load_dataset():
-    raw = yaml.safe_load(_FIXTURE_PATH.read_text(encoding="utf-8"))
-    return resolve_dataset(DatasetDef.model_validate(raw))
-
-
-_DATASET = _load_dataset()
-_DS = _DATASET.name
+_DS = "EksempelDatasett"
 _COLL = "with_oi"
-_PLAIN = "no_oi"
+_PLAIN = "NårwegiænØbject"
 _GEOM = {"type": "LineString", "coordinates": [[10.0, 55.0], [11.0, 56.0]]}
+
+
+def test_simple_feature_yaml_matches_expected_description(simple_description):
+    assert (
+        yaml.safe_load(_FIXTURE_PATH.read_text(encoding="utf-8")) == simple_description
+    )
 
 
 def _u(n: int) -> str:
@@ -41,9 +42,9 @@ _A = _u(0xA)  # identity via feature.id
 _B = _u(0xB)  # identity via OI path
 
 
-@pytest.fixture(scope="module")
-def oid_conn(db):
-    with _schema_conn(db, build_schema_plan(_DATASET)) as conn:
+@pytest.fixture
+def oid_conn(db, simple_dataset):
+    with _schema_conn(db, build_schema_plan(simple_dataset)) as conn:
         yield conn
 
 
@@ -58,7 +59,11 @@ def _feature(*, fid: str | None = None, testoi: str | None = None) -> dict:
 
 
 def _plain_feature() -> dict:
-    return {"type": "Feature", "geometry": _GEOM, "properties": {"label": "x"}}
+    return {
+        "type": "Feature",
+        "geometry": _GEOM,
+        "properties": {"feltØ": "før", "egenskaper": {"verdiÅ": 2026}},
+    }
 
 
 def _create(conn, feature, *, coll: str = _COLL) -> str:
@@ -280,10 +285,44 @@ def test_duplicate_identifier_is_rejected(oid_conn):
 # ── Collection without OI is unaffected ───────────────────────────────────────
 
 
-def test_plain_collection_without_oi_is_unaffected(oid_conn):
-    """The OI projection must not bleed into collections that declare no outward identifier."""
+def test_simple_collection_round_trips_declared_fields_without_oi(
+    oid_conn, db, simple_dataset
+):
     new_id = _create(oid_conn, _plain_feature(), coll=_PLAIN)
     got = _fetch(oid_conn, new_id, coll=_PLAIN)
     assert got is not None
     assert got["id"] == new_id
-    assert "identification" not in got["properties"]
+    assert got["properties"] == _plain_feature()["properties"]
+    columns = oid_conn.execute(
+        "select column_name from information_schema.columns "
+        "where table_schema = %s and table_name = %s",
+        (_DS, _PLAIN),
+    ).fetchall()
+    assert {name for (name,) in columns} == {"id", "geometry", "feltØ", "egenskaper"}
+    indexes = oid_conn.execute(
+        "select indexdef from pg_indexes where schemaname = %s and tablename = %s",
+        (_DS, _PLAIN),
+    ).fetchall()
+    assert any("'verdiÅ'" in definition for (definition,) in indexes)
+    updated = oid_conn.execute(
+        "select ogc.feature_update(%s, %s, %s, %s)",
+        (
+            _DS,
+            _PLAIN,
+            new_id,
+            orjson.dumps({"properties": {"feltØ": "etter"}}).decode(),
+        ),
+    ).fetchone()[0]
+    assert updated is True
+    expected_properties = {"feltØ": "etter", "egenskaper": {"verdiÅ": 2026}}
+    assert _fetch(oid_conn, new_id, coll=_PLAIN)["properties"] == expected_properties
+    client = TestClient(
+        build_gateway(
+            [simple_dataset], PygeoapiProvider(dsn=db), base_url="http://localhost:8000"
+        )
+    )
+    response = client.get(
+        f"/datasets/{_DS}/ogc_api/collections/{_PLAIN}/items/{new_id}?f=json"
+    )
+    assert response.status_code == 200
+    assert response.json()["properties"] == expected_properties

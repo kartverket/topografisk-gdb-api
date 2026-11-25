@@ -26,10 +26,10 @@ _TRANSLIT = str.maketrans(
 
 
 def _safe_id(raw: str) -> str:
-    """Lowercase + transliterate Norwegian chars → SafeIdentifier.
+    """Lowercase and transliterate Norwegian characters for legacy QMS output.
 
     Non-ASCII characters that remain after transliteration are replaced with
-    underscores. Result is capped at 40 characters (SafeIdentifier max length).
+    underscores. The result is capped at 40 characters.
     """
     s = raw.translate(_TRANSLIT).lower()
     s = re.sub(r"[^a-z0-9_]", "_", s)
@@ -235,9 +235,7 @@ def _cli_main() -> None:  # pragma: no cover
     )
     parser.add_argument("input", type=Path, help="QMS JSON input file")
     parser.add_argument("output", type=Path, help="YAML output file")
-    parser.add_argument(
-        "--dataset-name", required=True, help="Dataset identifier (SafeIdentifier)"
-    )
+    parser.add_argument("--dataset-name", required=True, help="Dataset identifier")
     parser.add_argument(
         "--srid", type=int, default=4326, help="Geometry SRID (default: 4326)"
     )

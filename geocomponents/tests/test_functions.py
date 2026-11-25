@@ -32,6 +32,7 @@ from geocomponents.schema.plan import (
     dispatch_function,
     internal_function,
 )
+from geocomponents.schema.sql_identifiers import identifier, qualified
 
 TOPOLOGY_FIXTURE = (
     Path(__file__).resolve().parent / "fixtures" / "topology_fixture.yaml"
@@ -115,7 +116,7 @@ def test_internal_functions_match_each_collections_declared_operations():
     stmts = "\n".join(function_statements(plan))
     for coll in plan.collections:
         for op in coll.functions:
-            assert f"function {coll.functions[op]}(" in stmts
+            assert f"function {qualified(coll.functions[op])}(" in stmts
 
 
 def test_topology_collection_has_internal_write_functions_for_transaction_path():
@@ -141,7 +142,7 @@ def test_create_function_omits_auto_increment_fields():
     create_sql = next(
         stmt
         for stmt in function_statements(plan)
-        if f"function {platform.functions['create']}(" in stmt
+        if f"function {qualified(platform.functions['create'])}(" in stmt
     )
     insert_columns = create_sql.split("values", maxsplit=1)[0]
     assert '"objid"' not in insert_columns
@@ -155,7 +156,7 @@ def test_upsert_function_conflicts_on_declared_business_key():
     sql = next(
         stmt
         for stmt in function_statements(plan)
-        if f"function {platform.functions['upsert']}(" in stmt
+        if f"function {qualified(platform.functions['upsert'])}(" in stmt
     )
     assert 'on conflict ("id")' in sql
 
@@ -178,17 +179,17 @@ def test_derived_footprint_is_built_only_in_measure_function():
     surface_measure = next(
         stmt
         for stmt in function_statements(plan)
-        if "function topology._surface_footprint_measure(" in stmt
+        if 'function "topology"."_surface_footprint_measure"(' in stmt
     )
     surface_verdict = next(
         stmt
         for stmt in function_statements(plan)
-        if "function topology._surface_footprint_geometry_verdict(" in stmt
+        if 'function "topology"."_surface_footprint_geometry_verdict"(' in stmt
     )
     apply_dirty = next(
         stmt
         for stmt in function_statements(plan)
-        if "function topology._apply_dirty_footprints(" in stmt
+        if 'function "topology"._apply_dirty_footprints(' in stmt
     )
 
     assert surface_measure.count("topogdb.build_footprint(") == 1
@@ -245,7 +246,7 @@ def test_all_three_literal_sites_escape_field_names_in_generated_sql():
     plan = _plan_with_field_named("it's")
     stmts = function_statements(plan)
     by_op = {
-        op: next(s for s in stmts if f"function s._c_{op}(" in s)
+        op: next(s for s in stmts if f"function {identifier('s', f'_c_{op}')}(" in s)
         for op in ("item", "create", "update")
     }
     assert "'it''s'" in by_op["item"]  # _properties_object
@@ -421,7 +422,7 @@ def test_fn_create_enum_guard_appears_before_insert():
     """Suspect: the enum validation block must precede INSERT in the create function."""
     plan = _plan_with_codelist_col(("A", "B"))
     stmts = function_statements(plan)
-    create = next(s for s in stmts if "function s._t_create(" in s)
+    create = next(s for s in stmts if 'function "s"."_t_create"(' in s)
     assert create.index("if (") < create.index("insert into")
 
 
@@ -430,8 +431,8 @@ def test_fn_update_uses_presence_guarded_enum_check_but_create_does_not():
     guarded by key presence; create receives the full feature so no guard needed."""
     plan = _plan_with_codelist_col(("A", "B"))
     stmts = function_statements(plan)
-    create = next(s for s in stmts if "function s._t_create(" in s)
-    update = next(s for s in stmts if "function s._t_update(" in s)
+    create = next(s for s in stmts if 'function "s"."_t_create"(' in s)
+    update = next(s for s in stmts if 'function "s"."_t_update"(' in s)
     assert "? 'medium'" not in create
     assert "? 'medium'" in update
 
@@ -446,7 +447,7 @@ def test_server_write_col_absent_from_create_insert_values():
     client-read value in the INSERT — the server expression is used instead."""
     plan = _plan_with_server_write_col()
     stmts = function_statements(plan)
-    create = next(s for s in stmts if "function s._t_create(" in s)
+    create = next(s for s in stmts if 'function "s"."_t_create"(' in s)
     # The client value expression must not appear for this column.
     assert "(feature->'properties'->>'oppdateringsdato')" not in create
     # The server expression must appear.
@@ -459,7 +460,7 @@ def test_server_write_col_always_updated_in_patch_not_behind_case_when():
     in the update SET clause — no CASE WHEN guard, unlike client-provided fields."""
     plan = _plan_with_server_write_col()
     stmts = function_statements(plan)
-    update = next(s for s in stmts if "function s._t_update(" in s)
+    update = next(s for s in stmts if 'function "s"."_t_update"(' in s)
     # server_write_expr column must appear in SET without a CASE WHEN guard.
     assert '"oppdateringsdato" = now()' in update
     assert "case when" not in update.split('"oppdateringsdato"')[1].split("\n")[0]

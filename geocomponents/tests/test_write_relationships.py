@@ -20,6 +20,7 @@ from geocomponents.descriptions.loader import resolve_dataset
 from geocomponents.descriptions.models import DatasetDef
 from geocomponents.schema import functions, postgis
 from geocomponents.schema.build import build_schema_plan
+from geocomponents.schema.sql_identifiers import identifier, qualified
 
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "topology_fixture.yaml"
 
@@ -243,7 +244,9 @@ class _TopologyCaseSchemaPool:
         conn = psycopg.connect(self._db, autocommit=True)
         try:
             for entry in self._entries.values():
-                conn.execute(f"drop schema if exists {entry.schema_name} cascade")
+                conn.execute(
+                    f"drop schema if exists {identifier(entry.schema_name)} cascade"
+                )
         finally:
             conn.close()
 
@@ -255,9 +258,11 @@ class _TopologyCaseSchemaPool:
 
         schema_name = f"topology_case_{key[:12]}"
         plan = _load_plan_from_raw(_schema_case_raw(raw, schema_name))
-        truncate_tables = tuple(coll.table.qualified for coll in plan.collections)
+        truncate_tables = tuple(
+            qualified(coll.table.qualified) for coll in plan.collections
+        )
         if plan.association_role_rows:
-            truncate_tables += (f"{schema_name}.association",)
+            truncate_tables += (identifier(schema_name, "association"),)
         with _schema_conn(self._db, plan, drop_on_exit=False):
             pass
         entry = _TopologyCaseSchema(
@@ -339,7 +344,7 @@ def borders(topology_conn):
         topology_conn,
         _insert("border4", _OUTER_RING_GEOM, {"is_bounding": True}, fid=b4_id),
     )
-    b3 = _txn(topology_conn, _insert("border3", _NOTE_LINE_GEOM, {}))
+    b3 = _txn(topology_conn, _insert("NotatÅ", _NOTE_LINE_GEOM, {}))
     return {
         "b1a_lokalid": b1a_id,
         "b1b_lokalid": b1b_id,
@@ -653,7 +658,7 @@ def _border2_ref(lokalid: str) -> dict:
 
 
 def _border3_ref(fid: str) -> dict:
-    return {"featuretype": "border3", "id": fid}
+    return {"featuretype": "NotatÅ", "id": fid}
 
 
 def _border4_ref(fid: str) -> dict:
@@ -825,7 +830,7 @@ def _case_delete_two_targets_collects_findings_across_ids_and_collections():
                 {"identifikasjon": {"lokalid": border2_id}},
                 fid=border2_id,
             ),
-            _insert("border3", _NOTE_LINE_GEOM, {}, fid=border3_id),
+            _insert("NotatÅ", _NOTE_LINE_GEOM, {}, fid=border3_id),
             _insert(
                 "surface",
                 _POLYGON_GEOM,
@@ -837,7 +842,7 @@ def _case_delete_two_targets_collects_findings_across_ids_and_collections():
                 fid=surface_id,
             ),
         ),
-        (_delete("border1", border1_id), _delete("border3", border3_id)),
+        (_delete("border1", border1_id), _delete("NotatÅ", border3_id)),
         (
             {
                 "reason": "missing_member",
@@ -853,12 +858,12 @@ def _case_delete_two_targets_collects_findings_across_ids_and_collections():
                 "source_collection": "surface",
                 "source_id": surface_id,
                 "property": "describedByNote",
-                "target_collection": "border3",
+                "target_collection": "NotatÅ",
                 "target_id": border3_id,
                 "deleted_by_item": 1,
             },
         ),
-        (("border1", border1_id), ("border3", border3_id), ("surface", surface_id)),
+        (("border1", border1_id), ("NotatÅ", border3_id), ("surface", surface_id)),
     )
 
 
@@ -881,7 +886,7 @@ def _case_delete_non_footprint_link_still_reports_missing_member():
                 {"identifikasjon": {"lokalid": border2_id}},
                 fid=border2_id,
             ),
-            _insert("border3", _NOTE_LINE_GEOM, {}, fid=border_id),
+            _insert("NotatÅ", _NOTE_LINE_GEOM, {}, fid=border_id),
             _insert(
                 "surface",
                 _POLYGON_GEOM,
@@ -893,19 +898,19 @@ def _case_delete_non_footprint_link_still_reports_missing_member():
                 fid=surface_id,
             ),
         ),
-        (_delete("border3", border_id),),
+        (_delete("NotatÅ", border_id),),
         (
             {
                 "reason": "missing_member",
                 "source_collection": "surface",
                 "source_id": surface_id,
                 "property": "describedByNote",
-                "target_collection": "border3",
+                "target_collection": "NotatÅ",
                 "target_id": border_id,
                 "deleted_by_item": 0,
             },
         ),
-        (("border3", border_id), ("surface", surface_id)),
+        (("NotatÅ", border_id), ("surface", surface_id)),
     )
 
 
@@ -1180,7 +1185,7 @@ def _case_described_by_note_only_is_no_boundary():
     surface_id = _new_id()
     return FootprintRuleFailureCase(
         raw,
-        (_insert("border3", _NOTE_LINE_GEOM, {}, fid=border3_id),),
+        (_insert("NotatÅ", _NOTE_LINE_GEOM, {}, fid=border3_id),),
         (
             _insert(
                 "surface",
@@ -1194,7 +1199,7 @@ def _case_described_by_note_only_is_no_boundary():
                 "surface", surface_id, "no_boundary", counts=(0, 0)
             ),
         ),
-        (("border3", border3_id),),
+        (("NotatÅ", border3_id),),
     )
 
 
@@ -1608,7 +1613,7 @@ def _case_bounds_curve_without_rule_is_never_reported():
     return BoundsSuccessCase(
         raw,
         (),
-        (_insert("border3", _NOTE_LINE_GEOM, {}, fid=border3_id),),
+        (_insert("NotatÅ", _NOTE_LINE_GEOM, {}, fid=border3_id),),
     )
 
 
@@ -2401,7 +2406,7 @@ def test_wrong_identifier_key_is_rejected(topology_conn, borders):
             "surface",
             _POLYGON_GEOM,
             {
-                "describedByNote": [{"featuretype": "border3", "lokalid": "ANYTHING"}],
+                "describedByNote": [{"featuretype": "NotatÅ", "lokalid": "ANYTHING"}],
             },
         ),
     )
@@ -2427,11 +2432,11 @@ def test_link_identifier_that_is_not_uuid_is_rejected(topology_conn):
 
 def test_duplicate_identifier_is_rejected_by_transaction(topology_conn):
     fid = _new_id()
-    _txn(topology_conn, _insert("border3", _NOTE_LINE_GEOM, {}, fid=fid))
+    _txn(topology_conn, _insert("NotatÅ", _NOTE_LINE_GEOM, {}, fid=fid))
 
     report = _txn(
         topology_conn,
-        _insert("border3", _NOTE_LINE_GEOM, {}, fid=fid),
+        _insert("NotatÅ", _NOTE_LINE_GEOM, {}, fid=fid),
     )
 
     _assert_rejected(report)
@@ -2525,9 +2530,7 @@ def test_create_no_oi_target_by_uuid(topology_conn, borders):
     )
     assert report["committed"] is True
     got = _properties(topology_conn, "surface", report["items"][0]["id"])
-    assert got["describedByNote"] == [
-        {"featuretype": "border3", "id": borders["b3_id"]}
-    ]
+    assert got["describedByNote"] == [{"featuretype": "NotatÅ", "id": borders["b3_id"]}]
 
 
 def test_read_uses_declared_identifier_keys(topology_conn, borders):
@@ -2549,9 +2552,7 @@ def test_read_uses_declared_identifier_keys(topology_conn, borders):
     assert got["boundedByOuter"] == [
         {"featuretype": "border1", "lokalid": borders["b1a_lokalid"]}
     ]
-    assert got["describedByNote"] == [
-        {"featuretype": "border3", "id": borders["b3_id"]}
-    ]
+    assert got["describedByNote"] == [{"featuretype": "NotatÅ", "id": borders["b3_id"]}]
 
 
 def test_read_uses_declared_featuretype(topology_conn, borders):
@@ -2819,7 +2820,7 @@ def test_update_leaves_unnamed_properties_intact(topology_conn, borders):
             _POLYGON_GEOM,
             {
                 "boundedByOuter": [{"featuretype": "border1", "lokalid": outer_id}],
-                "describedByNote": [{"featuretype": "border3", "id": borders["b3_id"]}],
+                "describedByNote": [{"featuretype": "NotatÅ", "id": borders["b3_id"]}],
             },
         ),
     )
@@ -3123,15 +3124,15 @@ def test_feature_items_returns_links_for_multiple_features(topology_conn, border
         {"featuretype": "border1", "lokalid": borders["b1b_lokalid"]}
     ]
     assert by_id[second["items"][0]["id"]]["properties"]["describedByNote"] == [
-        {"featuretype": "border3", "id": borders["b3_id"]}
+        {"featuretype": "NotatÅ", "id": borders["b3_id"]}
     ]
 
 
 def test_collection_with_no_declared_link_properties_reads_as_before(topology_conn):
     """A collection with no declared relationships reads without any link properties."""
-    report = _txn(topology_conn, _insert("border3", _LINE_GEOM, {}))
+    report = _txn(topology_conn, _insert("NotatÅ", _LINE_GEOM, {}))
 
-    got = _properties(topology_conn, "border3", report["items"][0]["id"])
+    got = _properties(topology_conn, "NotatÅ", report["items"][0]["id"])
     assert got == {}
 
 

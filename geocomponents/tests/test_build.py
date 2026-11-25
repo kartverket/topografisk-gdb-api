@@ -1,6 +1,11 @@
+from dataclasses import replace
+from pathlib import Path
+
 import pytest
 from fixtures.description_cache import resolved_dataset
 
+from geocomponents import cli
+from geocomponents.descriptions.loader import load_dataset, resolve_dataset
 from geocomponents.descriptions.models import (
     DerivedAreas,
     DerivedHoles,
@@ -12,7 +17,9 @@ from geocomponents.descriptions.models import (
 )
 from geocomponents.schema import postgis
 from geocomponents.schema.build import build_schema_plan
+from geocomponents.schema.functions import function_statements
 from geocomponents.schema.plan import OPERATIONS, READ_OPS
+from geocomponents.schema.sql_identifiers import identifier
 
 WGS84_SRID = 4326
 
@@ -203,7 +210,7 @@ def test_every_collection_gets_a_gist_index_on_geometry():
     for coll in plan.collections:
         expected = (
             f'create index if not exists "{coll.collection_name}_geometry_idx" '
-            f'on {coll.table.qualified} using gist ("geometry")'
+            f'on {identifier(coll.table.schema, coll.table.name)} using gist ("geometry")'
         )
         assert expected in stmts
 
@@ -601,7 +608,45 @@ def test_extra_index_statement_uses_if_not_exists():
 def test_extra_index_statement_uses_qualified_table_name():
     stmts = _stmts_for_indexable_dataset()
     extra = [s for s in stmts if "medium" in s and "index" in s]
-    assert all("x.c" in s for s in extra)  # dataset 'x', collection 'c'
+    assert all('"x"."c"' in s for s in extra)
+
+
+def _long_derived_dataset():
+    dataset = resolve_dataset(
+        load_dataset(Path(__file__).parent / "fixtures" / "topology_fixture.yaml")
+    )
+    surface = next(coll for coll in dataset.collections if coll.derived is not None)
+    long_surface = replace(surface, name="x" * 40)
+    assert len(long_surface.name.encode("utf-8")) == 40
+    return replace(
+        dataset,
+        collections=tuple(
+            long_surface if coll is surface else coll for coll in dataset.collections
+        ),
+    )
+
+
+def test_generated_topology_function_names_fit_postgresql_byte_limit():
+    plan = build_schema_plan(_long_derived_dataset())
+    with pytest.raises(ValueError, match="63 bytes"):
+        function_statements(plan)
+
+
+def test_apply_schema_checks_function_names_before_database_changes(monkeypatch):
+    monkeypatch.setattr(cli, "_load_datasets", lambda: [_long_derived_dataset()])
+    monkeypatch.setattr(
+        cli.config,
+        "database_dsn",
+        lambda: pytest.fail("attempted database connection before name validation"),
+    )
+    with pytest.raises(ValueError, match="63 bytes"):
+        cli.apply_schema()
+
+
+def test_sql_identifier_renderer_enforces_postgresql_byte_limit():
+    assert identifier("æ" * 31 + "a") == f'"{"æ" * 31}a"'
+    with pytest.raises(ValueError, match="63 bytes"):
+        identifier("æ" * 32)
 
 
 def test_no_extra_index_statements_when_indexes_empty():

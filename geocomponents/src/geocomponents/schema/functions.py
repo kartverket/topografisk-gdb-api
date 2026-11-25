@@ -36,6 +36,7 @@ from geocomponents.schema.plan import (
     SchemaPlan,
     TablePlan,
 )
+from geocomponents.schema.sql_identifiers import identifier, qualified
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 
@@ -43,8 +44,8 @@ _SCHEMA_DIR = Path(__file__).resolve().parent
 def _quote_key(name: str) -> str:
     """Escape single quotes so ``name`` can be embedded in a SQL literal.
 
-    Defense-in-depth: names are already restricted by the loader's
-    ``SafeIdentifier``, but hand-built plans (e.g. tests) can bypass that.
+    Defense-in-depth: description names cannot contain quotes, but hand-built
+    plans (e.g. tests) can bypass validation.
     """
     return name.replace("'", "''")
 
@@ -641,7 +642,7 @@ def _association_properties_object(plan: CollectionPlan, source_id_sql: str) -> 
             "jsonb_agg("
             + _association_element_object(role, "a.target_id")
             + " order by a.target_id) as refs\n"
-            f"      from {plan.table.schema}.association a\n"
+            f"      from {identifier(plan.table.schema)}.association a\n"
             f"      where a.source_collection = '{_quote_key(plan.collection_name)}'\n"
             f"        and a.source_id = {source_id_sql}\n"
             f"        and a.property = '{_quote_key(role.property)}'\n"
@@ -1044,7 +1045,7 @@ def _link_validation_block(role: CollectionRolePlan) -> str:
                 raise exception 'field {prop}.{oi_leaf}: value % is not a uuid',
                     coalesce(_elem->>'{oi_leaf}', 'null') using errcode = 'P0001';
             end if;
-      select "id" into _target_id from {role.target_table}
+      select "id" into _target_id from {qualified(role.target_table)}
         where {role.oi_lookup_cond};
       if not found then
         raise exception 'property {prop}: missing_member % not found in {target}',
@@ -1066,10 +1067,10 @@ def _link_write_patch(role: CollectionRolePlan, source: str) -> str:
     src = _quote_key(source)
     return f"""\
   if feature->'properties' ? '{prop}' then
-    delete from {role.target_table.rsplit(".", 1)[0]}.association
+    delete from {identifier(role.target_table.rsplit(".", 1)[0], "association")}
       where source_collection = '{src}' and source_id = fid
         and property = '{prop}';
-    insert into {role.target_table.rsplit(".", 1)[0]}.association
+    insert into {identifier(role.target_table.rsplit(".", 1)[0], "association")}
         (source_collection, source_id, property, target_id)
       select '{src}', fid, '{prop}', unnest(_ids_{vname});
   end if;"""
@@ -1082,7 +1083,7 @@ def _link_write_create(role: CollectionRolePlan, source: str) -> str:
     src = _quote_key(source)
     return f"""\
   if feature->'properties' ? '{prop}' then
-    insert into {role.target_table.rsplit(".", 1)[0]}.association
+    insert into {identifier(role.target_table.rsplit(".", 1)[0], "association")}
         (source_collection, source_id, property, target_id)
       select '{src}', new_id, '{prop}', unnest(_ids_{vname});
   end if;"""
@@ -1095,7 +1096,7 @@ def _link_clear_all(
     props = ", ".join(f"'{_quote_key(r.property)}'" for r in roles)
     src = _quote_key(source)
     return (
-        f"  delete from {schema}.association\n"
+        f"  delete from {identifier(schema)}.association\n"
         f"    where source_collection = '{src}' and source_id = fid\n"
         f"      and property in ({props});"
     )
@@ -1108,7 +1109,7 @@ def _link_write_put(role: CollectionRolePlan, source: str) -> str:
     src = _quote_key(source)
     return f"""\
   if feature->'properties' ? '{prop}' then
-    insert into {role.target_table.rsplit(".", 1)[0]}.association
+    insert into {identifier(role.target_table.rsplit(".", 1)[0], "association")}
         (source_collection, source_id, property, target_id)
       select '{src}', fid, '{prop}', unnest(_ids_{vname});
   end if;"""
@@ -1142,14 +1143,14 @@ def _fn_associations(plan: CollectionPlan) -> str:
                 f"'{_quote_key(role.property)}'::text as property, "
                 f"'{_quote_key(role.target_collection)}'::text as target_collection, "
                 "a.target_id\n"
-                f"  from {plan.table.schema}.association a\n"
+                f"  from {identifier(plan.table.schema)}.association a\n"
                 f"  where a.source_collection = '{_quote_key(plan.collection_name)}'\n"
                 "    and a.source_id = fid\n"
                 f"    and a.property = '{_quote_key(role.property)}'"
             )
         body = "\n  union all\n".join(selects) + "\n  order by property, target_id"
     return f"""\
-create or replace function {plan.table.schema}._{plan.collection_name}_associations(fid uuid)
+create or replace function {identifier(plan.table.schema, f"_{plan.collection_name}_associations")}(fid uuid)
 returns table (property text, target_collection text, target_id uuid)
 language sql stable as $func$
 {body};
@@ -1159,7 +1160,7 @@ $func$"""
 def _fn_sources_using(plan: SchemaPlan) -> str:
     if not plan.association_role_rows:
         return f"""\
-create or replace function {plan.schema_name}._sources_using(target_collection text, ids uuid[])
+create or replace function {identifier(plan.schema_name)}._sources_using(target_collection text, ids uuid[])
 returns table (collection text, id uuid, property text, target_id uuid)
 language sql stable as $func$
     select null::text as collection,
@@ -1169,15 +1170,15 @@ language sql stable as $func$
     where false;
 $func$"""
     return f"""\
-create or replace function {plan.schema_name}._sources_using(target_collection text, ids uuid[])
+create or replace function {identifier(plan.schema_name)}._sources_using(target_collection text, ids uuid[])
 returns table (collection text, id uuid, property text, target_id uuid)
 language sql stable as $func$
     select a.source_collection as collection,
            a.source_id as id,
            a.property,
            a.target_id
-    from {plan.schema_name}.association a
-    join {plan.schema_name}.association_role r
+    from {identifier(plan.schema_name)}.association a
+    join {identifier(plan.schema_name)}.association_role r
         on r.source_collection = a.source_collection
      and r.property = a.property
     where r.target_collection = _sources_using.target_collection
@@ -1189,7 +1190,7 @@ $func$"""
 def _fn_targets_from_sources(plan: SchemaPlan) -> str:
     if not plan.association_role_rows:
         return f"""\
-create or replace function {plan.schema_name}._targets_from_sources(source_collection text, ids uuid[])
+create or replace function {identifier(plan.schema_name)}._targets_from_sources(source_collection text, ids uuid[])
 returns table (collection text, id uuid, property text, target_collection text, target_id uuid)
 language sql stable as $func$
     select null::text as collection,
@@ -1200,7 +1201,7 @@ language sql stable as $func$
     where false;
 $func$"""
     return f"""\
-create or replace function {plan.schema_name}._targets_from_sources(source_collection text, ids uuid[])
+create or replace function {identifier(plan.schema_name)}._targets_from_sources(source_collection text, ids uuid[])
 returns table (collection text, id uuid, property text, target_collection text, target_id uuid)
 language sql stable as $func$
     select a.source_collection as collection,
@@ -1208,8 +1209,8 @@ language sql stable as $func$
            a.property,
            r.target_collection,
            a.target_id
-    from {plan.schema_name}.association a
-    join {plan.schema_name}.association_role r
+    from {identifier(plan.schema_name)}.association a
+    join {identifier(plan.schema_name)}.association_role r
         on r.source_collection = a.source_collection
      and r.property = a.property
     where a.source_collection = _targets_from_sources.source_collection
@@ -1244,8 +1245,8 @@ def _owner_rows_body(roles: tuple[FootprintOwnerRolePlan, ...]) -> str:
             "            select "
             f"'{_quote_key(role.source_collection)}'::text as owner_collection, "
             "a.source_id as owner_id\n"
-            f"            from {role.target_table} t\n"
-            f"            join {role.target_table.rsplit('.', 1)[0]}.association a\n"
+            f"            from {qualified(role.target_table)} t\n"
+            f"            join {identifier(role.target_table.rsplit('.', 1)[0], 'association')} a\n"
             '              on a.target_id = t."id"\n'
             f"             and a.source_collection = '{_quote_key(role.source_collection)}'\n"
             f"             and a.property = '{_quote_key(role.property)}'\n"
@@ -1261,7 +1262,7 @@ def _fn_check_member_bounds(plan: SchemaPlan) -> str:
     )
     if not bounded_collections:
         return f"""\
-create or replace function {plan.schema_name}._check_member_bounds(target_collection text, ids uuid[])
+create or replace function {identifier(plan.schema_name)}._check_member_bounds(target_collection text, ids uuid[])
 returns jsonb
 language sql stable as $func$
     select '[]'::jsonb;
@@ -1288,7 +1289,7 @@ $func$"""
             "               'owners', counts.owners) as finding\n"
             "    from (\n"
             f'        select t."id"\n'
-            f"        from {coll.table.qualified} t\n"
+            f"        from {qualified(coll.table.qualified)} t\n"
             f"        where _check_member_bounds.target_collection = '{_quote_key(coll.collection_name)}'\n"
             '          and t."id" = any(ids)\n'
             "    ) p\n"
@@ -1313,7 +1314,7 @@ $func$"""
 
     body = "\n    union all\n".join(statements)
     return f"""\
-create or replace function {plan.schema_name}._check_member_bounds(target_collection text, ids uuid[])
+create or replace function {identifier(plan.schema_name)}._check_member_bounds(target_collection text, ids uuid[])
 returns jsonb
 language sql stable as $func$
 with findings as (
@@ -1338,13 +1339,13 @@ def _fn_footprint_members(plan: CollectionPlan, derived: DerivedPlan) -> str:
             "           a.target_id,\n"
             f"           {included_expr} as included,\n"
             '           t."geometry" as geom\n'
-            f"    from {plan.table.schema}._{plan.collection_name}_associations(fid) a\n"
-            f'    left join {role.target_table} t on t."id" = a.target_id\n'
+            f"    from {identifier(plan.table.schema, f'_{plan.collection_name}_associations')}(fid) a\n"
+            f'    left join {qualified(role.target_table)} t on t."id" = a.target_id\n'
             f"    where a.property = '{_quote_key(role.property)}'"
         )
     body = "\n    union all\n".join(selects) + "\n    order by property, target_id"
     return f"""\
-create or replace function {plan.table.schema}._{plan.collection_name}_footprint_members(fid uuid)
+create or replace function {identifier(plan.table.schema, f"_{plan.collection_name}_footprint_members")}(fid uuid)
 returns table (
     property text,
     target_collection text,
@@ -1358,7 +1359,7 @@ $func$"""
 
 def _fn_footprint_measure(plan: CollectionPlan, derived: DerivedPlan) -> str:
     return f"""\
-create or replace function {plan.table.schema}._{plan.collection_name}_footprint_measure(fid uuid)
+create or replace function {identifier(plan.table.schema, f"_{plan.collection_name}_footprint_measure")}(fid uuid)
 returns topogdb.footprint_measure language plpgsql stable as $func$
 declare
     measure topogdb.footprint_measure;
@@ -1377,7 +1378,7 @@ begin
 
     select exists(
         select 1
-        from {plan.table.qualified} t
+        from {qualified(plan.table.qualified)} t
         where t."{plan.table.id_column}" = fid
     ) into measure.row_exists;
 
@@ -1388,7 +1389,7 @@ begin
     select count(*)::int,
            count(*) filter (where included)::int
     into measure.members, measure.included
-    from {plan.table.schema}._{plan.collection_name}_footprint_members(fid);
+    from {identifier(plan.table.schema, f"_{plan.collection_name}_footprint_members")}(fid);
 
     if measure.included = 0 then
         return measure;
@@ -1398,7 +1399,7 @@ begin
     into linework
     from (
         select (ST_Dump(m.geom)).geom as geom
-        from {plan.table.schema}._{plan.collection_name}_footprint_members(fid) m
+        from {identifier(plan.table.schema, f"_{plan.collection_name}_footprint_members")}(fid) m
         where m.included
           and m.geom is not null
     ) part;
@@ -1426,7 +1427,7 @@ begin
                 order by target_collection, target_id),
             '[]'::jsonb)
         into measure.unused
-        from {plan.table.schema}._{plan.collection_name}_footprint_members(fid)
+        from {identifier(plan.table.schema, f"_{plan.collection_name}_footprint_members")}(fid)
         where included
           and geom is not null
           and not ST_CoveredBy(ST_Force2D(geom), ST_Boundary((facts).footprint));
@@ -1447,7 +1448,7 @@ def _fn_footprint_structure_verdict(plan: CollectionPlan, derived: DerivedPlan) 
             member_selects.append(
                 "    select a.property, true as included\n"
                 "    from present p\n"
-                f"    join {plan.table.schema}.association a\n"
+                f"    join {identifier(plan.table.schema)}.association a\n"
                 f"      on a.source_collection = '{_quote_key(plan.collection_name)}'\n"
                 "     and a.source_id = p.id\n"
                 f"     and a.property = '{_quote_key(role.property)}'"
@@ -1457,11 +1458,11 @@ def _fn_footprint_structure_verdict(plan: CollectionPlan, derived: DerivedPlan) 
                 "    select a.property, "
                 f'coalesce(t."{role.when_field}", false) as included\n'
                 "    from present p\n"
-                f"    join {plan.table.schema}.association a\n"
+                f"    join {identifier(plan.table.schema)}.association a\n"
                 f"      on a.source_collection = '{_quote_key(plan.collection_name)}'\n"
                 "     and a.source_id = p.id\n"
                 f"     and a.property = '{_quote_key(role.property)}'\n"
-                f'    join {role.target_table} t on t."id" = a.target_id'
+                f'    join {qualified(role.target_table)} t on t."id" = a.target_id'
             )
     members_body = "\n    union all\n".join(member_selects)
     alternatives = "\n    union all\n".join(
@@ -1513,11 +1514,11 @@ def _fn_footprint_structure_verdict(plan: CollectionPlan, derived: DerivedPlan) 
         )
 
     return f"""\
-create or replace function {plan.table.schema}._{plan.collection_name}_footprint_structure_verdict(fid uuid)
+create or replace function {identifier(plan.table.schema, f"_{plan.collection_name}_footprint_structure_verdict")}(fid uuid)
 returns jsonb language sql stable as $func$
 with present as (
     select t."{plan.table.id_column}" as id
-    from {plan.table.qualified} t
+    from {qualified(plan.table.qualified)} t
     where t."{plan.table.id_column}" = fid
 ), members as (
 {members_body}
@@ -1566,17 +1567,17 @@ def _fn_footprint_structure_verdict_dispatch(plan: SchemaPlan) -> str:
     ]
     if not derived_collections:
         return f"""\
-create or replace function {plan.schema_name}._footprint_structure_verdict(collection text, fid uuid)
+create or replace function {identifier(plan.schema_name)}._footprint_structure_verdict(collection text, fid uuid)
 returns jsonb language sql stable as $func$
     select null::jsonb;
 $func$"""
 
     branches = "\n".join(
-        f"    when '{_quote_key(coll.collection_name)}' then return {plan.schema_name}._{coll.collection_name}_footprint_structure_verdict(fid);"
+        f"    when '{_quote_key(coll.collection_name)}' then return {identifier(plan.schema_name, f'_{coll.collection_name}_footprint_structure_verdict')}(fid);"
         for coll in derived_collections
     )
     return f"""\
-create or replace function {plan.schema_name}._footprint_structure_verdict(collection text, fid uuid)
+create or replace function {identifier(plan.schema_name)}._footprint_structure_verdict(collection text, fid uuid)
 returns jsonb language plpgsql stable as $func$
 begin
   case collection
@@ -1628,7 +1629,7 @@ def _fn_footprint_geometry_verdict(plan: CollectionPlan, derived: DerivedPlan) -
         else ""
     )
     return f"""\
-create or replace function {plan.table.schema}._{plan.collection_name}_footprint_geometry_verdict(fid uuid, measure topogdb.footprint_measure)
+create or replace function {identifier(plan.table.schema, f"_{plan.collection_name}_footprint_geometry_verdict")}(fid uuid, measure topogdb.footprint_measure)
 returns jsonb language plpgsql stable as $func$
 begin
     if not (measure).row_exists then
@@ -1712,19 +1713,19 @@ def _fn_footprint_geometry_verdict_dispatch(plan: SchemaPlan) -> str:
     ]
     if not derived_collections:
         return f"""\
-create or replace function {plan.schema_name}._footprint_geometry_verdict(collection text, fid uuid)
+create or replace function {identifier(plan.schema_name)}._footprint_geometry_verdict(collection text, fid uuid)
 returns table (verdict jsonb, footprint geometry) language sql stable as $func$
     select null::jsonb as verdict, null::geometry as footprint;
 $func$"""
 
     branches = "\n".join(
         f"    when '{_quote_key(coll.collection_name)}' then\n"
-        f"      measure := {plan.schema_name}._{coll.collection_name}_footprint_measure(fid);\n"
-        f"      return query select {plan.schema_name}._{coll.collection_name}_footprint_geometry_verdict(fid, measure), (measure).footprint;"
+        f"      measure := {identifier(plan.schema_name, f'_{coll.collection_name}_footprint_measure')}(fid);\n"
+        f"      return query select {identifier(plan.schema_name, f'_{coll.collection_name}_footprint_geometry_verdict')}(fid, measure), (measure).footprint;"
         for coll in derived_collections
     )
     return f"""\
-create or replace function {plan.schema_name}._footprint_geometry_verdict(collection text, fid uuid)
+create or replace function {identifier(plan.schema_name)}._footprint_geometry_verdict(collection text, fid uuid)
 returns table (verdict jsonb, footprint geometry) language plpgsql stable as $func$
 declare
   measure topogdb.footprint_measure;
@@ -1744,14 +1745,14 @@ def _fn_apply_dirty_footprints(plan: SchemaPlan) -> str:
     ]
     if not derived_collections:
         return f"""\
-create or replace function {plan.schema_name}._apply_dirty_footprints(touched jsonb)
+create or replace function {identifier(plan.schema_name)}._apply_dirty_footprints(touched jsonb)
 returns jsonb language sql as $func$
     select '[]'::jsonb;
 $func$"""
 
     updates = ",\n".join(
-        f"""updated_{coll.collection_name} as (
-    update {plan.schema_name}.{coll.collection_name} t
+        f"""{identifier(f"updated_{coll.collection_name}")} as (
+    update {identifier(plan.schema_name, coll.collection_name)} t
        set \"{coll.geometry_field}\" = measured.footprint
       from measured
       cross join invalid
@@ -1764,7 +1765,7 @@ $func$"""
         for coll in derived_collections
     )
     return f"""\
-create or replace function {plan.schema_name}._apply_dirty_footprints(touched jsonb)
+create or replace function {identifier(plan.schema_name)}._apply_dirty_footprints(touched jsonb)
 returns jsonb language sql as $func$
 with touched_rows as (
     select collection, id
@@ -1777,7 +1778,7 @@ with touched_rows as (
 ), reverse_surfaces as (
     select distinct s.collection, s.id
     from touched_sets t
-    cross join lateral {plan.schema_name}._sources_using(t.collection, t.ids) s
+    cross join lateral {identifier(plan.schema_name)}._sources_using(t.collection, t.ids) s
 ), dirty_surfaces as (
     select distinct collection, id from touched_rows
     union
@@ -1788,7 +1789,7 @@ with touched_rows as (
            g.verdict,
            g.footprint
     from dirty_surfaces d
-    cross join lateral {plan.schema_name}._footprint_geometry_verdict(d.collection, d.id) g
+    cross join lateral {identifier(plan.schema_name)}._footprint_geometry_verdict(d.collection, d.id) g
 ), invalid as (
     select coalesce(jsonb_agg(verdict order by collection, id), '[]'::jsonb) as findings
     from measured
@@ -1804,13 +1805,13 @@ $func$"""
 def _fn_item(plan: CollectionPlan) -> str:
     t = plan.table
     return f"""\
-create or replace function {plan.functions["item"]}(fid uuid)
+create or replace function {qualified(plan.functions["item"])}(fid uuid)
 returns jsonb language sql stable as $func$
     with link_props as (
         select {_association_properties_object(plan, "fid")} as props
     )
     select {_feature_object(plan, "t", "link_props.props")}
-  from {t.qualified} t
+  from {qualified(t.qualified)} t
     cross join link_props
   where t."{t.id_column}" = fid;
 $func$"""
@@ -1831,7 +1832,7 @@ def _fn_items(plan: CollectionPlan) -> str:
                 "jsonb_agg("
                 + _association_element_object(role, "a.target_id")
                 + " order by a.target_id) as refs\n"
-                f"    from {t.schema}.association a\n"
+                f"    from {identifier(t.schema)}.association a\n"
                 f"    where a.source_collection = '{_quote_key(plan.collection_name)}'\n"
                 f"      and a.property = '{_quote_key(role.property)}'\n"
                 f'      and a.source_id in (select "{t.id_column}" from page)\n'
@@ -1851,12 +1852,12 @@ def _fn_items(plan: CollectionPlan) -> str:
     # numberMatched is optional in OGC Features and costs an extra count over the
     # filtered set, so it is only computed (and only included) when with_matched.
     return f"""\
-create or replace function {plan.functions["items"]}(
+create or replace function {qualified(plan.functions["items"])}(
     bbox float8[] default null, lim int default 10, off int default 0,
     with_matched boolean default true)
 returns jsonb language sql stable as $func$
   with filtered as (
-    select t.* from {t.qualified} t
+    select t.* from {qualified(t.qualified)} t
     where bbox is null
        or t."{geom}" && ST_MakeEnvelope(bbox[1], bbox[2], bbox[3], bbox[4], {t.geometry.srid})
   ),
@@ -1952,12 +1953,12 @@ def _fn_create(plan: CollectionPlan) -> str:
     link_write = "\n".join(_link_write_create(r, plan.collection_name) for r in roles)
     link_write_block = ("\n" + link_write) if link_write else ""
     return f"""\
-create or replace function {plan.functions["create"]}(feature jsonb)
+create or replace function {qualified(plan.functions["create"])}(feature jsonb)
 returns uuid language plpgsql as $func$
 {declare}
 begin
 {guard_block}{link_validate_block}{oi_resolve}  begin
-        insert into {t.qualified} ({cols})
+        insert into {qualified(t.qualified)} ({cols})
         values ({vals})
         returning "{t.id_column}" into new_id;
     exception
@@ -2033,11 +2034,11 @@ def _fn_upsert(plan: CollectionPlan) -> str:
         else "declare result_id uuid;"
     )
     return f"""\
-create or replace function {plan.functions["upsert"]}(feature jsonb)
+create or replace function {qualified(plan.functions["upsert"])}(feature jsonb)
 returns uuid language plpgsql as $func$
 {declare}
 begin
-{upsert_guards}{guard_block}{oi_resolve}  insert into {t.qualified} ({cols})
+{upsert_guards}{guard_block}{oi_resolve}  insert into {qualified(t.qualified)} ({cols})
   values ({vals})
   on conflict ("{t.id_column}") do update set
       {set_clause}
@@ -2086,11 +2087,11 @@ def _fn_replace(plan: CollectionPlan) -> str:
     link_inserts_block = (link_inserts + "\n") if link_inserts else ""
     return (
         f"""\
-create or replace function {plan.functions["replace"]}(fid uuid, feature jsonb)
+create or replace function {qualified(plan.functions["replace"])}(fid uuid, feature jsonb)
 returns boolean language plpgsql as $func$
 {declare_block}
 begin
-{guard_block}{oi_guard}{link_validate_block}  update {t.qualified} set
+{guard_block}{oi_guard}{link_validate_block}  update {qualified(t.qualified)} set
       {set_clause}
   where "{t.id_column}" = fid;
   if not found then return false; end if;
@@ -2099,10 +2100,10 @@ end;
 $func$"""
         if roles
         else f"""\
-create or replace function {plan.functions["replace"]}(fid uuid, feature jsonb)
+create or replace function {qualified(plan.functions["replace"])}(fid uuid, feature jsonb)
 returns boolean language plpgsql as $func$
 begin
-{guard_block}{oi_guard}  update {t.qualified} set
+{guard_block}{oi_guard}  update {qualified(t.qualified)} set
       {set_clause}
   where "{t.id_column}" = fid;
   return found;
@@ -2153,11 +2154,11 @@ def _fn_update(plan: CollectionPlan) -> str:
     link_patch_block = (link_patch + "\n") if link_patch else ""
     return (
         f"""\
-create or replace function {plan.functions["update"]}(fid uuid, feature jsonb)
+create or replace function {qualified(plan.functions["update"])}(fid uuid, feature jsonb)
 returns boolean language plpgsql as $func$
 {declare_block}
 begin
-{guard_block}{oi_guard}{link_validate_block}  update {t.qualified} set
+{guard_block}{oi_guard}{link_validate_block}  update {qualified(t.qualified)} set
       {set_clause}
   where "{t.id_column}" = fid;
   if not found then return false; end if;
@@ -2166,10 +2167,10 @@ end;
 $func$"""
         if roles
         else f"""\
-create or replace function {plan.functions["update"]}(fid uuid, feature jsonb)
+create or replace function {qualified(plan.functions["update"])}(fid uuid, feature jsonb)
 returns boolean language plpgsql as $func$
 begin
-{guard_block}{oi_guard}  update {t.qualified} set
+{guard_block}{oi_guard}  update {qualified(t.qualified)} set
       {set_clause}
   where "{t.id_column}" = fid;
   return found;
@@ -2183,17 +2184,17 @@ def _fn_delete(plan: CollectionPlan) -> str:
     src = _quote_key(plan.collection_name)
     link_delete = (
         (
-            f"  delete from {t.schema}.association\n"
+            f"  delete from {identifier(t.schema)}.association\n"
             f"    where source_collection = '{src}' and source_id = fid;\n"
         )
         if plan.roles
         else ""
     )
     return f"""\
-create or replace function {plan.functions["delete"]}(fid uuid)
+create or replace function {qualified(plan.functions["delete"])}(fid uuid)
 returns boolean language plpgsql as $func$
 begin
-{link_delete}  delete from {t.qualified} where "{t.id_column}" = fid;
+{link_delete}  delete from {qualified(t.qualified)} where "{t.id_column}" = fid;
   return found;
 end;
 $func$"""

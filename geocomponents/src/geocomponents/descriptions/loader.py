@@ -28,6 +28,7 @@ from geocomponents.descriptions.models import (
     ResolvedField,
     ResolvedRelationship,
 )
+from geocomponents.descriptions.naming import validate_unique_names
 from geocomponents.processes.registry import known_process_ids
 
 
@@ -35,7 +36,9 @@ class DescriptionError(ValueError):
     """Raised when a description document is structurally invalid."""
 
 
-_RESERVED_COLLECTION_NAMES = frozenset({"association", "association_role"})
+_RESERVED_COLLECTION_NAMES = frozenset(
+    {"association", "association_role", "collection_capability"}
+)
 _LINE_GEOMETRY_TYPES = frozenset({"LineString", "MultiLineString"})
 
 
@@ -64,7 +67,7 @@ def load_dataset(path: Path) -> DatasetDef:
 
 
 def _validate_collection_name(name: str, *, where: str) -> None:
-    if name in _RESERVED_COLLECTION_NAMES:
+    if name.casefold() in _RESERVED_COLLECTION_NAMES:
         raise DescriptionError(
             f"{where}: collection name '{name}' is reserved for generated tables"
         )
@@ -311,6 +314,8 @@ def _validate_bounds(
 
 
 def resolve_dataset(dataset: DatasetDef) -> ResolvedDataset:
+    if dataset.name.casefold() in {"ogc", "topogdb"}:
+        raise DescriptionError(f"dataset name {dataset.name!r} is reserved")
     codelists: dict[str, CodeList] = {c.name: c for c in dataset.codelists}
     targeted_collections = {
         rel.target for coll in dataset.collections for rel in coll.relationships
@@ -457,4 +462,11 @@ def load_resolved_datasets(
     datasets: list[ResolvedDataset] = []
     for path in sorted(descriptions_dir.glob("*.yaml")):
         datasets.append(resolve_dataset(load_dataset(path)))
+    try:
+        validate_unique_names(
+            (dataset.name for dataset in datasets),
+            where=f"descriptions in {descriptions_dir}",
+        )
+    except ValueError as exc:
+        raise DescriptionError(str(exc)) from exc
     return datasets

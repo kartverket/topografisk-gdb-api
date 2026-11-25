@@ -124,7 +124,7 @@ _EXPECTED_ROLE_ROWS: list[RoleRow] = [
     RoleRow("surface", "boundedByOuter", "border1"),
     RoleRow("surface", "boundedByConditional", "border4"),
     RoleRow("surface", "boundedByShared", "border2"),
-    RoleRow("surface", "describedByNote", "border3"),
+    RoleRow("surface", "describedByNote", "NotatÅ"),
     RoleRow("surface2", "boundedByOuter", "border1"),
 ]
 
