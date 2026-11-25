@@ -2,9 +2,10 @@ apiVersion: backstage.io/v1alpha1
 kind: Component
 metadata:
   name: topografisk-gdb-api
-  description: Canonical OGC API facade and supporting services for topographic geodata imports and feature access.
+  description: Canonical OGC API facade and supporting services for topographic
+    geodata imports and feature access.
 spec:
   type: ops
   owner: topografisk_grunndatabase
   lifecycle: experimental
-  system: Topografisk Grunndatabase
+  system: system:default/topografisk_grunndatabase
