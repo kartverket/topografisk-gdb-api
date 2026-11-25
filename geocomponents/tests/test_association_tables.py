@@ -18,7 +18,7 @@ import yaml
 from conftest import _schema_conn
 
 from geocomponents.descriptions.loader import resolve_dataset
-from geocomponents.descriptions.models import Commons, DatasetDef
+from geocomponents.descriptions.models import DatasetDef
 from geocomponents.schema import postgis
 from geocomponents.schema.build import build_schema_plan
 
@@ -45,7 +45,7 @@ def _load_topology_plan():
     raw = yaml.safe_load(FIXTURE_PATH.read_text(encoding="utf-8"))
     for coll in raw["collections"]:
         coll.pop("bounds", None)
-    return build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw), Commons()))
+    return build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw)))
 
 
 @pytest.fixture(scope="module")
@@ -224,7 +224,7 @@ def test_dataset_with_no_relationships_applies_cleanly(db):
         "name": "no_rels",
         "collections": [{"name": "item", "geometry": {"type": "Point", "srid": 4326}}],
     }
-    plan = build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw), Commons()))
+    plan = build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw)))
     assert plan.association_role_rows == ()
 
     conn = psycopg.connect(db, autocommit=False)
@@ -279,7 +279,7 @@ def test_guard_aborts_when_referenced_property_removed(topology_conn, db):
         ]
         surface["geometry"].pop("derived", None)
         stripped_plan = build_schema_plan(
-            resolve_dataset(DatasetDef.model_validate(raw), Commons())
+            resolve_dataset(DatasetDef.model_validate(raw))
         )
 
         apply_conn = psycopg.connect(db, autocommit=True)
@@ -337,4 +337,4 @@ def test_relationship_target_not_in_dataset_rejected_at_load_time():
         ],
     }
     with pytest.raises(DescriptionError, match="unknown collection 'ghost'"):
-        resolve_dataset(DatasetDef.model_validate(raw), Commons())
+        resolve_dataset(DatasetDef.model_validate(raw))

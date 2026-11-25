@@ -26,20 +26,6 @@ def test_object_field_with_empty_fields_raises():
         FieldDef.model_validate({"name": "f", "type": "object"})
 
 
-def test_object_field_with_type_ref_also_set_raises():
-    """Suspect: type:object + type_ref → n_set==2, caught by existing check, but
-    confirm explicitly so a refactor can't accidentally let it through."""
-    with pytest.raises(ValidationError):
-        FieldDef.model_validate(
-            {
-                "name": "f",
-                "type": "object",
-                "type_ref": "x",
-                "fields": [{"name": "sub", "type": "string"}],
-            }
-        )
-
-
 def test_enum_alongside_type_does_not_count_as_type_source():
     fld = FieldDef.model_validate({"name": "f", "type": "string", "enum": ["a", "b"]})
     assert fld.enum == ["a", "b"]
@@ -57,6 +43,26 @@ def test_valid_object_field_with_sub_fields_parses():
     assert fld.type == "object"
     assert len(fld.fields) == 1
     assert fld.fields[0].name == "datafangstmetode"
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        {"name": "f", "type": "string", "max_length": 0},
+        {"name": "f", "type": "integer", "max_length": 4},
+        {
+            "name": "f",
+            "type": "object",
+            "max_length": 4,
+            "fields": [{"name": "x", "type": "string"}],
+        },
+        {"name": "f", "codelist": "c", "max_length": 4},
+        {"name": "f", "type_ref": "old"},
+    ],
+)
+def test_invalid_string_length_or_removed_type_ref_is_rejected(field):
+    with pytest.raises(ValidationError):
+        FieldDef.model_validate(field)
 
 
 def test_object_field_with_nested_object_parses():
@@ -305,15 +311,12 @@ def test_object_field_with_auto_increment_raises():
         )
 
 
-def test_object_field_with_type_ref_and_codelist_both_set_raises():
-    """Post-code suspect: both type_ref and codelist set alongside type:object.
-    The check catches either; confirm it raises (not silently uses one)."""
+def test_object_field_with_codelist_also_set_raises():
     with pytest.raises(ValidationError):
         FieldDef.model_validate(
             {
                 "name": "f",
                 "type": "object",
-                "type_ref": "x",
                 "codelist": "y",
                 "fields": [{"name": "sub", "type": "string"}],
             }

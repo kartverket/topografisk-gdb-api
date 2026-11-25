@@ -13,7 +13,7 @@ import yaml
 from conftest import _schema_conn
 
 from geocomponents.descriptions.loader import resolve_dataset
-from geocomponents.descriptions.models import Commons, DatasetDef
+from geocomponents.descriptions.models import DatasetDef
 from geocomponents.schema.build import build_schema_plan
 
 _FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "oi_fixture.yaml"
@@ -21,7 +21,7 @@ _FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "oi_fixture.yaml"
 
 def _load_dataset():
     raw = yaml.safe_load(_FIXTURE_PATH.read_text(encoding="utf-8"))
-    return resolve_dataset(DatasetDef.model_validate(raw), Commons())
+    return resolve_dataset(DatasetDef.model_validate(raw))
 
 
 _DATASET = _load_dataset()

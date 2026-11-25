@@ -55,8 +55,6 @@ def _sample_feature(coll, *, geometry=_DEFAULT_GEOMETRY, properties=None, fid=No
         for f in coll.fields
         if f.required and not f.auto_increment
     }
-    if any(f.name == "source" for f in coll.fields):
-        props["source"] = "orig"
     if properties:
         props.update(properties)
     # If the collection declares an outward identifier that is a JSONB sub-key,

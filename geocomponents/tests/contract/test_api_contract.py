@@ -302,7 +302,7 @@ def test_golden_cadastre_crud_and_patch_roundtrip(client):
     feat = {
         "type": "Feature",
         "geometry": _GEOM_MULTIPOLYGON,
-        "properties": {"label": "A", "status": "active", "source": "golden"},
+        "properties": {"label": "A", "status": "active"},
     }
 
     r = client.post(
@@ -313,7 +313,7 @@ def test_golden_cadastre_crud_and_patch_roundtrip(client):
     assert r.status_code == HTTPStatus.CREATED
     fid = r.headers["Location"].rstrip("/").split("/")[-1]
 
-    # PATCH changes only 'label'; 'source' is untouched.
+    # PATCH changes only 'label'; 'status' is untouched.
     r = client.patch(
         f"{api}/collections/parcels/items/{fid}",
         content=orjson.dumps({"properties": {"label": "B"}}).decode(),
@@ -324,7 +324,7 @@ def test_golden_cadastre_crud_and_patch_roundtrip(client):
         "properties"
     ]
     assert props["label"] == "B"
-    assert props["source"] == "golden"
+    assert props["status"] == "active"
 
     assert (
         client.delete(f"{api}/collections/parcels/items/{fid}").status_code
@@ -344,7 +344,7 @@ def test_golden_bbox_filter(client):
             "type": "MultiPolygon",
             "coordinates": [[[[40, 10], [40, 11], [41, 11], [41, 10], [40, 10]]]],
         },
-        "properties": {"label": "far", "source": "bbox"},
+        "properties": {"label": "far"},
     }
     r = client.post(
         f"{api}/collections/parcels/items",

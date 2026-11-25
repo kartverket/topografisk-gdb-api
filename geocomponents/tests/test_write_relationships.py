@@ -17,7 +17,7 @@ import yaml
 from conftest import _schema_conn
 
 from geocomponents.descriptions.loader import resolve_dataset
-from geocomponents.descriptions.models import Commons, DatasetDef
+from geocomponents.descriptions.models import DatasetDef
 from geocomponents.schema import functions, postgis
 from geocomponents.schema.build import build_schema_plan
 
@@ -189,7 +189,7 @@ def _topology_fixture_raw_without_bounds() -> dict:
 
 
 def _load_plan_from_raw(raw: dict):
-    return build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw), Commons()))
+    return build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw)))
 
 
 def _case_schema_key(raw: dict) -> str:
@@ -2339,7 +2339,7 @@ def test_no_link_properties_collection_generates_unchanged_sql():
         "name": "x",
         "collections": [{"name": "c", "geometry": {"type": "Point", "srid": 4326}}],
     }
-    plan = build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw), Commons()))
+    plan = build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw)))
     coll = plan.collections[0]
     assert coll.roles == ()
 
@@ -2957,8 +2957,8 @@ def test_delete_target_leaves_inbound_rows_intact(topology_conn, borders):
     ]
 
 
-def test_unlinking_does_not_modify_target_feature(topology_conn, borders):
-    """Removing a link from a surface must not touch the target feature's row."""
+def test_unlinking_keeps_target_feature_unchanged(topology_conn, borders):
+    """Removing a link from a surface leaves the target feature unchanged."""
     first_id = _new_id()
     second_id = _new_id()
     _txn(topology_conn, *_border1_ring_pair_items(first_id, second_id))
@@ -2972,22 +2972,16 @@ def test_unlinking_does_not_modify_target_feature(topology_conn, borders):
     )
     surface_id = create_report["items"][0]["id"]
 
-    before = topology_conn.execute(
-        'select updated_at from topology.border1 where "id" = %s::uuid',
-        (first_id,),
-    ).fetchone()[0]
+    before = _item(topology_conn, "border1", first_id)
 
     update_report = _txn(
         topology_conn, _update("surface2", surface_id, {"boundedByOuter": []})
     )
     assert update_report["committed"] is True
 
-    after = topology_conn.execute(
-        'select updated_at from topology.border1 where "id" = %s::uuid',
-        (first_id,),
-    ).fetchone()[0]
+    after = _item(topology_conn, "border1", first_id)
 
-    assert after == before, "Unlinking must not touch the target feature"
+    assert after == before, "Unlinking must not change the target feature"
 
 
 def test_reverse_and_idx_on_element_are_accepted(topology_conn, borders):
@@ -3066,8 +3060,7 @@ def test_write_read_replace_roundtrip_keeps_links(topology_conn, borders):
         after["properties"]["describedByNote"]
         == before["properties"]["describedByNote"]
     )
-    assert after["properties"]["created_at"] == before["properties"]["created_at"]
-    assert after["properties"]["updated_at"] != before["properties"]["updated_at"]
+    assert after["properties"] == before["properties"]
 
 
 def test_link_order_is_stable_across_reads(topology_conn, borders):
@@ -3139,7 +3132,7 @@ def test_collection_with_no_declared_link_properties_reads_as_before(topology_co
     report = _txn(topology_conn, _insert("border3", _LINE_GEOM, {}))
 
     got = _properties(topology_conn, "border3", report["items"][0]["id"])
-    assert set(got) == {"created_at", "updated_at"}
+    assert got == {}
 
 
 def test_associations_returns_one_row_per_link_including_dangling(
@@ -3709,7 +3702,7 @@ def test_upsert_rejects_declared_link_property(db):
             },
         ],
     }
-    plan = build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw), Commons()))
+    plan = build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw)))
     doc_plan = next(c for c in plan.collections if c.collection_name == "doc")
     assert doc_plan.upsert_field is not None
     assert doc_plan.roles

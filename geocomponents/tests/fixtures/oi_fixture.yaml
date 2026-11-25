@@ -13,6 +13,9 @@ collections:
       srid: 4326
     outward_identifier: identification.testoi
     fields:
+      - name: label
+        type: string
+        max_length: 4
       - name: identification
         type: object
         required: true

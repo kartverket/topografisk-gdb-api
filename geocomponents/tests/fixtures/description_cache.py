@@ -8,6 +8,7 @@ from pathlib import Path
 from geocomponents.descriptions.loader import load_resolved_datasets
 from geocomponents.descriptions.models import ResolvedDataset
 
+# TODO: Use dedicated test descriptions instead of the repository's examples.
 DESCRIPTIONS_DIR = Path(__file__).resolve().parents[3] / "descriptions"
 
 

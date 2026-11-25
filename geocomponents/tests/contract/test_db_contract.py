@@ -143,25 +143,26 @@ def test_with_matched_toggles_numbermatched(case: CollectionCase, conn):
         )
 
 
+# TODO: Use one explicit model for PATCH; picking fields by position hides
+# server-managed and outward-identifier behavior.
 @pytest.mark.parametrize("case", SIMPLE_CASES, ids=[case.id for case in SIMPLE_CASES])
 def test_simple_collections_support_full_crud_roundtrip(case: CollectionCase, conn):
     with conn.cursor() as cur:
         coll = case.collection
-        feat = _sample_feature(coll)
+        writable = [f for f in coll.fields if not f.auto_increment]
+        witness, changed = writable[:2] if len(writable) >= 2 else (None, None)
+        feat = _sample_feature(
+            coll,
+            properties={witness.name: _field_value(witness)} if witness else None,
+        )
         fid = _create(cur, case.dataset, coll.name, feat)
 
         got = _item(cur, case.dataset, coll.name, fid)
         assert got["type"] == "Feature"
         assert str(got["id"]) == str(fid)
 
-        # Partial update changes only the sent property; `source`
-        # (set to "orig" at create) is the untouched witness.
-        witness = any(f.name == "source" for f in coll.fields)
-        changed = next(
-            (f for f in coll.fields if f.name != "source" and not f.auto_increment),
-            None,
-        )
-        if changed and witness:
+        # A second declared property witnesses that PATCH leaves other values intact.
+        if changed is not None and witness is not None:
             cur.execute(
                 "select ogc.feature_update(%s,%s,%s,%s)",
                 (
@@ -175,7 +176,7 @@ def test_simple_collections_support_full_crud_roundtrip(case: CollectionCase, co
             )
             props = _item(cur, case.dataset, coll.name, fid)["properties"]
             assert props[changed.name] == _field_value(changed, 1)
-            assert props["source"] == "orig"  # untouched
+            assert props[witness.name] == _field_value(witness)
 
         cur.execute(
             "select ogc.feature_delete(%s,%s,%s)", (case.dataset, coll.name, fid)
@@ -309,19 +310,45 @@ def test_golden_parcels_feature_shape(conn):
                     "municipality": "0101",
                     "status": "active",
                     "area_m2": 5.0,
-                    "source": "golden",
                 },
             },
         )
         feat = _item(cur, "cadastre", "parcels", fid)
         assert feat["geometry"]["type"] == "MultiPolygon"
-        assert {
+        assert set(feat["properties"]) == {
             "label",
             "municipality",
             "status",
             "area_m2",
-            "source",
-            "created_at",
-            "updated_at",
-        } <= set(feat["properties"])
+        }
         cur.execute("select ogc.feature_delete(%s,%s,%s)", ("cadastre", "parcels", fid))
+
+
+@pytest.mark.parametrize("operation", ["create", "replace", "update"])
+def test_declared_string_length_is_enforced(conn, operation):
+    with conn.cursor() as cur:
+        feature = {
+            "type": "Feature",
+            "geometry": _GEOM["MultiPolygon"],
+            "properties": {"label": "G1", "municipality": "1234"},
+        }
+        fid = _create(cur, "cadastre", "parcels", feature)
+        feature["properties"]["municipality"] = "12345"
+        with pytest.raises(psycopg.Error, match=r"municipality.*max_length"):
+            if operation == "create":
+                _create(cur, "cadastre", "parcels", feature)
+            elif operation == "replace":
+                _replace(cur, "cadastre", "parcels", fid, feature)
+            else:
+                _update(
+                    cur,
+                    "cadastre",
+                    "parcels",
+                    fid,
+                    {"properties": {"municipality": "12345"}},
+                )
+        assert (
+            _item(cur, "cadastre", "parcels", fid)["properties"]["municipality"]
+            == "1234"
+        )
+        _delete(cur, "cadastre", "parcels", fid)
