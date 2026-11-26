@@ -278,6 +278,29 @@ class DatasetDef(BaseModel):
         return self
 
 
+class DomainGeneralDef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    srid: int
+    has_z: bool
+    outward_identifier: str | None = None
+    server_managed: dict[str, str] | None = None
+
+
+class DomainCollectionDef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outward_identifier: str | None = None
+    server_managed: dict[str, str] | None = None
+
+
+class DomainDef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    general: DomainGeneralDef
+    collections: dict[str, DomainCollectionDef] | None = None
+
+
 # --------------------------------------------------------------------------
 # Resolved, DB-neutral layer (produced by the loader)
 # --------------------------------------------------------------------------
