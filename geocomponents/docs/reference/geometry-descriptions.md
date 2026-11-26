@@ -1,13 +1,12 @@
 # Geometry descriptions
 
 Each collection has one primary geometry, declared by its `geometry` object.
-If `geometry` is omitted, the collection uses a required 2D `Point` with SRID 4326.
+If `geometry` is omitted, the collection uses a required 2D `Point` with the dataset's SRID.
 Geometry is separate from the collection's attribute `fields`.
 
 | Key | Type | Accepted values | Required / default | Meaning |
 | --- | --- | --- | --- | --- |
 | `type` | string | Geometry types listed below | Optional; `Point` | PostGIS geometry type; the declared type is enforced, so `MultiPolygon` does not accept `Polygon`. |
-| `srid` | integer | Spatial reference identifier | Optional; `4326` | 4326 uses WGS84 longitude/latitude coordinates. |
 | `has_z` | boolean | `true` or `false` | Optional; `false` | Stores coordinates with a Z dimension using the corresponding PostGIS `*Z` type. |
 | `required` | boolean | `true` or `false` | Optional; `true` | Requires a geometry on direct feature writes when no derived geometry is configured. |
 | `derived` | object | [Derived geometry rules](#derived-geometries) | Optional; no default | Constructs geometry from related features. |
@@ -26,7 +25,7 @@ The optional `derived` object selects a rule for constructing the collection's g
 ### Footprint
 
 `footprint` builds a `MultiPolygon` surface from linked boundary features.
-The collection must declare relationships for each boundary role; their targets must have `LineString` or `MultiLineString` geometry and the same SRID as the surface.
+The collection must declare relationships for each boundary role; their targets must have `LineString` or `MultiLineString` geometry. All geometries in a dataset share its SRID.
 
 | Key | Type | Accepted values | Required / default | Meaning |
 | --- | --- | --- | --- | --- |
@@ -39,17 +38,20 @@ Each role in `one_of` is either a relationship property name or an object with `
 `when` names a boolean field on the target collection; that role participates only when the field is true.
 
 ```yaml
-geometry:
-  type: MultiPolygon
-  srid: 4326
-  required: false
-  derived:
-    rule: footprint
-    areas: many
-    holes: forbidden
-    one_of:
-      - [boundedByOuter]
-      - [{name: boundedByConditional, when: is_bounding}]
+name: example
+srid: 4326
+collections:
+  - name: area
+    geometry:
+      type: MultiPolygon
+      required: false
+      derived:
+        rule: footprint
+        areas: many
+        holes: forbidden
+        one_of:
+          - [boundedByOuter]
+          - [{name: boundedByConditional, when: is_bounding}]
 ```
 
 `feature_model: topology` and `derived` are separate settings: a topology collection may declare direct geometry, derived geometry, or both.

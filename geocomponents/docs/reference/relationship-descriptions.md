@@ -14,14 +14,16 @@ The list defaults to empty.
 The `target` follows the collection [naming rules](./dataset-and-collection-names.md); `property` does not use those identifier rules.
 
 ```yaml
+name: example
+srid: 4326
 collections:
   - name: building
-    geometry: { type: MultiPolygon, srid: 4326 }
+    geometry: { type: MultiPolygon }
     relationships:
       - property: parcels
         target: parcel
   - name: parcel
-    geometry: { type: MultiPolygon, srid: 4326 }
+    geometry: { type: MultiPolygon }
 ```
 
 ## Feature representation

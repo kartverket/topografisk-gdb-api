@@ -37,6 +37,7 @@ def _make_dataset(
         name="x",
         title="X",
         description="",
+        srid=4258,
         collections=(
             ResolvedCollection(
                 name="c",
@@ -44,7 +45,6 @@ def _make_dataset(
                 description="",
                 feature_model="simple",
                 geometry_type=geometry_type,
-                srid=4258,
                 fields=tuple(fields or []),
                 relationships=(),
                 derived=derived,

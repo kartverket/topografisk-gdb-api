@@ -59,6 +59,11 @@ def test_convert_produces_two_collections(converted):
     assert "spormidt" in names
 
 
+def test_convert_declares_srid_once_for_the_dataset(converted):
+    assert converted["srid"] == 4326
+    assert all("srid" not in coll["geometry"] for coll in converted["collections"])
+
+
 # --------------------------------------------------------------------------
 # FKB Identifikasjon conventions
 # --------------------------------------------------------------------------

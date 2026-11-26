@@ -49,10 +49,10 @@ CRS84 = "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
 WGS84_SRID = 4326
 
 
-def _storage_crs_uri(coll: ResolvedCollection) -> str | None:
-    if coll.srid == WGS84_SRID:
+def _storage_crs_uri(srid: int) -> str | None:
+    if srid == WGS84_SRID:
         return None
-    return f"http://www.opengis.net/def/crs/EPSG/0/{coll.srid}"
+    return f"http://www.opengis.net/def/crs/EPSG/0/{srid}"
 
 
 # pygeoapi's HTML rendering memoizes the *translated config* in the module-global
@@ -110,8 +110,10 @@ def _provider_fields(coll: ResolvedCollection) -> dict:
     return {f.name: _field_schema(f) for f in coll.fields}
 
 
-def _collection_resource(dataset: str, coll: ResolvedCollection, dsn: str) -> dict:
-    storage_crs = _storage_crs_uri(coll)
+def _collection_resource(
+    dataset: ResolvedDataset, coll: ResolvedCollection, dsn: str
+) -> dict:
+    storage_crs = _storage_crs_uri(dataset.srid)
     return {
         "type": "collection",
         "title": coll.title,
@@ -130,12 +132,12 @@ def _collection_resource(dataset: str, coll: ResolvedCollection, dsn: str) -> di
                 # Writes only for simple-feature collections (topology = reads only).
                 "editable": coll.supports_crud,
                 # OGC identifiers carried to the provider (no physical names):
-                "dataset": dataset,
+                "dataset": dataset.name,
                 "collection": coll.name,
                 "fields": _provider_fields(coll),
                 # Geometry type/srid so the provider can describe its own schema.
                 "geometry_type": coll.geometry_type,
-                "srid": coll.srid,
+                "srid": dataset.srid,
                 "upsert_field": coll.upsert_field,
                 **(
                     {
@@ -162,7 +164,7 @@ def _process_resource(dataset: ResolvedDataset, process_id: str, dsn: str) -> di
     }
     if process_id == "upsert-batch":
         provider_defs = {
-            coll.name: _collection_resource(dataset.name, coll, dsn)["providers"][0]
+            coll.name: _collection_resource(dataset, coll, dsn)["providers"][0]
             for coll in dataset.collections
             if coll.supports_upsert
         }
@@ -172,7 +174,7 @@ def _process_resource(dataset: ResolvedDataset, process_id: str, dsn: str) -> di
 
 def build_config(dataset: ResolvedDataset, public_url: str, dsn: str) -> dict:
     resources: dict[str, dict] = {
-        coll.name: _collection_resource(dataset.name, coll, dsn)
+        coll.name: _collection_resource(dataset, coll, dsn)
         for coll in dataset.collections
     }
     # OGC API - Processes: only the processes this dataset declares.
