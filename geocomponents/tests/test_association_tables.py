@@ -222,7 +222,8 @@ def test_dataset_with_no_relationships_applies_cleanly(db):
     """A dataset with no relationships gets no association tables"""
     raw = {
         "name": "no_rels",
-        "collections": [{"name": "item", "geometry": {"type": "Point", "srid": 4326}}],
+        "srid": 4326,
+        "collections": [{"name": "item", "geometry": {"type": "Point"}}],
     }
     plan = build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw)))
     assert plan.association_role_rows == ()
@@ -328,10 +329,11 @@ def test_relationship_target_not_in_dataset_rejected_at_load_time():
 
     raw = {
         "name": "x",
+        "srid": 4326,
         "collections": [
             {
                 "name": "c",
-                "geometry": {"type": "Point", "srid": 4326},
+                "geometry": {"type": "Point"},
                 "relationships": [{"property": "link", "target": "ghost"}],
             }
         ],

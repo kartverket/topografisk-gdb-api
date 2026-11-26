@@ -3,6 +3,7 @@
 # /datasets/cadastre/ogc_api/...
 
 name: cadastre
+srid: 4326
 title: Cadastre
 description: Example cadastral dataset (parcels and buildings).
 
@@ -16,7 +17,6 @@ collections:
     description: Land parcels.
     geometry:
       type: MultiPolygon
-      srid: 4326
     fields:
       - name: label
         type: string
@@ -34,7 +34,6 @@ collections:
     description: Buildings, each sited on a parcel.
     geometry:
       type: MultiPolygon
-      srid: 4326
     fields:
       - name: use
         type: string
@@ -54,7 +53,6 @@ collections:
     feature_model: topology
     geometry:
       type: MultiPolygon
-      srid: 4326
     fields:
       - name: code
         type: string

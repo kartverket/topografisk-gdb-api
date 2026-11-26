@@ -16,6 +16,7 @@ Create `example-descriptions/places.yaml` with the following content:
 
 ```yaml
 name: places
+srid: 4326
 collections:
   - name: points_of_interest
     geometry:

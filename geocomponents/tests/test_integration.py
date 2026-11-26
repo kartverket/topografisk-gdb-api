@@ -141,6 +141,7 @@ _IDENT_DATASET = ResolvedDataset(
     name="test_ident",
     title="Test Identifikasjon",
     description="",
+    srid=4326,
     collections=(
         ResolvedCollection(
             name="line",
@@ -148,7 +149,6 @@ _IDENT_DATASET = ResolvedDataset(
             description="",
             feature_model="simple",
             geometry_type="LineString",
-            srid=4326,
             fields=(
                 ResolvedField(
                     "identifikasjon",

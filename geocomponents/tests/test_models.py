@@ -277,6 +277,7 @@ def test_dataset_codelists_field_parses():
     ds = DatasetDef.model_validate(
         {
             "name": "x",
+            "srid": 4326,
             "codelists": [{"name": "medium", "values": [{"code": "T"}]}],
         }
     )
@@ -287,7 +288,7 @@ def test_dataset_codelists_field_parses():
 
 def test_dataset_without_codelists_still_parses():
     """Suspect: adding a required-looking field could break existing datasets that omit it."""
-    ds = DatasetDef.model_validate({"name": "x"})
+    ds = DatasetDef.model_validate({"name": "x", "srid": 4326})
     assert ds.codelists == []
 
 

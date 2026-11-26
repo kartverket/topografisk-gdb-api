@@ -88,7 +88,9 @@ def _nested_field_plan(
     )
 
 
-def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: PLR0912
+def _build_table(  # noqa: PLR0912
+    schema: str, coll: ResolvedCollection, srid: int
+) -> TablePlan:
     columns: list[ColumnPlan] = _standard_columns()
     indexes: list[IndexPlan] = []
 
@@ -187,7 +189,7 @@ def _build_table(schema: str, coll: ResolvedCollection) -> TablePlan:  # noqa: P
     geometry = GeometryColumnPlan(
         name=coll.geometry_field,
         geometry_type=coll.geometry_type,
-        srid=coll.srid,
+        srid=srid,
         has_z=coll.has_z,
         nullable=(coll.derived is not None) or (not coll.geometry_required),
     )
@@ -273,7 +275,7 @@ def build_schema_plan(dataset: ResolvedDataset) -> SchemaPlan:
     coll_by_name = {c.name: c for c in dataset.collections}
     collections: list[CollectionPlan] = []
     for coll in dataset.collections:
-        table = _build_table(schema, coll)
+        table = _build_table(schema, coll, dataset.srid)
         ops = READ_OPS + WRITE_OPS
         if coll.supports_upsert:
             ops += (UPSERT_OP,)

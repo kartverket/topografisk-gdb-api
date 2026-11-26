@@ -249,13 +249,6 @@ def _resolve_derived(
                     f"'{target_collection.geometry.type}' (expected LineString or "
                     "MultiLineString)"
                 )
-            if target_collection.geometry.srid != coll.geometry.srid:
-                raise DescriptionError(
-                    f"{where}: derived property '{role.name}' targets collection "
-                    f"'{relationship.target}' with SRID {target_collection.geometry.srid} "
-                    f"but the surface geometry uses SRID {coll.geometry.srid}"
-                )
-
             when_field = None
             if role.when is not None:
                 target_fields = resolved_fields_by_collection[relationship.target]
@@ -429,7 +422,6 @@ def resolve_dataset(dataset: DatasetDef) -> ResolvedDataset:
                 feature_model=prepared.collection.feature_model,
                 bounds=prepared.collection.bounds,
                 geometry_type=prepared.collection.geometry.type,
-                srid=prepared.collection.geometry.srid,
                 has_z=prepared.collection.geometry.has_z,
                 geometry_required=prepared.collection.geometry.required,
                 fields=prepared.fields,
@@ -446,6 +438,7 @@ def resolve_dataset(dataset: DatasetDef) -> ResolvedDataset:
         name=dataset.name,
         title=dataset.title or dataset.name.replace("_", " ").title(),
         description=dataset.description or "",
+        srid=dataset.srid,
         processes=tuple(dataset.processes),
         collections=tuple(resolved_collections),
     )

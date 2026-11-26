@@ -20,10 +20,11 @@ _DATASET = resolve_dataset(
     DatasetDef.model_validate(
         {
             "name": _DS,
+            "srid": 4326,
             "collections": [
                 {
                     "name": _COLL,
-                    "geometry": {"type": "Point", "srid": 4326},
+                    "geometry": {"type": "Point"},
                     "outward_identifier": "identification.localid",
                     "server_managed": {"identification.versionid": "timestamp_iso"},
                     "fields": [

@@ -1,4 +1,5 @@
 name: bygning
+srid: 5972
 title: Bygning
 description: Bygningsobjekter fra FKB-Bygning.
 processes:
@@ -11,7 +12,6 @@ collections:
     description: Bygningsgrenser og annet bygningslinjeverk.
     geometry:
       type: MultiLineString
-      srid: 5972
       has_z: true
     fields:
       - name: objtype
@@ -65,7 +65,6 @@ collections:
     description: Bygningsområder fra FKB-Bygning.
     geometry:
       type: MultiPolygon
-      srid: 5972
       has_z: true
     fields:
       - name: objtype
@@ -119,7 +118,6 @@ collections:
     description: Bygningssenterlinjer og hjelpelinjer fra FKB-Bygning.
     geometry:
       type: MultiLineString
-      srid: 5972
       has_z: true
     fields:
       - name: objtype
@@ -167,7 +165,6 @@ collections:
     description: Bygningsposisjoner fra FKB-Bygning.
     geometry:
       type: Point
-      srid: 5972
       has_z: true
     fields:
       - name: objtype

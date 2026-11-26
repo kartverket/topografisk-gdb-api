@@ -116,7 +116,6 @@ def _with_target_geometry(
     collection_name: str,
     *,
     geometry_type: str | None = None,
-    srid: int | None = None,
 ) -> dict:
     raw = deepcopy(_topology_fixture_raw())
     target = next(
@@ -124,8 +123,6 @@ def _with_target_geometry(
     )
     if geometry_type is not None:
         target["geometry"]["type"] = geometry_type
-    if srid is not None:
-        target["geometry"]["srid"] = srid
     return raw
 
 
@@ -289,11 +286,6 @@ DERIVED_REJECT_CASES = [
         _with_target_geometry("border1", geometry_type="Point"),
         "Point",
     ),
-    DerivedRejectCase(
-        "target-srid-mismatch-is-rejected",
-        _with_target_geometry("border1", srid=3857),
-        "3857",
-    ),
 ]
 
 
@@ -445,6 +437,7 @@ def test_relationship_to_unknown_collection_raises():
     dataset = DatasetDef.model_validate(
         {
             "name": "x",
+            "srid": 4326,
             "collections": [
                 {"name": "c", "relationships": [{"property": "r", "target": "ghost"}]}
             ],
@@ -461,6 +454,7 @@ def test_footprint_derived_geometry_requires_multipolygon(geometry_type, tmp_pat
         yaml.safe_dump(
             {
                 "name": "x",
+                "srid": 4326,
                 "collections": [
                     {
                         "name": "surface",
@@ -512,6 +506,7 @@ def test_collection_name_reserves_generated_table_names(case):
     dataset = DatasetDef.model_validate(
         {
             "name": "x",
+            "srid": 4326,
             "collections": [{"name": case.collection_name}],
         }
     )
@@ -560,10 +555,10 @@ def test_fkb_bane_dataset_resolves_expected_geometry_and_upsert_field():
         "jernbaneplattformkant",
         "spormidt",
     ]
+    assert fkb_bane.srid == 5973
 
     for coll in fkb_bane.collections:
         assert coll.geometry_type == "MultiLineString"
-        assert coll.srid == 5973
         assert coll.has_z is True
         assert coll.upsert_field == "identifikasjon.lokalid"
         assert coll.upsert_path == "identifikasjon.lokalid"
@@ -580,10 +575,10 @@ def test_bygning_dataset_resolves_expected_geometry_and_upsert_field():
         "bygning_senterlinje",
         "bygning_posisjon",
     ]
+    assert bygning.srid == 5972
 
     linework = next(coll for coll in bygning.collections if coll.name == "bygning")
     assert linework.geometry_type == "MultiLineString"
-    assert linework.srid == 5972
     assert linework.has_z is True
     assert linework.upsert_field == "lokalid"
     assert linework.upsert_path == "lokalid"
@@ -591,7 +586,6 @@ def test_bygning_dataset_resolves_expected_geometry_and_upsert_field():
 
     area = next(coll for coll in bygning.collections if coll.name == "bygning_omrade")
     assert area.geometry_type == "MultiPolygon"
-    assert area.srid == 5972
     assert area.has_z is True
     assert area.upsert_field == "lokalid"
     assert area.upsert_path == "lokalid"
@@ -601,7 +595,6 @@ def test_bygning_dataset_resolves_expected_geometry_and_upsert_field():
         coll for coll in bygning.collections if coll.name == "bygning_senterlinje"
     )
     assert centerline.geometry_type == "MultiLineString"
-    assert centerline.srid == 5972
     assert centerline.has_z is True
     assert centerline.upsert_field == "lokalid"
     assert centerline.upsert_path == "lokalid"
@@ -611,7 +604,6 @@ def test_bygning_dataset_resolves_expected_geometry_and_upsert_field():
         coll for coll in bygning.collections if coll.name == "bygning_posisjon"
     )
     assert position.geometry_type == "Point"
-    assert position.srid == 5972
     assert position.has_z is True
     assert position.upsert_field == "lokalid"
     assert position.upsert_path == "lokalid"
@@ -619,7 +611,9 @@ def test_bygning_dataset_resolves_expected_geometry_and_upsert_field():
 
 
 def test_unknown_process_raises_clear_error():
-    dataset = DatasetDef.model_validate({"name": "x", "processes": ["nope"]})
+    dataset = DatasetDef.model_validate(
+        {"name": "x", "srid": 4326, "processes": ["nope"]}
+    )
     with pytest.raises(DescriptionError, match="unknown process"):
         resolve_dataset(dataset)
 
@@ -669,7 +663,7 @@ def test_relationship_target_rejects_invalid_sql_identifier():
     ],
 )
 def test_legal_name_preserves_original_spelling(good_name):
-    ds = DatasetDef.model_validate({"name": good_name})
+    ds = DatasetDef.model_validate({"name": good_name, "srid": 4326})
     assert ds.name == good_name
 
 
@@ -681,6 +675,7 @@ def test_legal_name_propagates_through_nested_models():
         DatasetDef.model_validate(
             {
                 "name": "ok",
+                "srid": 4326,
                 "collections": [
                     {
                         "name": "ok_coll",
@@ -751,8 +746,8 @@ def test_generated_names_are_reserved_ignoring_case(simple_description):
 
 
 def test_dataset_names_are_unique_across_files_ignoring_case(tmp_path):
-    (tmp_path / "a.yaml").write_text("name: Example\n", encoding="utf-8")
-    (tmp_path / "b.yaml").write_text("name: example\n", encoding="utf-8")
+    (tmp_path / "a.yaml").write_text("name: Example\nsrid: 4326\n", encoding="utf-8")
+    (tmp_path / "b.yaml").write_text("name: example\nsrid: 4326\n", encoding="utf-8")
     with pytest.raises(DescriptionError, match="conflict"):
         load_resolved_datasets(tmp_path)
 
@@ -779,7 +774,7 @@ def _dataset_with_object_field(extra_collection_keys=None):
     }
     if extra_collection_keys:
         coll.update(extra_collection_keys)
-    return DatasetDef.model_validate({"name": "x", "collections": [coll]})
+    return DatasetDef.model_validate({"name": "x", "srid": 4326, "collections": [coll]})
 
 
 def test_object_field_resolves_to_jsonb_with_sub_fields():
@@ -798,6 +793,7 @@ def test_depth2_nesting_resolves_correctly():
     dataset = DatasetDef.model_validate(
         {
             "name": "x",
+            "srid": 4326,
             "collections": [
                 {
                     "name": "c",
@@ -831,6 +827,7 @@ def test_enum_propagates_to_resolved_field():
     dataset = DatasetDef.model_validate(
         {
             "name": "x",
+            "srid": 4326,
             "collections": [
                 {
                     "name": "c",
@@ -850,6 +847,7 @@ def test_indexable_propagates_to_resolved_field():
     dataset = DatasetDef.model_validate(
         {
             "name": "x",
+            "srid": 4326,
             "collections": [
                 {
                     "name": "c",
@@ -869,6 +867,7 @@ def test_error_message_contains_full_path_for_nested_bad_type():
     dataset = DatasetDef.model_validate(
         {
             "name": "myds",
+            "srid": 4326,
             "collections": [
                 {
                     "name": "mycoll",
@@ -892,6 +891,7 @@ def test_outward_identifier_dot_path_validated_against_fields():
     dataset = DatasetDef.model_validate(
         {
             "name": "x",
+            "srid": 4326,
             "collections": [
                 {
                     "name": "c",
@@ -916,6 +916,7 @@ def test_server_managed_dot_path_validated_against_fields():
     dataset = DatasetDef.model_validate(
         {
             "name": "x",
+            "srid": 4326,
             "collections": [
                 {
                     "name": "c",
@@ -934,6 +935,7 @@ def test_outward_identifier_and_server_managed_stored_on_resolved_collection():
     dataset = DatasetDef.model_validate(
         {
             "name": "x",
+            "srid": 4326,
             "collections": [
                 {
                     "name": "c",
@@ -971,6 +973,7 @@ def test_codelist_resolves():
     dataset = DatasetDef.model_validate(
         {
             "name": "x",
+            "srid": 4326,
             "codelists": [{"name": "medium", "values": [{"code": "T"}]}],
             "collections": [
                 {"name": "c", "fields": [{"name": "f", "codelist": "medium"}]}
@@ -1013,6 +1016,7 @@ def test_codelist_values_populated_from_declared_codes():
     dataset = DatasetDef.model_validate(
         {
             "name": "x",
+            "srid": 4326,
             "codelists": [
                 {
                     "name": "surface",
@@ -1038,6 +1042,7 @@ def test_codelist_with_no_values_gives_empty_codelist_values():
     dataset = DatasetDef.model_validate(
         {
             "name": "x",
+            "srid": 4326,
             "codelists": [{"name": "empty"}],
             "collections": [
                 {"name": "c", "fields": [{"name": "f", "codelist": "empty"}]}

@@ -1,4 +1,5 @@
 name: topology
+srid: 4326
 title: Topology fixture
 description: Synthetic fixture for association table tests (slice 2a).
 
@@ -9,7 +10,6 @@ collections:
     feature_model: topology
     geometry:
       type: MultiPolygon
-      srid: 4326
       derived:
         rule: footprint
         areas: one
@@ -33,7 +33,6 @@ collections:
     feature_model: topology
     geometry:
       type: MultiPolygon
-      srid: 4326
       required: false
       derived:
         rule: footprint
@@ -52,7 +51,6 @@ collections:
     bounds: 1
     geometry:
       type: LineString
-      srid: 4326
     outward_identifier: identifikasjon.lokalid
     fields:
       - name: label
@@ -70,7 +68,6 @@ collections:
     bounds: 2
     geometry:
       type: LineString
-      srid: 4326
     outward_identifier: identifikasjon.lokalid
     fields:
       - name: identifikasjon
@@ -85,7 +82,6 @@ collections:
     feature_model: topology
     geometry:
       type: LineString
-      srid: 4326
       required: false
 
   - name: border4
@@ -95,7 +91,6 @@ collections:
     bounds: 1
     geometry:
       type: LineString
-      srid: 4326
     fields:
       - name: is_bounding
         type: boolean

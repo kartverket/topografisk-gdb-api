@@ -1,5 +1,6 @@
 # A second dataset, to prove each gets its own independent OGC API.
 name: hydro
+srid: 4326
 title: Hydrography
 description: Example hydrography dataset.
 
@@ -9,7 +10,6 @@ collections:
     description: River centrelines.
     geometry:
       type: MultiLineString
-      srid: 4326
     fields:
       - name: name
         type: string

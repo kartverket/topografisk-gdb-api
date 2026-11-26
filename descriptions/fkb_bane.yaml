@@ -1,4 +1,5 @@
 name: fkb_bane
+srid: 5973
 title: FKB-Bane
 description: FKB-Bane 5.0
 processes:
@@ -12,7 +13,6 @@ collections:
     eller ved av-/pålasting av gods
   geometry:
     type: MultiLineString
-    srid: 5973
     has_z: true
   outward_identifier: identifikasjon.lokalid
   server_managed:
@@ -70,7 +70,6 @@ collections:
   description: teoretisk linje midt mellom skinnestrengene
   geometry:
     type: MultiLineString
-    srid: 5973
     has_z: true
   outward_identifier: identifikasjon.lokalid
   server_managed:

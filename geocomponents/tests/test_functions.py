@@ -55,6 +55,7 @@ def _synthetic_plan(
             name="x",
             title="X",
             description="",
+            srid=srid,
             collections=(
                 ResolvedCollection(
                     name="c",
@@ -62,7 +63,6 @@ def _synthetic_plan(
                     description="",
                     feature_model="simple",
                     geometry_type=geometry_type,
-                    srid=srid,
                     has_z=has_z,
                     fields=fields,
                     relationships=(),

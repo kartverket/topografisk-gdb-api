@@ -2342,7 +2342,8 @@ def test_no_link_properties_collection_generates_unchanged_sql():
 
     raw = {
         "name": "x",
-        "collections": [{"name": "c", "geometry": {"type": "Point", "srid": 4326}}],
+        "srid": 4326,
+        "collections": [{"name": "c", "geometry": {"type": "Point"}}],
     }
     plan = build_schema_plan(resolve_dataset(DatasetDef.model_validate(raw)))
     coll = plan.collections[0]
@@ -3692,11 +3693,12 @@ def test_upsert_rejects_declared_link_property(db):
     """
     raw = {
         "name": "upsert_link_test",
+        "srid": 4326,
         "collections": [
-            {"name": "anchor", "geometry": {"type": "Point", "srid": 4326}},
+            {"name": "anchor", "geometry": {"type": "Point"}},
             {
                 "name": "doc",
-                "geometry": {"type": "Point", "srid": 4326},
+                "geometry": {"type": "Point"},
                 "outward_identifier": "ext_id",
                 "fields": [{"name": "ext_id", "type": "string"}],
                 "relationships": [{"property": "linkedTo", "target": "anchor"}],

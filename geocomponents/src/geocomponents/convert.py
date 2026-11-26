@@ -132,7 +132,6 @@ def _convert_attr(
 def _convert_feature_type(
     ft: dict,
     dat_by_uuid: dict[str, dict],
-    srid: int,
     codelists: dict[str, dict],
     has_z: bool,
 ) -> dict:
@@ -182,7 +181,7 @@ def _convert_feature_type(
         "name": coll_name,
         "title": ft["Name"],
         "description": description,
-        "geometry": {"type": geom_type, "srid": srid, "has_z": has_z},
+        "geometry": {"type": geom_type, "has_z": has_z},
     }
     if outward_identifier:
         coll["outward_identifier"] = outward_identifier
@@ -202,9 +201,7 @@ def convert_qms(data: dict, dataset_name: str, srid: int, has_z: bool) -> str:
     collections = []
 
     for ft in data.get("FeatureTypes", []):
-        collections.append(
-            _convert_feature_type(ft, dat_by_uuid, srid, codelists, has_z)
-        )
+        collections.append(_convert_feature_type(ft, dat_by_uuid, codelists, has_z))
 
     obj_katalog = data.get("Objektkatalog", {})
     title = obj_katalog.get("ObjektkatalogFullstendigNavn") or dataset_name
@@ -213,6 +210,7 @@ def convert_qms(data: dict, dataset_name: str, srid: int, has_z: bool) -> str:
 
     dataset: dict = {
         "name": dataset_name,
+        "srid": srid,
         "title": title,
         "description": description,
         "collections": collections,

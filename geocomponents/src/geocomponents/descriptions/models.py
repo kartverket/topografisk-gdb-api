@@ -177,7 +177,6 @@ class GeometryDef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: GeometryType = "Point"
-    srid: int = 4326
     has_z: bool = False
     required: bool = True
     derived: DerivedDef | None = None
@@ -257,6 +256,7 @@ class DatasetDef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: LegalName
+    srid: int
     title: str | None = None
     description: str | None = None
     processes: list[str] = Field(default_factory=list)
@@ -327,7 +327,6 @@ class ResolvedCollection:
     description: str
     feature_model: str
     geometry_type: str
-    srid: int
     fields: tuple[ResolvedField, ...]
     relationships: tuple[ResolvedRelationship, ...]
     derived: ResolvedDerivedDef | None = None
@@ -364,5 +363,6 @@ class ResolvedDataset:
     name: str
     title: str
     description: str
+    srid: int
     processes: tuple[str, ...] = field(default_factory=tuple)
     collections: tuple[ResolvedCollection, ...] = field(default_factory=tuple)

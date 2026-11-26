@@ -4,6 +4,7 @@
 def expected_simple_description() -> dict:
     return {
         "name": "EksempelDatasett",
+        "srid": 4326,
         "title": "Example simple features",
         "description": "Simple features with and without a projected identifier.",
         "processes": ["upsert-batch"],
@@ -12,7 +13,7 @@ def expected_simple_description() -> dict:
                 "name": "with_oi",
                 "title": "With OI",
                 "description": "",
-                "geometry": {"type": "LineString", "srid": 4326},
+                "geometry": {"type": "LineString"},
                 "outward_identifier": "identification.testoi",
                 "fields": [
                     {"name": "label", "type": "string", "max_length": 4},
@@ -28,7 +29,7 @@ def expected_simple_description() -> dict:
                 "name": "NårwegiænØbject",
                 "title": "Example object",
                 "description": "Simple feature with norwegian letters and camelCase",
-                "geometry": {"type": "LineString", "srid": 4326},
+                "geometry": {"type": "LineString"},
                 "fields": [
                     {"name": "feltØ", "type": "string", "indexable": True},
                     {
